@@ -1,11 +1,11 @@
---- linux/fs/binfmt_elf.c	Tue Dec  6 17:37:06 1994
-+++ fs/binfmt_elf.c	Mon Dec 12 21:49:38 1994
-@@ -549,7 +549,7 @@
- 					elf_ppnt->p_vaddr & 0xfffff000,
- 					elf_ppnt->p_filesz + (elf_ppnt->p_vaddr & 0xfff),
- 					PROT_READ | PROT_WRITE | PROT_EXEC,
--					MAP_FIXED | MAP_PRIVATE | MAP_DENYWRITE,
-+					MAP_FIXED | MAP_PRIVATE | MAP_DENYWRITE | MAP_EXECUTABLE,
- 					elf_ppnt->p_offset & 0xfffff000);
- 			
- #ifdef LOW_ELF_STACK
+--- linux/fs/binfmt_elf.c	Mon Jan  9 07:22:08 1995
++++ fs/binfmt_elf.c	Sun Jan 22 14:38:25 1995
+@@ -84,7 +84,7 @@
+ 		mpnt->vm_task = current;
+ 		mpnt->vm_start = PAGE_MASK & (unsigned long) p;
+ 		mpnt->vm_end = TASK_SIZE;
+-		mpnt->vm_page_prot = PAGE_PRIVATE|PAGE_DIRTY;
++		mpnt->vm_page_prot = PAGE_COPY;
+ #ifdef VM_STACK_FLAGS
+ 		mpnt->vm_flags = VM_STACK_FLAGS;
+ 		mpnt->vm_pte = 0;
