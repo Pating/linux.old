@@ -1,0 +1,10 @@
+--- linux/fs/binfmt_elf.c	Tue Nov 22 15:41:13 1994
++++ fs/binfmt_elf.c	Wed Nov 30 17:17:39 1994
+@@ -93,7 +93,6 @@
+ 		mpnt->vm_flags = VM_GROWSDOWN;
+ #  endif
+ #endif
+-		mpnt->vm_share = NULL;
+ 		mpnt->vm_inode = NULL;
+ 		mpnt->vm_offset = 0;
+ 		mpnt->vm_ops = NULL;
