@@ -25,6 +25,7 @@
 #include <linux/shm.h>
 
 #include <asm/segment.h>
+#include <asm/pgtable.h>
 
 asmlinkage int sys_exit(int exit_code);
 asmlinkage int sys_close(unsigned fd);
