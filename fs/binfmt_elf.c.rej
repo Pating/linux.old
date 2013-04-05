@@ -1,11 +1,11 @@
---- linux/fs/binfmt_elf.c	Thu Dec  1 19:15:04 1994
-+++ fs/binfmt_elf.c	Tue Dec  6 12:40:18 1994
-@@ -29,7 +29,7 @@
- 
- #ifndef CONFIG_BINFMT_ELF
- #include <linux/module.h>
--#include "../tools/version.h"
-+#include <linux/version.h>
- #endif
- 
- #include <linux/unistd.h>
+--- linux/fs/binfmt_elf.c	Tue Dec  6 17:37:06 1994
++++ fs/binfmt_elf.c	Mon Dec 12 21:49:38 1994
+@@ -549,7 +549,7 @@
+ 					elf_ppnt->p_vaddr & 0xfffff000,
+ 					elf_ppnt->p_filesz + (elf_ppnt->p_vaddr & 0xfff),
+ 					PROT_READ | PROT_WRITE | PROT_EXEC,
+-					MAP_FIXED | MAP_PRIVATE | MAP_DENYWRITE,
++					MAP_FIXED | MAP_PRIVATE | MAP_DENYWRITE | MAP_EXECUTABLE,
+ 					elf_ppnt->p_offset & 0xfffff000);
+ 			
+ #ifdef LOW_ELF_STACK
