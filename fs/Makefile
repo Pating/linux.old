@@ -7,7 +7,7 @@
 #
 # Note 2! The CFLAGS definitions are now in the main makefile...
 
-SUBDIRS = minix ext msdos proc
+SUBDIRS = minix ext msdos proc isofs
 
 .c.s:
 	$(CC) $(CFLAGS) -S $<

@@ -92,7 +92,7 @@ LD86	=ld86 -0
 
 AS	=as
 LD	=ld
-HOSTCC	=gcc -static
+HOSTCC	=gcc
 CC	=gcc -DKERNEL
 MAKE	=make
 CPP	=$(CC) -E $(LIMIT_MEMORY)
@@ -127,7 +127,7 @@ linuxsubdirs: dummy
 
 Version:
 	@./makever.sh
-	@echo \#define UTS_RELEASE \"0.98.pl5-`cat .version`\" > tools/version.h
+	@echo \#define UTS_RELEASE \"0.98.pl6-`cat .version`\" > tools/version.h
 	@echo \#define UTS_VERSION \"`date +%D`\" >> tools/version.h
 	@echo \#define LINUX_COMPILE_TIME \"`date +%T`\" >> tools/version.h
 	@echo \#define LINUX_COMPILE_BY \"`whoami`\" >> tools/version.h
@@ -170,11 +170,11 @@ boot/setup: boot/setup.s
 	$(AS86) -o boot/setup.o boot/setup.s
 	$(LD86) -s -o boot/setup boot/setup.o
 
-boot/setup.s:	boot/setup.S include/linux/config.h Makefile
-	$(CPP) -traditional $(SVGA_MODE) boot/setup.S -o boot/setup.s
+boot/setup.s:	boot/setup.S include/linux/config.h
+	$(CPP) -traditional boot/setup.S -o boot/setup.s
 
-boot/bootsect.s: boot/bootsect.S include/linux/config.h
-	$(CPP) -traditional boot/bootsect.S -o boot/bootsect.s
+boot/bootsect.s: boot/bootsect.S include/linux/config.h Makefile
+	$(CPP) -traditional $(SVGA_MODE) $(RAMDISK) boot/bootsect.S -o boot/bootsect.s
 
 boot/bootsect:	boot/bootsect.s
 	$(AS86) -o boot/bootsect.o boot/bootsect.s
