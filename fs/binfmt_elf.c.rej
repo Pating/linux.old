@@ -1,11 +1,217 @@
---- linux/fs/binfmt_elf.c	Mon Jan  9 07:22:08 1995
-+++ fs/binfmt_elf.c	Sun Jan 22 14:38:25 1995
-@@ -84,7 +84,7 @@
- 		mpnt->vm_task = current;
- 		mpnt->vm_start = PAGE_MASK & (unsigned long) p;
- 		mpnt->vm_end = TASK_SIZE;
--		mpnt->vm_page_prot = PAGE_PRIVATE|PAGE_DIRTY;
-+		mpnt->vm_page_prot = PAGE_COPY;
- #ifdef VM_STACK_FLAGS
- 		mpnt->vm_flags = VM_STACK_FLAGS;
- 		mpnt->vm_pte = 0;
+--- linux/fs/binfmt_elf.c	Sun Jan 22 23:03:59 1995
++++ fs/binfmt_elf.c	Wed Jan 25 09:30:45 1995
+@@ -36,11 +45,6 @@
+ 
+ #include <linux/config.h>
+ 
+-#ifndef CONFIG_BINFMT_ELF
+-#include <linux/module.h>
+-#include <linux/version.h>
+-#endif
+-
+ #include <linux/unistd.h>
+ typedef int (*sysfun_p)();
+ extern sysfun_p sys_call_table[];
+@@ -54,7 +58,7 @@
+ static int load_elf_library(int fd);
+ 
+ struct linux_binfmt elf_format = {
+-#ifdef CONFIG_BINFMT_ELF
++#ifndef MODULE
+ 	NULL, NULL, load_elf_binary, load_elf_library, NULL
+ #else
+ 	NULL, &mod_use_count_, load_elf_binary, load_elf_library, NULL
+@@ -323,9 +327,7 @@
+ 	unsigned int elf_stack;
+ 	char passed_fileno[6];
+ 	
+-#ifndef CONFIG_BINFMT_ELF
+ 	MOD_INC_USE_COUNT;
+-#endif
+ 
+ 	ibcs2_interpreter = 0;
+ 	status = 0;
+@@ -334,9 +336,7 @@
+ 	
+ 	if (elf_ex.e_ident[0] != 0x7f ||
+ 	    strncmp(&elf_ex.e_ident[1], "ELF",3) != 0) {
+-#ifndef CONFIG_BINFMT_ELF
+ 		MOD_DEC_USE_COUNT;
+-#endif
+ 		return  -ENOEXEC;
+ 	}
+ 	
+@@ -346,9 +346,7 @@
+ 	   (elf_ex.e_machine != EM_386 && elf_ex.e_machine != EM_486) ||
+ 	   (!bprm->inode->i_op || !bprm->inode->i_op->default_file_ops ||
+ 	    !bprm->inode->i_op->default_file_ops->mmap)){
+-#ifndef CONFIG_BINFMT_ELF
+ 		MOD_DEC_USE_COUNT;
+-#endif
+ 		return -ENOEXEC;
+ 	};
+ 	
+@@ -364,9 +362,7 @@
+ 	set_fs(old_fs);
+ 	if (retval < 0) {
+ 	        kfree (elf_phdata);
+-#ifndef CONFIG_BINFMT_ELF
+ 		MOD_DEC_USE_COUNT;
+-#endif
+ 		return retval;
+ 	}
+ 	
+@@ -379,9 +375,7 @@
+ 
+ 	if (elf_exec_fileno < 0) {
+ 	        kfree (elf_phdata);
+-#ifndef CONFIG_BINFMT_ELF
+ 		MOD_DEC_USE_COUNT;
+-#endif
+ 		return elf_exec_fileno;
+ 	}
+ 	
+@@ -428,9 +422,7 @@
+ 			if(retval < 0) {
+ 			  kfree (elf_phdata);
+ 			  kfree(elf_interpreter);
+-#ifndef CONFIG_BINFMT_ELF
+ 			  MOD_DEC_USE_COUNT;
+-#endif
+ 			  return retval;
+ 			};
+ 		};
+@@ -445,9 +437,7 @@
+ 		if(retval < 0) {
+ 			kfree(elf_interpreter);
+ 			kfree(elf_phdata);
+-#ifndef CONFIG_BINFMT_ELF
+ 			MOD_DEC_USE_COUNT;
+-#endif
+ 			return -ELIBACC;
+ 		};
+ 		/* Now figure out which format our binary is */
+@@ -464,9 +454,7 @@
+ 		  {
+ 		    kfree(elf_interpreter);
+ 		    kfree(elf_phdata);
+-#ifndef CONFIG_BINFMT_ELF
+ 		    MOD_DEC_USE_COUNT;
+-#endif
+ 		    return -ELIBBAD;
+ 		  };
+ 	}
+@@ -491,9 +479,7 @@
+ 			      kfree(elf_interpreter);
+ 			}
+ 		        kfree (elf_phdata);
+-#ifndef CONFIG_BINFMT_ELF
+ 			MOD_DEC_USE_COUNT;
+-#endif
+ 			return -E2BIG;
+ 		}
+ 	}
+@@ -545,9 +531,7 @@
+ 		    printk("Unable to load interpreter\n");
+ 		    kfree(elf_phdata);
+ 		    send_sig(SIGSEGV, current, 0);
+-#ifndef CONFIG_BINFMT_ELF
+ 		    MOD_DEC_USE_COUNT;
+-#endif
+ 		    return 0;
+ 		  };
+ 		};
+@@ -649,9 +633,7 @@
+ 	start_thread(regs, elf_entry, bprm->p);
+ 	if (current->flags & PF_PTRACED)
+ 		send_sig(SIGTRAP, current, 0);
+-#ifndef CONFIG_BINFMT_ELF
+ 	MOD_DEC_USE_COUNT;
+-#endif
+ 	return 0;
+ }
+ 
+@@ -671,10 +653,7 @@
+ 	int error;
+ 	int i,j, k;
+ 
+-#ifndef CONFIG_BINFMT_ELF
+ 	MOD_INC_USE_COUNT;
+-#endif
+-
+ 	len = 0;
+ 	file = current->files->fd[fd];
+ 	inode = file->f_inode;
+@@ -683,18 +662,14 @@
+ 	set_fs(KERNEL_DS);
+ 	if (file->f_op->read(inode, file, (char *) &elf_ex, sizeof(elf_ex)) != sizeof(elf_ex)) {
+ 		SYS(close)(fd);
+-#ifndef CONFIG_BINFMT_ELF
+ 		MOD_DEC_USE_COUNT;
+-#endif
+ 		return -EACCES;
+ 	}
+ 	set_fs(USER_DS);
+ 	
+ 	if (elf_ex.e_ident[0] != 0x7f ||
+ 	    strncmp(&elf_ex.e_ident[1], "ELF",3) != 0) {
+-#ifndef CONFIG_BINFMT_ELF
+ 		MOD_DEC_USE_COUNT;
+-#endif
+ 		return -ENOEXEC;
+ 	}
+ 	
+@@ -702,18 +677,14 @@
+ 	if(elf_ex.e_type != ET_EXEC || elf_ex.e_phnum > 2 ||
+ 	   (elf_ex.e_machine != EM_386 && elf_ex.e_machine != EM_486) ||
+ 	   (!inode->i_op || !inode->i_op->default_file_ops->mmap)){
+-#ifndef CONFIG_BINFMT_ELF
+ 		MOD_DEC_USE_COUNT;
+-#endif
+ 		return -ENOEXEC;
+ 	};
+ 	
+ 	/* Now read in all of the header information */
+ 	
+ 	if(sizeof(struct elf_phdr) * elf_ex.e_phnum > PAGE_SIZE) {
+-#ifndef CONFIG_BINFMT_ELF
+ 		MOD_DEC_USE_COUNT;
+-#endif
+ 		return -ENOEXEC;
+ 	}
+ 	
+@@ -732,9 +703,7 @@
+ 	
+ 	if(j != 1)  {
+ 		kfree(elf_phdata);
+-#ifndef CONFIG_BINFMT_ELF
+ 		MOD_DEC_USE_COUNT;
+-#endif
+ 		return -ENOEXEC;
+ 	};
+ 	
+@@ -754,9 +723,7 @@
+ 	SYS(close)(fd);
+ 	if (error != elf_phdata->p_vaddr & 0xfffff000) {
+ 	        kfree(elf_phdata);
+-#ifndef CONFIG_BINFMT_ELF
+ 		MOD_DEC_USE_COUNT;
+-#endif
+ 		return error;
+ 	}
+ 
+@@ -769,13 +736,11 @@
+ 		  PROT_READ|PROT_WRITE|PROT_EXEC,
+ 		  MAP_FIXED|MAP_PRIVATE, 0);
+ 	kfree(elf_phdata);
+-#ifndef CONFIG_BINFMT_ELF
+ 	MOD_DEC_USE_COUNT;
+-#endif
+ 	return 0;
+ }
+ 
+-#ifndef CONFIG_BINFMT_ELF
++#ifdef MODULE
+ char kernel_version[] = UTS_RELEASE;
+ 
+ int init_module(void) {

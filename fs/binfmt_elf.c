@@ -1,6 +1,15 @@
 /*
  * linux/fs/binfmt_elf.c
  */
+
+#ifdef MODULE
+#include <linux/module.h>
+#include <linux/version.h>
+#else
+#define MOD_INC_USE_COUNT
+#define MOD_DEC_USE_COUNT
+#endif
+
 #include <linux/fs.h>
 #include <linux/sched.h>
 #include <linux/mm.h>
