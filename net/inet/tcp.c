@@ -152,22 +152,6 @@ get_firstr(struct sock *sk)
   return skb_dequeue(&sk->rqueue);
 }
 
-/*
- *	Difference between two values in tcp ack terms.
- */
-
-static long
-diff(unsigned long seq1, unsigned long seq2)
-{
-  long d;
-
-  d = seq1 - seq2;
-  if (d > 0) return(d);
-
-  /* I hope this returns what I want. */
-  return(~d+1);
-}
-
 /* This routine picks a TCP windows for a socket based on
    the following constraints
    
@@ -3403,15 +3387,6 @@ if (inet_debug == DBG_SLIP) printk("\rtcp_rcv: not in seq\n");
 		kfree_skb(skb, FREE_READ);
 		release_sock(sk);
 		return(0);
-
-	case TCP_SYN_RECV:
-		if (th->syn) {
-			/* Probably a retransmitted syn */
-			kfree_skb(skb, FREE_READ);
-			release_sock(sk);
-			return(0);
-		}
-
 
 	default:
 		if (!tcp_sequence(sk, th, len, opt, saddr,dev)) {
