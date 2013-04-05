@@ -19,7 +19,7 @@
 
 
 LOWLEVELCSRC = aha1542.c fdomain.c seagate.c ultrastor.c 7000fasst.c
-LOWLEVELHSRC = aha1542.h fdomain.h seagate.h ultrastor.h 7000fasst.o
+LOWLEVELHSRC = aha1542.h fdomain.h seagate.h ultrastor.h 7000fasst.h
  
 CSRC = hosts.c sd.c sd_ioctl.c st.c st_ioctl.c sr.c sr_ioctl.c scsi.c scsi_ioctl.c $(LOWLEVELCSRC)
 HSRC = hosts.h sd.h st.h sr.h sr_ioctl.h scsi.h scsi_ioctl.h $(LOWLEVELHSRC)
