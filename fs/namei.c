@@ -12,22 +12,14 @@
  * lookup logic.
  */
 
-#include <linux/errno.h>
-#include <linux/sched.h>
-#include <linux/kernel.h>
-#include <linux/string.h>
-#include <linux/fcntl.h>
-#include <linux/stat.h>
 #include <linux/mm.h>
 #include <linux/proc_fs.h>
-#include <linux/smp.h>
 #include <linux/smp_lock.h>
 #include <linux/quotaops.h>
 
 #include <asm/uaccess.h>
 #include <asm/unaligned.h>
 #include <asm/semaphore.h>
-#include <asm/spinlock.h>
 #include <asm/page.h>
 #include <asm/pgtable.h>
 
@@ -346,6 +338,7 @@ struct dentry * lookup_dentry(const char * name, struct dentry * base, unsigned 
 		do {
 			name++;
 		} while (*name == '/');
+		__prefix_lookup_dentry(name, lookup_flags);
 		base = dget(current->fs->root);
 	} else if (!base) {
 		base = dget(current->fs->pwd);

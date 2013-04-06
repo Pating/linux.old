@@ -1,6 +1,6 @@
 /* linux/net/inet/arp.c
  *
- * Version:	$Id: arp.c,v 1.74 1998/11/01 22:15:06 davem Exp $
+ * Version:	$Id: arp.c,v 1.75 1998/11/16 04:51:56 davem Exp $
  *
  * Copyright (C) 1994 by Florian  La Roche
  *
@@ -163,8 +163,6 @@ static struct neigh_ops arp_direct_ops =
 	dev_queue_xmit
 };
 
-#if defined(CONFIG_AX25) || defined(CONFIG_AX25_MODULE) || \
-    defined(CONFIG_SHAPER) || defined(CONFIG_SHAPER_MODULE)
 struct neigh_ops arp_broken_ops =
 {
 	AF_INET,
@@ -176,7 +174,6 @@ struct neigh_ops arp_broken_ops =
 	dev_queue_xmit,
 	dev_queue_xmit,
 };
-#endif
 
 struct neigh_table arp_tbl =
 {

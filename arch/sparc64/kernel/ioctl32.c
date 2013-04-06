@@ -1,4 +1,4 @@
-/* $Id: ioctl32.c,v 1.53 1998/10/26 08:01:01 jj Exp $
+/* $Id: ioctl32.c,v 1.55 1998/11/17 07:43:17 davem Exp $
  * ioctl32.c: Conversion between 32bit and 64bit native ioctls.
  *
  * Copyright (C) 1997  Jakub Jelinek  (jj@sunsite.mff.cuni.cz)
@@ -34,6 +34,7 @@
 #include <linux/tty.h>
 #include <linux/vt_kern.h>
 #include <linux/fb.h>
+#include <linux/ext2_fs.h>
 
 #include <scsi/scsi.h>
 /* Ugly hack. */
@@ -52,6 +53,8 @@
 #include <asm/envctrl.h>
 #include <asm/audioio.h>
 
+#include <linux/soundcard.h>
+
 /* Use this to get at 32-bit user passed pointers. 
    See sys_sparc32.c for description about these. */
 #define A(__x) ((unsigned long)(__x))
@@ -62,6 +65,12 @@
 		 : "0" (__x));		\
 	__ret;				\
 })
+
+/* Aiee. Someone does not find a difference between int and long */
+#define EXT2_IOC32_GETFLAGS               _IOR('f', 1, int)
+#define EXT2_IOC32_SETFLAGS               _IOW('f', 2, int)
+#define EXT2_IOC32_GETVERSION             _IOR('v', 1, int)
+#define EXT2_IOC32_SETVERSION             _IOW('v', 2, int)
 
 extern asmlinkage int sys_ioctl(unsigned int fd, unsigned int cmd, unsigned long arg);
 
@@ -93,6 +102,18 @@ static int rw_long(unsigned int fd, unsigned int cmd, unsigned long arg)
 	if (!err && put_user(val, (u32 *)arg))
 		return -EFAULT;
 	return err;
+}
+
+static int do_ext2_ioctl(unsigned int fd, unsigned int cmd, unsigned long arg)
+{
+	/* These are just misnamed, they actually get/put from/to user an int */
+	switch (cmd) {
+	case EXT2_IOC32_GETFLAGS: cmd = EXT2_IOC_GETFLAGS; break;
+	case EXT2_IOC32_SETFLAGS: cmd = EXT2_IOC_SETFLAGS; break;
+	case EXT2_IOC32_GETVERSION: cmd = EXT2_IOC_GETVERSION; break;
+	case EXT2_IOC32_SETVERSION: cmd = EXT2_IOC_SETVERSION; break;
+	}
+	return sys_ioctl(fd, cmd, arg);
 }
  
 struct timeval32 {
@@ -1551,6 +1572,13 @@ asmlinkage int sys32_ioctl(unsigned int fd, unsigned int cmd, unsigned long arg)
 		error = do_kdfontop_ioctl(filp, (struct console_font_op32 *)arg);
 		goto out;
 		
+	case EXT2_IOC32_GETFLAGS:
+	case EXT2_IOC32_SETFLAGS:
+	case EXT2_IOC32_GETVERSION:
+	case EXT2_IOC32_SETVERSION:
+		error = do_ext2_ioctl(fd, cmd, arg);
+		goto out;
+		
 	/* List here exlicitly which ioctl's are known to have
 	 * compatable types passed or none at all...
 	 */
@@ -1859,13 +1887,159 @@ asmlinkage int sys32_ioctl(unsigned int fd, unsigned int cmd, unsigned long arg)
 	case AUDIO_GETDEV_SUNOS:
 	case AUDIO_FLUSH:
 
+	/* Big Q for sound/OSS */
+	case SNDCTL_SEQ_RESET:
+	case SNDCTL_SEQ_SYNC:
+	case SNDCTL_SYNTH_INFO:
+	case SNDCTL_SEQ_CTRLRATE:
+	case SNDCTL_SEQ_GETOUTCOUNT:
+	case SNDCTL_SEQ_GETINCOUNT:
+	case SNDCTL_SEQ_PERCMODE:
+	case SNDCTL_FM_LOAD_INSTR:
+	case SNDCTL_SEQ_TESTMIDI:
+	case SNDCTL_SEQ_RESETSAMPLES:
+	case SNDCTL_SEQ_NRSYNTHS:
+	case SNDCTL_SEQ_NRMIDIS:
+	case SNDCTL_MIDI_INFO:
+	case SNDCTL_SEQ_THRESHOLD:
+	case SNDCTL_SYNTH_MEMAVL:
+	case SNDCTL_FM_4OP_ENABLE:
+	case SNDCTL_SEQ_PANIC:
+	case SNDCTL_SEQ_OUTOFBAND:
+	case SNDCTL_SEQ_GETTIME:
+	case SNDCTL_SYNTH_ID:
+	case SNDCTL_SYNTH_CONTROL:
+	case SNDCTL_SYNTH_REMOVESAMPLE:
+
+	/* Big T for sound/OSS */
+	case SNDCTL_TMR_TIMEBASE:
+	case SNDCTL_TMR_START:
+	case SNDCTL_TMR_STOP:
+	case SNDCTL_TMR_CONTINUE:
+	case SNDCTL_TMR_TEMPO:
+	case SNDCTL_TMR_SOURCE:
+	case SNDCTL_TMR_METRONOME:
+	case SNDCTL_TMR_SELECT:
+
+	/* Little m for sound/OSS */
+	case SNDCTL_MIDI_PRETIME:
+	case SNDCTL_MIDI_MPUMODE:
+	case SNDCTL_MIDI_MPUCMD:
+
+	/* Big P for sound/OSS */
+	case SNDCTL_DSP_RESET:
+	case SNDCTL_DSP_SYNC:
+	case SNDCTL_DSP_SPEED:
+	case SNDCTL_DSP_STEREO:
+	case SNDCTL_DSP_GETBLKSIZE:
+	case SNDCTL_DSP_CHANNELS:
+	case SOUND_PCM_WRITE_FILTER:
+	case SNDCTL_DSP_POST:
+	case SNDCTL_DSP_SUBDIVIDE:
+	case SNDCTL_DSP_SETFRAGMENT:
+	case SNDCTL_DSP_GETFMTS:
+	case SNDCTL_DSP_SETFMT:
+	case SNDCTL_DSP_GETOSPACE:
+	case SNDCTL_DSP_GETISPACE:
+	case SNDCTL_DSP_NONBLOCK:
+	case SNDCTL_DSP_GETCAPS:
+	case SNDCTL_DSP_GETTRIGGER:
+	case SNDCTL_DSP_SETTRIGGER:
+	case SNDCTL_DSP_GETIPTR:
+	case SNDCTL_DSP_GETOPTR:
+	/* case SNDCTL_DSP_MAPINBUF: XXX needs translation */
+	/* case SNDCTL_DSP_MAPOUTBUF: XXX needs translation */
+	case SNDCTL_DSP_SETSYNCRO:
+	case SNDCTL_DSP_SETDUPLEX:
+	case SNDCTL_DSP_GETODELAY:
+	case SNDCTL_DSP_PROFILE:
+
+	case SOUND_PCM_READ_RATE:
+	case SOUND_PCM_READ_CHANNELS:
+	case SOUND_PCM_READ_BITS:
+	case SOUND_PCM_READ_FILTER:
+
+	/* Big C for sound/OSS */
+	case SNDCTL_COPR_RESET:
+	case SNDCTL_COPR_LOAD:
+	case SNDCTL_COPR_RDATA:
+	case SNDCTL_COPR_RCODE:
+	case SNDCTL_COPR_WDATA:
+	case SNDCTL_COPR_WCODE:
+	case SNDCTL_COPR_RUN:
+	case SNDCTL_COPR_HALT:
+	case SNDCTL_COPR_SENDMSG:
+	case SNDCTL_COPR_RCVMSG:
+
+	/* Big M for sound/OSS */
+	case SOUND_MIXER_READ_VOLUME:
+	case SOUND_MIXER_READ_BASS:
+	case SOUND_MIXER_READ_TREBLE:
+	case SOUND_MIXER_READ_SYNTH:
+	case SOUND_MIXER_READ_PCM:
+	case SOUND_MIXER_READ_SPEAKER:
+	case SOUND_MIXER_READ_LINE:
+	case SOUND_MIXER_READ_MIC:
+	case SOUND_MIXER_READ_CD:
+	case SOUND_MIXER_READ_IMIX:
+	case SOUND_MIXER_READ_ALTPCM:
+	case SOUND_MIXER_READ_RECLEV:
+	case SOUND_MIXER_READ_IGAIN:
+	case SOUND_MIXER_READ_OGAIN:
+	case SOUND_MIXER_READ_LINE1:
+	case SOUND_MIXER_READ_LINE2:
+	case SOUND_MIXER_READ_LINE3:
+	case SOUND_MIXER_READ_MUTE:
+	/* case SOUND_MIXER_READ_ENHANCE: same value as READ_MUTE */
+	/* case SOUND_MIXER_READ_LOUD: same value as READ_MUTE */
+	case SOUND_MIXER_READ_RECSRC:
+	case SOUND_MIXER_READ_DEVMASK:
+	case SOUND_MIXER_READ_RECMASK:
+	case SOUND_MIXER_READ_STEREODEVS:
+	case SOUND_MIXER_READ_CAPS:
+
+	case SOUND_MIXER_WRITE_VOLUME:
+	case SOUND_MIXER_WRITE_BASS:
+	case SOUND_MIXER_WRITE_TREBLE:
+	case SOUND_MIXER_WRITE_SYNTH:
+	case SOUND_MIXER_WRITE_PCM:
+	case SOUND_MIXER_WRITE_SPEAKER:
+	case SOUND_MIXER_WRITE_LINE:
+	case SOUND_MIXER_WRITE_MIC:
+	case SOUND_MIXER_WRITE_CD:
+	case SOUND_MIXER_WRITE_IMIX:
+	case SOUND_MIXER_WRITE_ALTPCM:
+	case SOUND_MIXER_WRITE_RECLEV:
+	case SOUND_MIXER_WRITE_IGAIN:
+	case SOUND_MIXER_WRITE_OGAIN:
+	case SOUND_MIXER_WRITE_LINE1:
+	case SOUND_MIXER_WRITE_LINE2:
+	case SOUND_MIXER_WRITE_LINE3:
+	case SOUND_MIXER_WRITE_MUTE:
+	/* case SOUND_MIXER_WRITE_ENHANCE: same value as WRITE_MUTE */
+	/* case SOUND_MIXER_WRITE_LOUD: same value as WRITE_MUTE */
+	case SOUND_MIXER_WRITE_RECSRC:
+
+	case SOUND_MIXER_INFO:
+	case SOUND_OLD_MIXER_INFO:
+	case SOUND_MIXER_ACCESS:
+	case SOUND_MIXER_PRIVATE1:
+	case SOUND_MIXER_PRIVATE2:
+	case SOUND_MIXER_PRIVATE3:
+	case SOUND_MIXER_PRIVATE4:
+	case SOUND_MIXER_PRIVATE5:
+	case SOUND_MIXER_GETLEVELS:
+	case SOUND_MIXER_SETLEVELS:
+
+	case OSS_GETVERSION:
+
 	/* AUTOFS */
 	case AUTOFS_IOC_READY:
 	case AUTOFS_IOC_FAIL:
 	case AUTOFS_IOC_CATATONIC:
 	case AUTOFS_IOC_PROTOVER:
 	case AUTOFS_IOC_EXPIRE:
-
+	
 		error = sys_ioctl (fd, cmd, arg);
 		goto out;
 

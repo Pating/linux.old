@@ -1,4 +1,4 @@
-/* $Id: parport_ax.c,v 1.12 1998/07/26 03:03:31 davem Exp $
+/* $Id: parport_ax.c,v 1.14 1998/11/16 04:48:02 davem Exp $
  * Parallel-port routines for Sun Ultra/AX architecture
  * 
  * Author: Eddie C. Dost <ecd@skynet.be>
@@ -11,6 +11,7 @@
  *          Grant Guenther <grant@torque.net>
  */
 
+#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/delay.h>
 #include <linux/errno.h>
@@ -585,7 +586,9 @@ init_one_port(struct linux_ebus_device *dev)
 		printmode(ECPPS2);
 	}
 	printk("]\n");
+#ifdef	CONFIG_PROC_FS
 	parport_proc_register(p);
+#endif
 	p->flags |= PARPORT_FLAG_COMA;
 
 	p->ops->write_control(p, 0x0c);
@@ -628,7 +631,9 @@ cleanup_module(void)
 		if (p->modes & PARPORT_MODE_PCSPP) { 
 			if (!(p->flags & PARPORT_FLAG_COMA)) 
 				parport_quiesce(p);
+#ifdef	CONFIG_PROC_FS
 			parport_proc_unregister(p);
+#endif
 			parport_unregister_port(p);
 		}
 		p = tmp;
