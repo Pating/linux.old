@@ -40,10 +40,12 @@
 #include <linux/smp_lock.h>
 #include <linux/init.h>
 #include <asm/mtrr.h>
+#include <asm/msr.h>
 
 #include "irq.h"
 
-extern unsigned long start_kernel;
+#define JIFFIE_TIMEOUT 100
+
 extern void update_one_process( struct task_struct *p,
 				unsigned long ticks, unsigned long user,
 				unsigned long system, int cpu);
@@ -147,16 +149,7 @@ int skip_ioapic_setup = 0;				/* 1 if "noapic" boot option passed */
  */
 #define APIC_DEFAULT_PHYS_BASE 0xfee00000
 
-/*
- * Reads and clears the Pentium Timestamp-Counter
- */
-#define READ_TSC(x)	__asm__ __volatile__ (  "rdtsc" \
-				:"=a" (((unsigned long*)&(x))[0]),  \
-				 "=d" (((unsigned long*)&(x))[1]))
-
-#define CLEAR_TSC \
-	__asm__ __volatile__ ("\t.byte 0x0f, 0x30;\n"::\
-		"a"(0x00001000), "d"(0x00001000), "c"(0x10):"memory")
+#define CLEAR_TSC wrmsr(0x10, 0x00001000, 0x00001000)
 
 /*
  *	Setup routine for controlling SMP activation
@@ -899,6 +892,7 @@ int __init start_secondary(void *unused)
  * Everything has been set up for the secondary
  * CPUs - they just need to reload everything
  * from the task structure
+ * This function must not return.
  */
 void __init initialize_secondary(void)
 {
@@ -940,7 +934,6 @@ static void __init do_boot_cpu(int i)
 	/*
 	 *	We need an idle process for each processor.
 	 */
-
 	kernel_thread(start_secondary, NULL, CLONE_PID);
 	cpucount++;
 
@@ -951,6 +944,8 @@ static void __init do_boot_cpu(int i)
 	idle->processor = i;
 	__cpu_logical_map[cpucount] = i;
 	cpu_number_map[i] = cpucount;
+	idle->has_cpu = 1; /* we schedule the first task manually */
+	idle->tss.eip = (unsigned long) start_secondary;
 
 	/* start_eip had better be page-aligned! */
 	start_eip = setup_trampoline();
@@ -1183,6 +1178,7 @@ void __init smp_boot_cpus(void)
 	/*  Must be done before other processors booted  */
 	mtrr_init_boot_cpu ();
 #endif
+	init_idle();
 	/*
 	 *	Initialize the logical to physical CPU number mapping
 	 *	and the per-CPU profiling counter/multiplier
@@ -1657,15 +1653,84 @@ void smp_send_stop(void)
 	send_IPI_allbutself(STOP_CPU_VECTOR);
 }
 
+/* Structure and data for smp_call_function(). This is designed to minimise
+ * static memory requirements. It also looks cleaner.
+ */
+struct smp_call_function_struct {
+	void (*func) (void *info);
+	void *info;
+	atomic_t unstarted_count;
+	atomic_t unfinished_count;
+	int wait;
+};
+static volatile struct smp_call_function_struct *smp_call_function_data = NULL;
+
 /*
- * this function sends an 'reload MTRR state' IPI to all other CPUs
- * in the system. it goes straight through, completion processing
- * is done on the mttr.c level.
+ * this function sends a 'generic call function' IPI to all other CPUs
+ * in the system.
  */
 
-void smp_send_mtrr(void)
+int smp_call_function (void (*func) (void *info), void *info, int retry,
+		       int wait)
+/*  [SUMMARY] Run a function on all other CPUs.
+    <func> The function to run. This must be fast and non-blocking.
+    <info> An arbitrary pointer to pass to the function.
+    <retry> If true, keep retrying until ready.
+    <wait> If true, wait until function has completed on other CPUs.
+    [RETURNS] 0 on success, else a negative status code. Does not return until
+    remote CPUs are nearly ready to execute <<func>> or are or have executed.
+*/
 {
-	send_IPI_allbutself(MTRR_CHANGE_VECTOR);
+	unsigned long timeout;
+	struct smp_call_function_struct data;
+	static spinlock_t lock = SPIN_LOCK_UNLOCKED;
+
+	if (retry) {
+		while (1) {
+			if (smp_call_function_data) {
+				schedule ();  /*  Give a mate a go  */
+				continue;
+			}
+			spin_lock (&lock);
+			if (smp_call_function_data) {
+				spin_unlock (&lock);  /*  Bad luck  */
+				continue;
+			}
+			/*  Mine, all mine!  */
+			break;
+		}
+	}
+	else {
+		if (smp_call_function_data) return -EBUSY;
+		spin_lock (&lock);
+		if (smp_call_function_data) {
+			spin_unlock (&lock);
+			return -EBUSY;
+		}
+	}
+	smp_call_function_data = &data;
+	spin_unlock (&lock);
+	data.func = func;
+	data.info = info;
+	atomic_set (&data.unstarted_count, smp_num_cpus - 1);
+	data.wait = wait;
+	if (wait) atomic_set (&data.unfinished_count, smp_num_cpus - 1);
+	/*  Send a message to all other CPUs and wait for them to respond  */
+	send_IPI_allbutself (CALL_FUNCTION_VECTOR);
+	/*  Wait for response  */
+	timeout = jiffies + JIFFIE_TIMEOUT;
+	while ( (atomic_read (&data.unstarted_count) > 0) &&
+		time_before (jiffies, timeout) )
+		barrier ();
+	if (atomic_read (&data.unstarted_count) > 0) {
+		smp_call_function_data = NULL;
+		return -ETIMEDOUT;
+	}
+	if (wait)
+		while (atomic_read (&data.unfinished_count) > 0)
+			barrier ();
+	smp_call_function_data = NULL;
+	return 0;
 }
 
 /*
@@ -1781,6 +1846,7 @@ asmlinkage void smp_invalidate_interrupt(void)
 		local_flush_tlb();
 
 	ack_APIC_irq();
+
 }
 
 static void stop_this_cpu (void)
@@ -1803,12 +1869,19 @@ asmlinkage void smp_stop_cpu_interrupt(void)
 	stop_this_cpu();
 }
 
-void (*mtrr_hook) (void) = NULL;
-
-asmlinkage void smp_mtrr_interrupt(void)
+asmlinkage void smp_call_function_interrupt(void)
 {
-	ack_APIC_irq();
-	if (mtrr_hook) (*mtrr_hook)();
+	void (*func) (void *info) = smp_call_function_data->func;
+	void *info = smp_call_function_data->info;
+	int wait = smp_call_function_data->wait;
+
+	ack_APIC_irq ();
+	/*  Notify initiating CPU that I've grabbed the data and am about to
+	    execute the function  */
+	atomic_dec (&smp_call_function_data->unstarted_count);
+	/*  At this point the structure may be out of scope unless wait==1  */
+	(*func) (info);
+	if (wait) atomic_dec (&smp_call_function_data->unfinished_count);
 }
 
 /*
@@ -1949,7 +2022,7 @@ int __init calibrate_APIC_clock(void)
 	/*
 	 * We wrapped around just now. Let's start:
 	 */
-	READ_TSC(t1);
+	rdtscll(t1);
 	tt1=apic_read(APIC_TMCCT);
 
 #define LOOPS (HZ/10)
@@ -1960,7 +2033,7 @@ int __init calibrate_APIC_clock(void)
 		wait_8254_wraparound ();
 
 	tt2=apic_read(APIC_TMCCT);
-	READ_TSC(t2);
+	rdtscll(t2);
 
 	/*
 	 * The APIC bus clock counter is 32 bits only, it

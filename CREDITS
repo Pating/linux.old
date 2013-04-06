@@ -256,6 +256,10 @@ W: http://math-www.uni-paderborn.de/~axel/
 D: Configuration help text support
 D: Linux CD and Support Giveaway List
 
+N: Zoltan Boszormenyi
+E: zboszor@mol.hu
+D: MTRR emulation with Cyrix style ARR registers
+
 N: John Boyd
 E: boyd@cis.ohio-state.edu
 D: Co-author of wd7000 SCSI driver
@@ -2217,6 +2221,12 @@ D: XFree86 and kernel development
 S: 1507 145th Place SE #B5
 S: Bellevue, Washington 98007
 S: USA
+
+N: Richard Zidlicky
+E: rdzidlic@geocities.com,rdzidlic@cip.informatik.uni-erlangen.de
+W: http://www.geocities.com/SiliconValley/Bay/2602/
+D: Q40 port - see arch/m68k/q40/README
+S: Germany
 
 N: Werner Zimmermann
 E: Werner.Zimmermann@fht-esslingen.de

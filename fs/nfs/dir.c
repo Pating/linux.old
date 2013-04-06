@@ -72,9 +72,9 @@ static struct file_operations nfs_dir_operations = {
 	NULL,			/* select - default */
 	NULL,			/* ioctl - default */
 	NULL,			/* mmap */
-	NULL,			/* no special open is needed */
+	nfs_open,		/* open */
 	NULL,			/* flush */
-	NULL,			/* no special release code */
+	nfs_release,		/* release */
 	NULL			/* fsync */
 };
 
@@ -364,7 +364,48 @@ static inline void nfs_renew_times(struct dentry * dentry)
 	dentry->d_time = jiffies;
 }
 
-#define NFS_REVALIDATE_INTERVAL (5*HZ)
+static inline int nfs_dentry_force_reval(struct dentry *dentry, int flags)
+{
+	struct inode *inode = dentry->d_inode;
+	unsigned long timeout = NFS_ATTRTIMEO(inode);
+
+	/*
+	 * If it's the last lookup in a series, we use a stricter
+	 * cache consistency check by looking at the parent mtime.
+	 *
+	 * If it's been modified in the last hour, be really strict.
+	 * (This still means that we can avoid doing unnecessary
+	 * work on directories like /usr/share/bin etc which basically
+	 * never change).
+	 */
+	if (!(flags & LOOKUP_CONTINUE)) {
+		long diff = CURRENT_TIME - dentry->d_parent->d_inode->i_mtime;
+
+		if (diff < 15*60)
+			timeout = 0;
+	}
+	
+	return time_after(jiffies,dentry->d_time + timeout);
+}
+
+/*
+ * We judge how long we want to trust negative
+ * dentries by looking at the parent inode mtime.
+ *
+ * If mtime is close to present time, we revalidate
+ * more often.
+ */
+static inline int nfs_neg_need_reval(struct dentry *dentry)
+{
+	unsigned long timeout = 30 * HZ;
+	long diff = CURRENT_TIME - dentry->d_parent->d_inode->i_mtime;
+
+	if (diff < 5*60)
+		timeout = 1 * HZ;
+
+	return time_after(jiffies, dentry->d_time + timeout);
+}
+
 /*
  * This is called every time the dcache has a lookup hit,
  * and we should check whether we can really trust that
@@ -377,7 +418,7 @@ static inline void nfs_renew_times(struct dentry * dentry)
  * we do a new lookup and verify that the dentry is still
  * correct.
  */
-static int nfs_lookup_revalidate(struct dentry * dentry)
+static int nfs_lookup_revalidate(struct dentry * dentry, int flags)
 {
 	struct dentry * parent = dentry->d_parent;
 	struct inode * inode = dentry->d_inode;
@@ -386,11 +427,15 @@ static int nfs_lookup_revalidate(struct dentry * dentry)
 	struct nfs_fattr fattr;
 
 	/*
-	 * If we don't have an inode, let's just assume
-	 * a 5-second "live" time for negative dentries.
+	 * If we don't have an inode, let's look at the parent
+	 * directory mtime to get a hint about how often we
+	 * should validate things..
 	 */
-	if (!inode)
-		goto do_lookup;
+	if (!inode) {
+		if (nfs_neg_need_reval(dentry))
+			goto out_bad;
+		goto out_valid;
+	}
 
 	if (is_bad_inode(inode)) {
 		dfprintk(VFS, "nfs_lookup_validate: %s/%s has dud inode\n",
@@ -398,27 +443,17 @@ static int nfs_lookup_revalidate(struct dentry * dentry)
 		goto out_bad;
 	}
 
-	if (_nfs_revalidate_inode(NFS_DSERVER(dentry), dentry))
-		goto out_bad;
-
-	if (time_before(jiffies,dentry->d_time+NFS_ATTRTIMEO(inode)))
-		goto out_valid;
-
 	if (IS_ROOT(dentry))
 		goto out_valid;
 
-do_lookup:
+	if (!nfs_dentry_force_reval(dentry, flags))
+		goto out_valid;
+
 	/*
 	 * Do a new lookup and check the dentry attributes.
 	 */
-	error = nfs_proc_lookup(NFS_DSERVER(parent), NFS_FH(parent), 
+	error = nfs_proc_lookup(NFS_DSERVER(parent), NFS_FH(parent),
 				dentry->d_name.name, &fhandle, &fattr);
-	if (dentry->d_inode == NULL) {
-		if (error == -ENOENT &&
-		    time_before(jiffies,dentry->d_time+NFS_REVALIDATE_INTERVAL))
-			goto out_valid;
-		goto out_bad;
-	}
 	if (error)
 		goto out_bad;
 
@@ -496,7 +531,7 @@ static void nfs_dentry_release(struct dentry *dentry)
 }
 
 struct dentry_operations nfs_dentry_operations = {
-	nfs_lookup_revalidate,	/* d_validate(struct dentry *) */
+	nfs_lookup_revalidate,	/* d_revalidate(struct dentry *, int) */
 	NULL,			/* d_hash */
 	NULL,			/* d_compare */
 	nfs_dentry_delete,	/* d_delete(struct dentry *) */

@@ -21,7 +21,6 @@
 #include <linux/selection.h>
 #include <linux/ioport.h>
 #include <linux/init.h>
-#include <linux/config.h>
 
 #include <asm/io.h>
 #include <asm/mtrr.h>
@@ -635,10 +634,8 @@ __initfunc(void vesafb_init(void))
 		video_cmap_len = 256;
 	}
 	request_region(0x3c0, 32, "vga+");
-#ifdef CONFIG_MTRR
 	if (mtrr)
 		mtrr_add((unsigned long)video_base, video_size, MTRR_TYPE_WRCOMB, 1);
-#endif
 	
 	strcpy(fb_info.modename, "VESA VGA");
 	fb_info.changevar = NULL;

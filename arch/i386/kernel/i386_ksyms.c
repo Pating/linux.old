@@ -39,6 +39,7 @@ EXPORT_SYMBOL(local_bh_count);
 EXPORT_SYMBOL(local_irq_count);
 EXPORT_SYMBOL(enable_irq);
 EXPORT_SYMBOL(disable_irq);
+EXPORT_SYMBOL(disable_irq_nosync);
 EXPORT_SYMBOL(kernel_thread);
 
 EXPORT_SYMBOL_NOVERS(__down_failed);
@@ -91,7 +92,7 @@ EXPORT_SYMBOL(__global_cli);
 EXPORT_SYMBOL(__global_sti);
 EXPORT_SYMBOL(__global_save_flags);
 EXPORT_SYMBOL(__global_restore_flags);
-EXPORT_SYMBOL(mtrr_hook);
+EXPORT_SYMBOL(smp_call_function);
 #endif
 
 #ifdef CONFIG_MCA

@@ -7,7 +7,7 @@
  *		handler for protocols to use and generic option handler.
  *
  *
- * Version:	$Id: sock.c,v 1.79 1999/03/28 10:18:25 davem Exp $
+ * Version:	$Id: sock.c,v 1.80 1999/05/08 03:04:34 davem Exp $
  *
  * Authors:	Ross Biro, <bir7@leland.Stanford.Edu>
  *		Fred N. van Kempen, <waltje@uWalt.NL.Mugnet.ORG>
@@ -944,7 +944,7 @@ int sock_no_fcntl(struct socket *sock, unsigned int cmd, unsigned long arg)
 			 */
 			if (current->pgrp != -arg &&
 				current->pid != arg &&
-				!capable(CAP_NET_ADMIN)) return(-EPERM);
+				!capable(CAP_KILL)) return(-EPERM);
 			sk->proc = arg;
 			return(0);
 		case F_GETOWN:

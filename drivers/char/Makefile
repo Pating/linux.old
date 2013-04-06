@@ -283,12 +283,12 @@ L_OBJS += rtc.o
 endif
 
 ifeq ($(CONFIG_NVRAM),y)
-  ifeq ($(CONFIG_PMAC)$(CONFIG_CHRP),)
+  ifeq ($(CONFIG_PPC),)
   L_OBJS += nvram.o
   endif
 else
   ifeq ($(CONFIG_NVRAM),m)
-    ifeq ($(CONFIG_PMAC)$(CONFIG_CHRP),)
+    ifeq ($(CONFIG_PPC),)
     M_OBJS += nvram.o
     endif
   endif
@@ -351,6 +351,14 @@ L_OBJS += pms.o
 else
   ifeq ($(CONFIG_VIDEO_PMS),m)
   M_OBJS += pms.o
+  endif
+endif
+
+ifeq ($(CONFIG_VIDEO_PLANB),y)
+L_OBJS += planb.o
+else
+  ifeq ($(CONFIG_VIDEO_PLANB),m)
+  M_OBJS += planb.o
   endif
 endif
 

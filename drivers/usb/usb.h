@@ -1,6 +1,7 @@
 #ifndef __LINUX_USB_H
 #define __LINUX_USB_H
 
+#include <linux/config.h>
 #include <linux/types.h>
 #include <linux/list.h>
 #include <linux/sched.h>
@@ -8,7 +9,7 @@
 static __inline__ void wait_ms(unsigned int ms)
 {
         current->state = TASK_UNINTERRUPTIBLE;
-        schedule_timeout(1 + ms / 10);
+        schedule_timeout(1 + ms * HZ / 1000);
 }
 
 
@@ -99,17 +100,11 @@ struct usb_devmap {
  *
  * USB device information
  *
- * Make this MUCH dynamic, right now
- * it contains enough information for
- * a USB floppy controller, and nothing
- * else.
- *
- * I'm not proud. I just want this dang
- * thing to start working.
  */
-#define USB_MAXCONFIG		2
-#define USB_MAXINTERFACES	8
-#define USB_MAXENDPOINTS	4
+
+#define USB_MAXCONFIG		8
+#define USB_MAXINTERFACES	32
+#define USB_MAXENDPOINTS	32
 
 struct usb_device_descriptor {
 	__u8  bLength;
@@ -136,6 +131,7 @@ struct usb_endpoint_descriptor {
 	__u8  bmAttributes;
 	__u16 wMaxPacketSize;
 	__u8  bInterval;
+	void  *audio;
 };
 
 /* Interface descriptor */
@@ -150,7 +146,8 @@ struct usb_interface_descriptor {
 	__u8  bInterfaceProtocol;
 	__u8  iInterface;
 
-	struct usb_endpoint_descriptor endpoint[USB_MAXENDPOINTS];
+	struct usb_endpoint_descriptor *endpoint;
+	void  *audio;
 };
 
 /* Configuration descriptor information.. */
@@ -164,7 +161,7 @@ struct usb_config_descriptor {
 	__u8  bmAttributes;
 	__u8  MaxPower;
 
-	struct usb_interface_descriptor interface[USB_MAXINTERFACES];
+	struct usb_interface_descriptor *interface;
 };
 
 /* String descriptor */
@@ -197,6 +194,14 @@ struct usb_driver {
 
 /*
  * Pointer to a device endpoint interrupt function -greg
+ *   Parameters:
+ *     int status - This needs to be defined.  Right now each HCD
+ *         passes different transfer status bits back.  Don't use it
+ *         until we come up with a common meaning.
+ *     void *buffer - This is a pointer to the data used in this
+ *         USB transfer.
+ *     void *dev_id - This is a user defined pointer set when the IRQ
+ *         is requested that is passed back.
  */
 typedef int (*usb_device_irq)(int, void *, void *);
 
@@ -228,7 +233,7 @@ struct usb_device {
 	struct usb_bus *bus;					/* Bus we're apart of */
 	struct usb_driver *driver;				/* Driver */
 	struct usb_device_descriptor descriptor;		/* Descriptor */
-	struct usb_config_descriptor config[USB_MAXCONFIG];	/* All of the configs */
+	struct usb_config_descriptor *config;			/* All of the configs */
 	struct usb_device *parent;
   
 	/*
@@ -363,8 +368,8 @@ void usb_show_device(struct usb_device *);
 void usb_audio_interface(struct usb_interface_descriptor *, u8 *);
 void usb_audio_endpoint(struct usb_endpoint_descriptor *, u8 *);
 #else
-extern inline void usb_audio_interface(struct usb_interface_descriptor *, u8 *) {}
-extern inline void usb_audio_endpoint(struct usb_endpoint_descriptor *, u8 *) {}
+extern inline void usb_audio_interface(struct usb_interface_descriptor *interface, u8 *data) {}
+extern inline void usb_audio_endpoint(struct usb_endpoint_descriptor *interface, u8 *data) {}
 #endif
 
 #endif

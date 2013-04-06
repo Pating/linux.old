@@ -696,6 +696,22 @@ nfs_revalidate(struct dentry *dentry)
 }
 
 /*
+ * These are probably going to contain hooks for
+ * allocating and releasing RPC credentials for
+ * the file. I'll have to think about Tronds patch
+ * a bit more..
+ */
+int nfs_open(struct inode *inode, struct file *filp)
+{
+	return 0;
+}
+
+int nfs_release(struct inode *inode, struct file *filp)
+{
+	return 0;
+}
+
+/*
  * This function is called whenever some part of NFS notices that
  * the cached attributes have to be refreshed.
  */

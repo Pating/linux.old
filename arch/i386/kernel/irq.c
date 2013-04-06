@@ -203,7 +203,7 @@ int i8259A_irq_pending(unsigned int irq)
 
 void make_8259A_irq(unsigned int irq)
 {
-	disable_irq(irq);
+	disable_irq_nosync(irq);
 	io_apic_irqs &= ~(1<<irq);
 	irq_desc[irq].handler = &i8259A_irq_type;
 	enable_irq(irq);
@@ -239,11 +239,13 @@ static void do_8259A_IRQ(unsigned int irq, struct pt_regs * regs)
 	{
 		unsigned int status;
 		mask_and_ack_8259A(irq);
-		status = desc->status & ~IRQ_REPLAY;
+		status = desc->status & ~(IRQ_REPLAY | IRQ_WAITING);
 		action = NULL;
-		if (!(status & (IRQ_DISABLED | IRQ_INPROGRESS)))
+		if (!(status & (IRQ_DISABLED | IRQ_INPROGRESS))) {
 			action = desc->action;
-		desc->status = status | IRQ_INPROGRESS;
+			status |= IRQ_INPROGRESS;
+		}
+		desc->status = status;
 	}
 	spin_unlock(&irq_controller_lock);
 
@@ -320,7 +322,7 @@ BUILD_16_IRQS(0xc) BUILD_16_IRQS(0xd)
 BUILD_SMP_INTERRUPT(reschedule_interrupt)
 BUILD_SMP_INTERRUPT(invalidate_interrupt)
 BUILD_SMP_INTERRUPT(stop_cpu_interrupt)
-BUILD_SMP_INTERRUPT(mtrr_interrupt)
+BUILD_SMP_INTERRUPT(call_function_interrupt)
 BUILD_SMP_INTERRUPT(spurious_interrupt)
 
 /*
@@ -747,7 +749,7 @@ int handle_IRQ_event(unsigned int irq, struct pt_regs * regs, struct irqaction *
  * hardware disable after having gotten the irq
  * controller lock. 
  */
-void disable_irq(unsigned int irq)
+void disable_irq_nosync(unsigned int irq)
 {
 	unsigned long flags;
 
@@ -757,9 +759,21 @@ void disable_irq(unsigned int irq)
 		irq_desc[irq].handler->disable(irq);
 	}
 	spin_unlock_irqrestore(&irq_controller_lock, flags);
+}
 
-	if (irq_desc[irq].status & IRQ_INPROGRESS)
-		synchronize_irq();
+/*
+ * Synchronous version of the above, making sure the IRQ is
+ * no longer running on any other IRQ..
+ */
+void disable_irq(unsigned int irq)
+{
+	disable_irq_nosync(irq);
+
+	if (!local_irq_count[smp_processor_id()]) {
+		do {
+			barrier();
+		} while (irq_desc[irq].status & IRQ_INPROGRESS);
+	}
 }
 
 void enable_irq(unsigned int irq)
@@ -769,7 +783,7 @@ void enable_irq(unsigned int irq)
 	spin_lock_irqsave(&irq_controller_lock, flags);
 	switch (irq_desc[irq].depth) {
 	case 1:
-		irq_desc[irq].status &= ~(IRQ_DISABLED | IRQ_INPROGRESS);
+		irq_desc[irq].status &= ~IRQ_DISABLED;
 		irq_desc[irq].handler->enable(irq);
 		/* fall throught */
 	default:
@@ -864,7 +878,7 @@ int setup_x86_irq(unsigned int irq, struct irqaction * new)
 
 	if (!shared) {
 		irq_desc[irq].depth = 0;
-		irq_desc[irq].status &= ~(IRQ_DISABLED | IRQ_INPROGRESS);
+		irq_desc[irq].status &= ~IRQ_DISABLED;
 		irq_desc[irq].handler->startup(irq);
 	}
 	spin_unlock_irqrestore(&irq_controller_lock,flags);
@@ -936,7 +950,7 @@ out:
  *
  * This depends on the fact that any interrupt that
  * comes in on to an unassigned handler will get stuck
- * with "IRQ_INPROGRESS" asserted and the interrupt
+ * with "IRQ_WAITING" cleared and the interrupt
  * disabled.
  */
 unsigned long probe_irq_on(void)
@@ -950,8 +964,7 @@ unsigned long probe_irq_on(void)
 	spin_lock_irq(&irq_controller_lock);
 	for (i = NR_IRQS-1; i > 0; i--) {
 		if (!irq_desc[i].action) {
-			unsigned int status = irq_desc[i].status | IRQ_AUTODETECT;
-			irq_desc[i].status = status & ~IRQ_INPROGRESS;
+			irq_desc[i].status |= IRQ_AUTODETECT | IRQ_WAITING;
 			irq_desc[i].handler->startup(i);
 		}
 	}
@@ -974,7 +987,7 @@ unsigned long probe_irq_on(void)
 			continue;
 		
 		/* It triggered already - consider it spurious. */
-		if (status & IRQ_INPROGRESS) {
+		if (!(status & IRQ_WAITING)) {
 			irq_desc[i].status = status & ~IRQ_AUTODETECT;
 			irq_desc[i].handler->shutdown(i);
 		}
@@ -1000,7 +1013,7 @@ int probe_irq_off(unsigned long unused)
 		if (!(status & IRQ_AUTODETECT))
 			continue;
 
-		if (status & IRQ_INPROGRESS) {
+		if (!(status & IRQ_WAITING)) {
 			if (!nr_irqs)
 				irq_found = i;
 			nr_irqs++;
@@ -1081,8 +1094,8 @@ __initfunc(void init_IRQ(void))
 	/* self generated IPI for local APIC timer */
 	set_intr_gate(LOCAL_TIMER_VECTOR, apic_timer_interrupt);
 
-	/* IPI for MTRR control */
-	set_intr_gate(MTRR_CHANGE_VECTOR, mtrr_interrupt);
+	/* IPI for generic function call */
+	set_intr_gate(CALL_FUNCTION_VECTOR, call_function_interrupt);
 
 	/* IPI vector for APIC spurious interrupts */
 	set_intr_gate(SPURIOUS_APIC_VECTOR, spurious_interrupt);
