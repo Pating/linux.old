@@ -82,6 +82,7 @@ EXPORT_SYMBOL(get_options);
 /* process memory management */
 EXPORT_SYMBOL(do_mmap);
 EXPORT_SYMBOL(do_munmap);
+EXPORT_SYMBOL(do_brk);
 EXPORT_SYMBOL(exit_mm);
 EXPORT_SYMBOL(exit_files);
 EXPORT_SYMBOL(exit_fs);
@@ -345,7 +346,7 @@ EXPORT_SYMBOL(securebits);
 
 /* Program loader interfaces */
 EXPORT_SYMBOL(setup_arg_pages);
-EXPORT_SYMBOL(copy_strings);
+EXPORT_SYMBOL(copy_strings_kernel);
 EXPORT_SYMBOL(do_execve);
 EXPORT_SYMBOL(flush_old_exec);
 EXPORT_SYMBOL(open_dentry);

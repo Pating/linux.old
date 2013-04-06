@@ -123,7 +123,7 @@ void usb_register_bus(struct usb_bus *new_bus)
 {
       /* Add it to the list of buses */
       list_add(&new_bus->bus_list, &usb_bus_list);
-      printk("New bus registered");
+      printk("New bus registered\n");
 }
 
 void usb_deregister_bus(struct usb_bus *bus)
@@ -148,11 +148,11 @@ void usb_check_support(struct usb_device *dev)
               return;
       }
       for (i=0;i<USB_MAXCHILDREN;i++)
-              if ((dev->children[i]!=NULL)&&
-                      (dev->children[i]->driver==NULL))
+              if (dev->children[i]!=NULL)
                       usb_check_support(dev->children[i]);
       /*now we check this device*/
-      usb_device_descriptor(dev);
+      if (dev->driver==NULL)
+	      usb_device_descriptor(dev);
 }
 /*
  * This entrypoint gets called for each new device.
@@ -197,8 +197,8 @@ static int usb_expect_descriptor(unsigned char *ptr, int len, unsigned char desc
 
 		if (len < descindex)
 			return -1;
-		n_desc = *(unsigned short *)ptr;
-		n_len = n_desc & 0xff;
+		n_desc = le16_to_cpup((unsigned short *)ptr);
+		n_len = ptr[0];
 
 		if (n_desc == ((desctype << 8) + descindex))
 			break;
@@ -245,7 +245,10 @@ static int usb_check_descriptor(unsigned char *ptr, int len, unsigned char desct
 
 	if (n_len < 2 || n_len > len)
 	{
-		printk("Short descriptor. (%d, %d)\n", len, n_len);
+		int i;
+		printk("Short descriptor. (%d, %d):\n", len, n_len);
+		for (i = 0; i < len; ++i)
+			printk(" %d: %x\n", i, ptr[i]);
 		return -1;
 	}
 
@@ -264,9 +267,10 @@ static int usb_parse_endpoint(struct usb_device *dev, struct usb_endpoint_descri
 	if (parsed < 0)
 		return parsed;
 	memcpy(endpoint, ptr + parsed, ptr[parsed]);
+	le16_to_cpus(&endpoint->wMaxPacketSize);
 
 	parsed += ptr[parsed];
-	len -= ptr[parsed];
+	len -= parsed;
 
 	while((i = usb_check_descriptor(ptr+parsed, len, 0x25))>=0)
 	{
@@ -328,7 +332,9 @@ static int usb_parse_interface(struct usb_device *dev, struct usb_interface_desc
 
 static int usb_parse_config(struct usb_device *dev, struct usb_config_descriptor *config, unsigned char *ptr, int len)
 {
-	int i;
+	int i, j;
+	int retval;
+	struct usb_alternate_setting *as;
 	int parsed = usb_expect_descriptor(ptr, len, USB_DT_CONFIG, 9);
 
 	if (parsed < 0)
@@ -337,6 +343,7 @@ static int usb_parse_config(struct usb_device *dev, struct usb_config_descriptor
 	memcpy(config, ptr + parsed, *ptr);
 	len -= *ptr;
 	parsed += *ptr;
+	le16_to_cpus(&config->wTotalLength);
 
 	if (config->MaxPower == 200) {
 		printk("bNumInterfaces kludge\n");
@@ -350,22 +357,58 @@ static int usb_parse_config(struct usb_device *dev, struct usb_config_descriptor
 
 	}
 
-	config->interface = (struct usb_interface_descriptor *)
+	config->altsetting = (struct usb_alternate_setting *)
+	        kmalloc(USB_MAXALTSETTING * sizeof(struct usb_alternate_setting), GFP_KERNEL);
+	if (config->altsetting == NULL) {
+	  printk(KERN_WARNING "usb: out of memory.\n");
+	  return -1;
+	}
+	config->act_altsetting = 0;
+	config->num_altsetting = 1;
+
+	config->altsetting->interface = (struct usb_interface_descriptor *)
 		kmalloc(config->bNumInterfaces * sizeof(struct usb_interface_descriptor), GFP_KERNEL);
-	if(config->interface==NULL)
+	if(config->altsetting->interface==NULL)
 	{
 		printk(KERN_WARNING "usb: out of memory.\n");
 		return -1;	
 	}
-	memset(config->interface, 0, config->bNumInterfaces*sizeof(struct usb_interface_descriptor));
+	memset(config->altsetting->interface, 
+	       0, config->bNumInterfaces*sizeof(struct usb_interface_descriptor));
 	
 	for (i = 0; i < config->bNumInterfaces; i++) {
-		int retval = usb_parse_interface(dev, config->interface + i, ptr + parsed, len);
+		retval = usb_parse_interface(dev, config->altsetting->interface + i, ptr + parsed, len);
 		if (retval < 0)
 			return parsed; // HACK
 //			return retval;
 		parsed += retval;
 		len -= retval;
+	}
+
+	printk("parsed = %d len = %d\n", parsed, len);
+
+	// now parse for additional alternate settings
+	for (j = 1; j < USB_MAXALTSETTING; j++) {
+	  retval = usb_expect_descriptor(ptr + parsed, len, USB_DT_INTERFACE, 9);
+	  if (retval) 
+	    break;
+	  config->num_altsetting++;
+	  as = config->altsetting + j;
+	  as->interface = (struct usb_interface_descriptor *)
+	    kmalloc(config->bNumInterfaces * sizeof(struct usb_interface_descriptor), GFP_KERNEL);
+	  if (as->interface == NULL) {
+	    printk(KERN_WARNING "usb: out of memory.\n");
+	    return -1;
+	  }
+	  memset(as->interface, 0, config->bNumInterfaces * sizeof(struct usb_interface_descriptor));
+	  for (i = 0; i < config->bNumInterfaces; i++) {
+	    retval = usb_parse_interface(dev, as->interface + i, 
+					 ptr + parsed, len);
+	    if (retval < 0)
+	      return parsed;
+	    parsed += retval;
+	    len -= retval;
+	  }
 	}
 	return parsed;
 }
@@ -403,26 +446,34 @@ int usb_parse_configuration(struct usb_device *dev, void *__buf, int bytes)
 
 void usb_destroy_configuration(struct usb_device *dev)
 {
-	int c, i;
+	int c, a, i;
 	struct usb_config_descriptor *cf;
+	struct usb_alternate_setting *as;
 	struct usb_interface_descriptor *ifp;
 	
 	if(dev->config==NULL)
 		return;
 
-	for(c=0;c<dev->descriptor.bNumConfigurations;c++)
+	for(c = 0; c < dev->descriptor.bNumConfigurations; c++)
 	{
-		cf=&dev->config[c];
-		if(cf->interface==NULL)
-			break;
-		for(i=0;i<cf->bNumInterfaces;i++)
+		cf = &dev->config[c];
+		if (cf->altsetting == NULL)
+		        break;
+		for (a = 0; a < cf->num_altsetting; a++)
 		{
-			ifp=&cf->interface[i];
-			if(ifp->endpoint==NULL)
-				break;
-			kfree(ifp->endpoint);
+		        as = &cf->altsetting[a];
+			if (as->interface == NULL)
+			        break;
+			for(i=0;i<cf->bNumInterfaces;i++)
+			{
+			        ifp = &as->interface[i];
+				if(ifp->endpoint==NULL)
+				       break;
+				kfree(ifp->endpoint);
+			}
+			kfree(as->interface);
 		}
-		kfree(cf->interface);
+		kfree(cf->altsetting);
 	}
 	kfree(dev->config);
 
@@ -526,8 +577,6 @@ int usb_get_descriptor(struct usb_device *dev, unsigned char type, unsigned char
 int usb_get_string(struct usb_device *dev, unsigned short langid, unsigned char index, void *buf, int size)
 {
 	devrequest dr;
-	int i = 5;
-	int result;
 
 	dr.requesttype = 0x80;
 	dr.request = USB_REQ_GET_DESCRIPTOR;
@@ -535,16 +584,16 @@ int usb_get_string(struct usb_device *dev, unsigned short langid, unsigned char 
 	dr.index = langid;
 	dr.length = size;
 
-	while (i--) {
-		if (!(result = dev->bus->op->control_msg(dev, usb_rcvctrlpipe(dev,0), &dr, buf, size)))
-			break;
-	}
-	return result;
+	return dev->bus->op->control_msg(dev, usb_rcvctrlpipe(dev,0), &dr, buf, size);
 }
 
 int usb_get_device_descriptor(struct usb_device *dev)
 {
 	return usb_get_descriptor(dev, USB_DT_DEVICE, 0, &dev->descriptor, sizeof(dev->descriptor));
+	le16_to_cpus(&dev->descriptor.bcdUSB);
+	le16_to_cpus(&dev->descriptor.idVendor);
+	le16_to_cpus(&dev->descriptor.idProduct);
+	le16_to_cpus(&dev->descriptor.bcdDevice);
 }
 
 int usb_get_hub_descriptor(struct usb_device *dev, void *data, int size)
@@ -665,13 +714,15 @@ int usb_set_idle(struct usb_device *dev,  int duration, int report_id)
 
 static void usb_set_maxpacket(struct usb_device *dev)
 {
-	struct usb_endpoint_descriptor *ep;
-	struct usb_interface_descriptor *ip = dev->actconfig->interface;
 	int i;
+	struct usb_endpoint_descriptor *ep;
+	int act_as = dev->actconfig->act_altsetting;
+	struct usb_alternate_setting *as = dev->actconfig->altsetting + act_as;
+	struct usb_interface_descriptor *ip = as->interface;
 
 	for (i=0; i<dev->actconfig->bNumInterfaces; i++) {
-		if (dev->actconfig->interface[i].bInterfaceNumber == dev->ifnum) {
-			ip = &dev->actconfig->interface[i];
+		if (as->interface[i].bInterfaceNumber == dev->ifnum) {
+			ip = &as->interface[i];
 			break;
 		}
 	}
@@ -679,6 +730,52 @@ static void usb_set_maxpacket(struct usb_device *dev)
 	for (i=0; i<ip->bNumEndpoints; i++) {
 		dev->epmaxpacket[ep[i].bEndpointAddress & 0x0f] = ep[i].wMaxPacketSize;
 	}
+}
+
+int usb_clear_halt(struct usb_device *dev, int endp)
+{
+	devrequest dr;
+	int result;
+	__u16 status;
+
+    	//if (!usb_endpoint_halted(dev, endp))
+	//	return 0;
+
+	dr.requesttype = USB_RT_ENDPOINT;
+	dr.request = USB_REQ_CLEAR_FEATURE;
+	dr.value = 0;
+	dr.index = endp;
+	dr.length = 0;
+
+	result = dev->bus->op->control_msg(dev, usb_sndctrlpipe(dev,0), &dr, NULL, 0);
+
+	/* dont clear if failed */
+	if (result) {
+	    return result;
+	}
+
+#if 1	/* lets be really tough */
+	dr.requesttype = 0x80 | USB_RT_ENDPOINT;
+	dr.request = USB_REQ_GET_STATUS;
+	dr.length = 2;
+	status = 0xffff;
+
+	result = dev->bus->op->control_msg(dev, usb_rcvctrlpipe(dev,0), &dr, &status, 2);
+
+	if (result) {
+	    return result;
+	}
+	if (status & 1) {
+	    return 1;		/* still halted */
+	}
+#endif
+	usb_endpoint_running(dev, endp & 0x0f);
+
+	/* toggle is reset on clear */
+
+	usb_settoggle(dev, endp & 0x0f, 0);
+
+	return 0;
 }
 
 int usb_set_interface(struct usb_device *dev, int interface, int alternate)
@@ -695,10 +792,10 @@ int usb_set_interface(struct usb_device *dev, int interface, int alternate)
 		return -1;
 
 	dev->ifnum = interface;
+	dev->actconfig->act_altsetting = alternate;
 	usb_set_maxpacket(dev);
 	return 0;
 }
-
 
 int usb_set_configuration(struct usb_device *dev, int configuration)
 {
@@ -762,7 +859,7 @@ int usb_get_configuration(struct usb_device *dev)
 	    		return -1;
 
   	  	/* Get the full buffer */
-	  	size = *(unsigned short *)(bufptr+2);
+	  	size = le16_to_cpup((unsigned short *)(bufptr+2));
 	  	if (bufptr+size > buffer+sizeof(buffer)) {
 			printk(KERN_INFO "usb: truncated DT_CONFIG (want %d).\n", size);
 			size = buffer+sizeof(buffer)-bufptr;
@@ -793,7 +890,7 @@ int usb_get_stringtable(struct usb_device *dev)
 	   usb_get_string(dev, 0, 0, buffer, sd->bLength))
 		return -1;
 	/* we are going to assume that the first ID is good */
-	langid = sd->wData[0];
+	langid = le16_to_cpup(&sd->wData[0]);
 
 	/* whip through and find total length and max index */
 	for (maxindex = 1, totalchars = 0; maxindex<=USB_MAXSTRINGS; maxindex++) {
@@ -823,7 +920,7 @@ int usb_get_stringtable(struct usb_device *dev)
 			continue;
 		dev->stringindex[i] = string;
 		for (j=0; j < (bLengths[i] - 2)/2; j++) {
-			*string++ =  sd->wData[j];
+			*string++ = le16_to_cpup(&sd->wData[j]);
 		}
 		*string++ = '\0';
 	}
@@ -932,4 +1029,3 @@ int usb_request_irq(struct usb_device *dev, unsigned int pipe, usb_device_irq ha
 {
 	return dev->bus->op->request_irq(dev, pipe, handler, period, dev_id);
 }
-

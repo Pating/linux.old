@@ -263,6 +263,7 @@ static struct dev_info device_list[] =
 {"HP", "C1790A", "", BLIST_NOLUN},              /* scanjet iip */
 {"HP", "C2500A", "", BLIST_NOLUN},              /* scanjet iicx */
 {"YAMAHA", "CDR102", "1.00", BLIST_NOLUN},	/* extra reset */
+{"RELISYS", "Scorpio", "*", BLIST_NOLUN},	/* responds to all LUN */
 
 /*
  * Other types of devices that have special flags.
@@ -669,8 +670,8 @@ int scan_scsis_single (int channel, int dev, int lun, int *max_dev_lun,
     SCpnt->request.rq_status = RQ_SCSI_BUSY;
     spin_lock_irq(&io_request_lock);
     scsi_do_cmd (SCpnt, (void *) scsi_cmd,
-                 (void *) scsi_result,
-                 256, scan_scsis_done, SCSI_TIMEOUT + 4 * HZ, 5);
+                 (void *) NULL,
+                 0, scan_scsis_done, SCSI_TIMEOUT + 4 * HZ, 5);
     spin_unlock_irq(&io_request_lock);
     down (&sem);
     SCpnt->request.sem = NULL;

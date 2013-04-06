@@ -96,6 +96,30 @@ typedef struct {
 
 #define USB_RT_HIDD			(USB_TYPE_CLASS | USB_RECIP_INTERFACE)
 
+/* 
+ * Status codes 
+ */
+#define USB_ST_NOERROR		0x0
+#define USB_ST_CRC		0x1
+#define USB_ST_BITSTUFF		0x2
+#define USB_ST_DTMISMATCH	0x3
+#define USB_ST_STALL		0x4
+#define USB_ST_TIMEOUT		0x5
+#define USB_ST_PIDCHECK		0x6
+#define USB_ST_PIDUNDEF		0x7
+#define USB_ST_DATAOVERRUN	0x8
+#define USB_ST_DATAUNDERRUN	0x9
+#define USB_ST_RESERVED1	0xA
+#define USB_ST_RESERVED2	0xB
+#define USB_ST_BUFFEROVERRUN	0xC
+#define USB_ST_BUFFERUNDERRUN	0xD
+#define USB_ST_RESERVED3	0xE
+#define USB_ST_RESERVED4	0xF
+
+/* internal errors */
+#define USB_ST_REMOVED		0x100
+#define USB_ST_INTERNALERROR	-1
+
 /*
  * USB device number allocation bitmap. There's one bitmap
  * per USB tree.
@@ -112,6 +136,7 @@ struct usb_devmap {
  */
 
 #define USB_MAXCONFIG		8
+#define USB_MAXALTSETTING       5
 #define USB_MAXINTERFACES	32
 #define USB_MAXENDPOINTS	32
 #define USB_MAXSTRINGS		16
@@ -160,6 +185,11 @@ struct usb_interface_descriptor {
 	void  *audio;
 };
 
+/* hack for alternate settings */
+struct usb_alternate_setting {
+        struct usb_interface_descriptor *interface;
+};
+
 /* Configuration descriptor information.. */
 struct usb_config_descriptor {
 	__u8  bLength;
@@ -170,8 +200,9 @@ struct usb_config_descriptor {
 	__u8  iConfiguration;
 	__u8  bmAttributes;
 	__u8  MaxPower;
-
-	struct usb_interface_descriptor *interface;
+        int act_altsetting;                /* active alternate setting */
+        int num_altsetting;                /* number of alternate settings */
+	struct usb_alternate_setting *altsetting;
 };
 
 /* String descriptor */
@@ -186,7 +217,7 @@ struct usb_hub_descriptor {
 	__u8  bLength;
 	__u8  bDescriptorType;
 	__u8  bNbrPorts;
-	__u16 wHubCharacteristics;
+	__u8  wHubCharacteristics[2];	/* __u16 but not aligned! */
 	__u8  bPwrOn2PwrGood;
 	__u8  bHubContrCurrent;
 	/* DeviceRemovable and PortPwrCtrlMask want to be variable-length 
@@ -219,9 +250,10 @@ typedef int (*usb_device_irq)(int, void *, void *);
 struct usb_operations {
 	struct usb_device *(*allocate)(struct usb_device *);
 	int (*deallocate)(struct usb_device *);
-	int (*control_msg)(struct usb_device *, unsigned int, void *, void *, int);
+	int (*control_msg)(struct usb_device *, unsigned int, devrequest *, void *, int);
 	int (*bulk_msg)(struct usb_device *, unsigned int, void *, int,unsigned long *);
 	int (*request_irq)(struct usb_device *, unsigned int, usb_device_irq, int, void *);
+	int (*remove_irq)(struct usb_device *, unsigned int, usb_device_irq, int, void *);
 };
 
 /*
@@ -239,22 +271,23 @@ struct usb_bus {
 #define USB_MAXCHILDREN (8)
 
 struct usb_device {
-	int devnum;						/* Device number on USB bus */
-	int slow;						/* Slow device? */
-	int maxpacketsize;					/* Maximum packet size */
-	__u16 toggle;						/* one bit for each endpoint */
-	struct usb_config_descriptor *actconfig;		/* the active configuration */
-	int epmaxpacket[16];					/* endpoint specific maximums */
-	int ifnum;						/* active interface number */
-	struct usb_bus *bus;					/* Bus we're apart of */
-	struct usb_driver *driver;				/* Driver */
-	struct usb_device_descriptor descriptor;		/* Descriptor */
-	struct usb_config_descriptor *config;			/* All of the configs */
+	int devnum;			/* Device number on USB bus */
+	int slow;			/* Slow device? */
+	int maxpacketsize;		/* Maximum packet size */
+	int toggle;			/* one bit for each endpoint */
+	int halted;			/* endpoint halts */
+	struct usb_config_descriptor *actconfig;/* the active configuration */
+	int epmaxpacket[16];		/* endpoint specific maximums */
+	int ifnum;			/* active interface number */
+	struct usb_bus *bus;		/* Bus we're apart of */
+	struct usb_driver *driver;	/* Driver */
+	struct usb_device_descriptor descriptor;/* Descriptor */
+	struct usb_config_descriptor *config;	/* All of the configs */
 	struct usb_device *parent;
-	char *stringtable;					/* Strings (multiple, null term) */
-	char **stringindex;					/* pointers to strings */
-	int maxstring;						/* max valid index */
-  
+	char *stringtable;		/* Strings (multiple, null term) */
+	char **stringindex;		/* pointers to strings */
+	int maxstring;			/* max valid index */
+
 	/*
 	 * Child devices - these can be either new devices
 	 * (if this is a hub device), or different instances
@@ -341,7 +374,12 @@ extern void usb_destroy_configuration(struct usb_device *dev);
 /* The D0/D1 toggle bits */
 #define usb_gettoggle(dev, ep) (((dev)->toggle >> ep) & 1)
 #define	usb_dotoggle(dev, ep)	((dev)->toggle ^= (1 <<	ep))
-#define usb_settoggle(dev, ep, bit) ((dev)->toggle = ((dev)->toggle & (0xfffe << ep)) | (bit << ep))
+#define usb_settoggle(dev, ep, bit) ((dev)->toggle = ((dev)->toggle & ~(1 << ep)) | ((bit) << ep))
+
+/* Endpoint halt */
+#define usb_endpoint_halt(dev, ep) ((dev)->halted |= (1 << (ep)))
+#define usb_endpoint_running(dev, ep) ((dev)->halted &= ~(1 << (ep)))
+#define usb_endpoint_halted(dev, ep) ((dev)->halted & (1 << (ep)))
 
 static inline unsigned int __create_pipe(struct usb_device *dev, unsigned int endpoint)
 {
@@ -381,6 +419,14 @@ int usb_set_protocol(struct usb_device *dev, int protocol);
 int usb_set_idle(struct usb_device *dev, int duration, int report_id);
 int usb_set_configuration(struct usb_device *dev, int configuration);
 int usb_get_report(struct usb_device *dev);
+int usb_clear_halt(struct usb_device *dev, int endp);
+static inline char * usb_string(struct usb_device* dev, int index)
+{
+	if (index <= dev->maxstring && dev->stringindex && dev->stringindex[index])
+		return dev->stringindex[index];
+	else
+		return NULL;
+}
 
 /*
  * Debugging helpers..

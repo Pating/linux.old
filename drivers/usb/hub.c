@@ -159,7 +159,7 @@ static int hub_probe(struct usb_device *dev)
 	if (dev->config[0].bNumInterfaces != 1)
 		return -1;
 
-	interface = &dev->config[0].interface[0];
+	interface = &dev->config[0].altsetting[0].interface[0];
 
 	/* Is it a hub? */
 	if (interface->bInterfaceClass != 9)
@@ -241,8 +241,8 @@ static void usb_hub_port_connect_change(struct usb_device *hub, int port)
 		return;
 	}
 
-	portstatus = *((unsigned short *)buf + 0);
-	portchange = *((unsigned short *)buf + 1);
+	portstatus = le16_to_cpup((unsigned short *)buf + 0);
+	portchange = le16_to_cpup((unsigned short *)buf + 1);
 
 	if ((!(portstatus & USB_PORT_STAT_CONNECTION)) &&
 		(!(portstatus & USB_PORT_STAT_ENABLE))) {
@@ -294,8 +294,8 @@ static void usb_hub_events(void)
 				continue;
 			}
 
-			portstatus = *((unsigned short *)buf + 0);
-			portchange = *((unsigned short *)buf + 1);
+			portstatus = le16_to_cpup((unsigned short *)buf + 0);
+			portchange = le16_to_cpup((unsigned short *)buf + 1);
 
 			if (portchange & USB_PORT_STAT_C_CONNECTION) {
 				printk("hub: port %d connection change\n", i + 1);
@@ -421,7 +421,7 @@ int init_module(void){
 	return usb_hub_init();
 }
 
-void module_cleanup(void){
+void cleanup_module(void){
 	usb_hub_cleanup();
 }
 #endif

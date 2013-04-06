@@ -5,7 +5,7 @@
  *
  *		PF_INET protocol family socket handler.
  *
- * Version:	$Id: af_inet.c,v 1.90 1999/05/29 04:30:38 davem Exp $
+ * Version:	$Id: af_inet.c,v 1.91 1999/06/09 08:28:55 davem Exp $
  *
  * Authors:	Ross Biro, <bir7@leland.Stanford.Edu>
  *		Fred N. van Kempen, <waltje@uWalt.NL.Mugnet.ORG>
@@ -371,7 +371,7 @@ static int inet_create(struct socket *sock, int protocol)
 		if (protocol && protocol != IPPROTO_UDP)
 			goto free_and_noproto;
 		protocol = IPPROTO_UDP;
-		sk->no_check = UDP_NO_CHECK;
+		sk->no_check = UDP_CSUM_DEFAULT;
 		sk->ip_pmtudisc = IP_PMTUDISC_DONT;
 		prot=&udp_prot;
 		sock->ops = &inet_dgram_ops;
