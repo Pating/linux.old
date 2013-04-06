@@ -106,6 +106,8 @@ enum
 	KERN_SYSRQ=38,		/* int: Sysreq enable */
 	KERN_SHMALL=41,		/* int: maximum size of shared memory */
 	KERN_SPARC_STOP_A=44,	/* int: Sparc Stop-A enable */
+	KERN_HOTPLUG=49,	/* string: path to hotplug policy agent */
+	KERN_IEEE_EMULATION_WARNINGS=50 /* int: unimplemented ieee instructions */
 };
 
 
@@ -166,7 +168,8 @@ enum
 	NET_CORE_FASTROUTE=7,
 	NET_CORE_MSG_COST=8,
 	NET_CORE_MSG_BURST=9,
-	NET_CORE_OPTMEM_MAX=10
+	NET_CORE_OPTMEM_MAX=10,
+	NET_CORE_DIVERT_VERSION=12
 };
 
 /* /proc/sys/net/ethernet */
@@ -270,7 +273,8 @@ enum
 	NET_IPV4_CONF_ACCEPT_SOURCE_ROUTE=9,
 	NET_IPV4_CONF_BOOTP_RELAY=10,
 	NET_IPV4_CONF_LOG_MARTIANS=11,
-	NET_IPV4_CONF_HIDDEN=12
+	NET_IPV4_CONF_HIDDEN=12,
+	NET_IPV4_CONF_ARPFILTER=13
 };
 
 /* /proc/sys/net/ipv6 */
@@ -430,7 +434,8 @@ enum
 /* CTL_DEV names: */
 enum {
 	DEV_CDROM=1,
-	DEV_HWMON=2
+	DEV_HWMON=2,
+	DEV_MAC_HID=5
 };
 
 /* /proc/sys/dev/cdrom */
@@ -441,6 +446,16 @@ enum {
 	DEV_CDROM_DEBUG=4,
 	DEV_CDROM_LOCK=5,
 	DEV_CDROM_CHECK_MEDIA=6
+};
+
+/* /proc/sys/dev/mac_hid */
+enum {
+	DEV_MAC_HID_KEYBOARD_SENDS_LINUX_KEYCODES=1,
+	DEV_MAC_HID_KEYBOARD_LOCK_KEYCODES=2,
+	DEV_MAC_HID_MOUSE_BUTTON_EMULATION=3,
+	DEV_MAC_HID_MOUSE_BUTTON2_KEYCODE=4,
+	DEV_MAC_HID_MOUSE_BUTTON3_KEYCODE=5,
+	DEV_MAC_HID_ADB_MOUSE_SENDS_KEYCODES=6
 };
 
 #ifdef __KERNEL__

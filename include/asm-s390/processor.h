@@ -35,7 +35,7 @@ struct cpuinfo_S390
         cpuid_t  cpu_id;
         __u16    cpu_addr;
         __u16    cpu_nr;
-        unsigned long loops_per_sec;
+        unsigned long loops_per_jiffy;
         unsigned long *pgd_quick;
         unsigned long *pte_quick;
         unsigned long pgtable_cache_sz;
@@ -90,7 +90,7 @@ typedef struct thread_struct thread_struct;
 
 #define INIT_MMAP \
 { &init_mm, 0, 0, NULL, PAGE_SHARED, \
-VM_READ | VM_WRITE | VM_EXEC, 1, NULL, &init_mm.mmap }
+VM_READ | VM_WRITE | VM_EXEC, 1, NULL, NULL }
 
 #define INIT_TSS  { (struct pt_regs *) 0,                         \
                     { 0,{{0},{0},{0},{0},{0},{0},{0},{0},{0},{0}, \

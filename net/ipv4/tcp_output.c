@@ -5,7 +5,7 @@
  *
  *		Implementation of the Transmission Control Protocol(TCP).
  *
- * Version:	$Id: tcp_output.c,v 1.108.2.6 2000/02/07 20:20:11 davem Exp $
+ * Version:	$Id: tcp_output.c,v 1.108.2.11 2000/11/10 12:43:29 davem Exp $
  *
  * Authors:	Ross Biro, <bir7@leland.Stanford.Edu>
  *		Fred N. van Kempen, <waltje@uWalt.NL.Mugnet.ORG>
@@ -104,7 +104,7 @@ void tcp_transmit_skb(struct sock *sk, struct sk_buff *skb)
 	if(skb != NULL) {
 		struct tcp_opt *tp = &(sk->tp_pinfo.af_tcp);
 		struct tcp_skb_cb *tcb = TCP_SKB_CB(skb);
-		int tcp_header_size = tp->tcp_header_len;
+		int tcp_header_size = sizeof(struct tcphdr);
 		struct tcphdr *th;
 		int sysctl_flags;
 
@@ -128,12 +128,17 @@ void tcp_transmit_skb(struct sock *sk, struct sk_buff *skb)
 				if(!(sysctl_flags & SYSCTL_FLAG_TSTAMPS))
 					tcp_header_size += TCPOLEN_SACKPERM_ALIGNED;
 			}
-		} else if(tp->sack_ok && tp->num_sacks) {
-			/* A SACK is 2 pad bytes, a 2 byte header, plus
-			 * 2 32-bit sequence numbers for each SACK block.
-			 */
-			tcp_header_size += (TCPOLEN_SACK_BASE_ALIGNED +
-					    (tp->num_sacks * TCPOLEN_SACK_PERBLOCK));
+		} else {
+			if(tp->tstamp_ok)
+				tcp_header_size += TCPOLEN_TSTAMP_ALIGNED;
+
+			if(tp->sack_ok && tp->num_sacks) {
+				/* A SACK is 2 pad bytes, a 2 byte header, plus
+				 * 2 32-bit sequence numbers for each SACK block.
+				 */
+				tcp_header_size += (TCPOLEN_SACK_BASE_ALIGNED +
+						    (tp->num_sacks * TCPOLEN_SACK_PERBLOCK));
+			}
 		}
 		th = (struct tcphdr *) skb_push(skb, tcp_header_size);
 		skb->h.th = th;
@@ -195,7 +200,7 @@ void tcp_send_skb(struct sock *sk, struct sk_buff *skb, int force_queue)
 		TCP_SKB_CB(skb)->when = tcp_time_stamp;
 		tp->snd_nxt = TCP_SKB_CB(skb)->end_seq;
 		tp->packets_out++;
-		tcp_transmit_skb(sk, skb_clone(skb, GFP_KERNEL));
+		tcp_transmit_skb(sk, skb_clone(skb, sk->allocation));
 		if(!tcp_timer_is_set(sk, TIME_RETRANS))
 			tcp_reset_xmit_timer(sk, TIME_RETRANS, tp->rto);
 	} else {
@@ -811,7 +816,6 @@ void tcp_send_fin(struct sock *sk)
  */
 void tcp_send_active_reset(struct sock *sk)
 {
-	struct tcp_opt *tp = &(sk->tp_pinfo.af_tcp);
 	struct sk_buff *skb;
 
 	/* NOTE: No TCP options attached and we never retransmit this. */

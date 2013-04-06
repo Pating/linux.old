@@ -93,6 +93,12 @@ M:	p_gortmaker@yahoo.com
 L:	linux-net@vger.kernel.org
 S:	Maintained
 
+AACRAID ADAPTEC RAID DRIVER
+P:	Brian M. Boerner
+M:	aacraid@ntc.adaptec.com
+L:	To Be Announced
+S:	Maintained
+
 AD1816 SOUND DRIVER
 P:	Thorsten Knabe
 M:	Thorsten Knabe <tek@rbg.informatik.tu-darmstadt.de>
@@ -103,8 +109,10 @@ S:	Maintained
 
 ADVANSYS SCSI DRIVER
 P:	Bob Frey
-M:	linux@advansys.com
+M:	bfrey@turbolinux.com.cn
+M:	linux@connectcom.net
 W:	http://www.advansys.com/linux.html
+W:      http://www.connectcom.net/downloads/software/os/linux.html
 L:	linux-scsi@vger.kernel.org
 S:	Maintained
 
@@ -177,6 +185,13 @@ M:	jgarzik@pobox.com
 L:	linux-fbdev@vuser.vu.union.edu
 S:	Maintained
 
+COMPAQ FIBRE CHANNEL 64-bit/66MHz PCI non-intelligent HBA
+P:      Amy Vanzant-Hodge 
+M:      Amy Vanzant-Hodge (fibrechannel@compaq.com)
+L:	compaqandlinux@cpqlin.van-dijk.net
+W:	ftp.compaq.com/pub/products/drivers/linux
+S:      Supported
+
 COMPUTONE INTELLIPORT MULTIPORT CARD
 P:     Doug McNash
 P:     Michael H. Warfield
@@ -228,9 +243,9 @@ S:	Supported
 
 DAMA SLAVE for AX.25
 P:	Joerg Reuter
-M:	jreuter@poboxes.com
-W:	http://poboxes.com/jreuter/
-W:	http://qsl.net/dl1bke/
+M:	jreuter@yaina.de
+W:	http://yaina.de/jreuter
+W:	http://www.qsl.net/dl1bke/
 L:	linux-hams@vger.kernel.org
 S:	Maintained
 
@@ -252,6 +267,12 @@ DEVICE NUMBER REGISTRY
 P:	H. Peter Anvin
 M:	hpa@zytor.com
 L:	linux-kernel@vger.kernel.org
+S:	Maintained
+
+DEVICE FILESYSTEM
+P:	Richard Gooch
+M:	rgooch@atnf.csiro.au
+L:	linux-kernel@vger.rutgers.edu
 S:	Maintained
 
 DIGI INTL. EPCA DRIVER
@@ -300,6 +321,13 @@ M:	Charles White <arrays@compaq.com>
 L:	compaqandlinux@cpqlin.van-dijk.net
 W:	ftp.compaq.com/pub/products/drivers/linux
 S:	Supported
+
+COMPAQ SMART CISS RAID DRIVER 
+P:      Charles White
+M:      Charles White <arrays@compaq.com>
+L:      compaqandlinux@cpqlin.van-dijk.net
+W:	ftp.compaq.com/pub/products/drivers/linux	
+S:     	Supported 
 
 DAC960 RAID DRIVER
 P:	Leonard N. Zubkoff
@@ -358,6 +386,12 @@ FPU EMULATOR
 P:	Bill Metzenthen
 M:	billm@suburbia.net
 W:	http://suburbia.net/~billm/floating-point/emulator/
+S:	Maintained
+
+FRAME DIVERTER
+P:	Benoit Locher
+M:	Benoit.Locher@skf.com
+W:	http://perso.wanadoo.fr/magpie/EtherDivert.html
 S:	Maintained
 
 FRAME RELAY DLCI/FRAD (Sangoma drivers too)
@@ -442,13 +476,20 @@ S:	Maintained
 
 IDE/ATAPI CDROM DRIVER 
 P:	Jens Axboe
-M:	axboe@image.dk
+M:	axboe@suse.de
 L:	linux-kernel@vger.kernel.org
 S:	Maintained
 
-IDE/ATAPI TAPE/FLOPPY DRIVERS
+IDE/ATAPI TAPE DRIVERS
 P:	Gadi Oxman
 M:	Gadi Oxman <gadio@netvision.net.il>
+L:	linux-kernel@vger.kernel.org
+S:	Maintained
+
+IDE/ATAPI FLOPPY DRIVERS
+P:	Paul Bristow
+M:	Paul Bristow <paul@paulbristow.net>
+W:      http://paulbristow.net/linux
 L:	linux-kernel@vger.kernel.org
 S:	Maintained
 
@@ -780,6 +821,14 @@ L:	rtl@rtlinux.org
 W:	www.rtlinux.org
 S:	Maintained
 
+S390
+P:	Martin Schwidefsky
+M:	schwidefsky@de.ibm.com
+M:      linux390@de.ibm.com
+L:	linux-390@vm.marist.edu
+W:	http://oss.software.ibm.com/developerworks/opensource/linux390
+S:	Supported
+
 SBPCD CDROM DRIVER
 P:	Eberhard Moenkeberg
 M:	emoenke@gwdg.de
@@ -917,24 +966,118 @@ S:	Maintained
 
 UNIFORM CDROM DRIVER 
 P:	Jens Axboe
-M:	axboe@image.dk
+M:	axboe@suse.de
 L:	linux-kernel@vger.kernel.org
 S:	Maintained
 
-USB HUB AND UHCI DRIVERS
+USB SUBSYSTEM
+P:	Johannes Erdfelt
+M	jerdfelt@valinux.com
+M:	johannes@erdfelt.com
+L:	linux-usb-users@lists.sourceforge.net
+L:	linux-usb-devel@lists.sourceforge.net
+W:	http://www.linux-usb.org
+S:	Supported
+
+USB ACM DRIVER
+P:	Vojtech Pavlik
+M:	vojtech@suse.cz
+L:	linux-usb-users@lists.sourceforge.net
+L:	linux-usb-devel@lists.sourceforge.net
+S:	Supported
+
+USB BLUETOOTH DRIVER
+P:	Greg Kroah-Hartman
+M:	greg@kroah.com
+L:	linux-usb-users@lists.sourceforge.net
+L:	linux-usb-devel@lists.sourceforge.net
+S:	Maintained
+W:	http://www.kroah.com/linux-usb/
+
+USB HID/HIDBP/INPUT DRIVERS
+P:	Vojtech Pavlik
+M:	vojtech@suse.cz
+L:	linux-usb-users@lists.sourceforge.net
+L:	linux-usb-devel@lists.sourceforge.net
+W:	http://www.suse.cz/development/input/
+S:	Supported
+
+USB HUB
 P:	Johannes Erdfelt
 M:	jerdfelt@sventech.com
-L:	linux-usb@suse.com
+L:	linux-usb-users@lists.sourceforge.net
+L:	linux-usb-devel@lists.sourceforge.net
 S:	Maintained
 
 USB OHCI DRIVER
-P:	Gregory P. Smith
-M:	greg@electricrain.com
-M:	greg@suitenine.com
-L:	linux-usb@suse.com
-S:	Maintained (not yet usable)
-W:	http://suitenine.com/usb/
+P:	Roman Weissgaerber
+M:	weissg@vienna.at
+L:	linux-usb-users@lists.sourceforge.net
+L:	linux-usb-devel@lists.sourceforge.net
+S:	Maintained
 
+USB OV511 DRIVER
+P:     Mark McClelland
+M:     mmcclelland@delphi.com
+L:     linux-usb-users@lists.sourceforge.net
+L:     linux-usb-devel@lists.sourceforge.net
+W:     http://alpha.dyndns.org/ov511/
+S:     Maintained
+
+USB PEGASUS DRIVER
+P:	Petko Manolov
+M:	petkan@dce.bg
+L:	linux-usb-users@lists.sourceforge.net
+L:	linux-usb-devel@lists.sourceforge.net
+S:	Maintained
+
+USB PRINTER DRIVER
+P:	Vojtech Pavlik
+M:	vojtech@suse.cz
+L:	linux-usb-users@lists.sourceforge.net
+L:	linux-usb-devel@lists.sourceforge.net
+S:	Supported
+
+USB SERIAL DIGI ACCELEPORT DRIVER
+P:	Peter Berger and Al Borchers
+M:	pberger@brimson.com
+M:	alborchers@steinerpoint.com
+L:	linux-usb-users@lists.sourceforge.net
+L:	linux-usb-devel@lists.sourceforge.net
+S:	Maintained
+
+USB SERIAL KEYSPAN DRIVER
+P:	Hugh Blemings
+M:	hugh@linuxcare.com
+L:	linux-usb-users@lists.sourceforge.net
+L:	linux-usb-devel@lists.sourceforge.net
+S:	Maintained
+W:	http://www.linuxcare.com.au/hugh/keyspan.html
+
+USB SERIAL DRIVER
+P:	Greg Kroah-Hartman
+M:	greg@kroah.com
+L:	linux-usb-users@lists.sourceforge.net
+L:	linux-usb-devel@lists.sourceforge.net
+S:	Maintained
+W:	http://www.kroah.com/linux-usb/
+
+USB MASS STORAGE DRIVER
+P:	Matthew Dharm
+M:	mdharm-usb@one-eyed-alien.net
+L:	linux-usb-users@lists.sourceforge.net
+L:	linux-usb-devel@lists.sourceforge.net
+S:	Maintained
+W:	http://www.one-eyed-alien.net/~mdharm/linux-usb/
+
+USB UHCI DRIVER
+P:	Georg Acher
+M:	usb@in.tum.de
+L:	linux-usb-users@lists.sourceforge.net
+L:	linux-usb-devel@lists.sourceforge.net
+W:	http://usb.in.tum.de
+S:	Maintained
+	
 VFAT FILESYSTEM:
 P:	Gordon Chaffee
 M:	chaffee@cs.berkeley.edu
@@ -992,9 +1135,9 @@ S:	Maintained
 
 Z8530 DRIVER FOR AX.25
 P:	Joerg Reuter
-M:	jreuter@poboxes.com
-W:	http://poboxes.com/jreuter/
-W:	http://qsl.net/dl1bke/
+M:	jreuter@yaina.de
+W:	http://yaina.de/jreuter
+W:	http://www.qsl.net/dl1bke/
 L:	linux-hams@vger.kernel.org
 S:	Maintained
 

@@ -406,8 +406,6 @@ struct proc_dir_entry proc_scsi_aha152x =
 
 /* END OF DEFINES */
 
-extern long loops_per_sec;
-
 #define DELAY_DEFAULT 100
 
 /* some additional "phases" for getphase() */
@@ -615,7 +613,7 @@ static struct signature {
 
 static void do_pause(unsigned amount)
 {				/* Pause for amount*10 milliseconds */
-	unsigned long the_time = jiffies + amount;	/* 0.01 seconds per jiffy */
+	unsigned long the_time = jiffies + (amount*HZ)/100;	/* 0.01 seconds per jiffy */
 
 	while (time_before(jiffies, the_time))
 		barrier();
@@ -1070,7 +1068,7 @@ int aha152x_detect(Scsi_Host_Template * tpnt)
 		printk("aha152x: trying software interrupt, ");
 		SETBITS(DMACNTRL0, SWINT);
 
-		the_time = jiffies + 100;
+		the_time = jiffies + HZ;
 		while (!HOSTDATA(shpnt)->swint && time_before(jiffies, the_time))
 			barrier();
 

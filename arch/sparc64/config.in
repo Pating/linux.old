@@ -1,4 +1,4 @@
-# $Id: config.in,v 1.67.2.11 2000/07/27 01:50:59 davem Exp $
+# $Id: config.in,v 1.67.2.13 2000/10/24 21:00:53 davem Exp $
 # For a description of the syntax of this configuration file,
 # see Documentation/kbuild/config-language.txt.
 #
@@ -26,12 +26,8 @@ define_bool CONFIG_VT_CONSOLE y
 
 bool 'Symmetric multi-processing support' CONFIG_SMP
 
-mainmenu_option next_comment
-comment 'Console drivers'
-bool 'PROM console' CONFIG_PROM_CONSOLE
-bool 'Support Frame buffer devices' CONFIG_FB
-source drivers/video/Config.in
-endmenu
+# Identify this as a Sparc64 build
+define_bool CONFIG_SPARC64 y
 
 # Global things across all Sun machines.
 define_bool CONFIG_SBUS y
@@ -45,6 +41,14 @@ define_bool CONFIG_SUN_CONSOLE y
 define_bool CONFIG_SUN_AUXIO y
 define_bool CONFIG_SUN_IO y
 bool 'PCI support' CONFIG_PCI
+
+mainmenu_option next_comment
+comment 'Console drivers'
+bool 'PROM console' CONFIG_PROM_CONSOLE
+bool 'Support Frame buffer devices' CONFIG_FB
+source drivers/video/Config.in
+endmenu
+
 source drivers/sbus/char/Config.in
 source drivers/sbus/audio/Config.in
 
@@ -247,9 +251,10 @@ if [ "$CONFIG_NET" = "y" ]; then
 			tristate 'EtherExpressPro/100 support' CONFIG_EEXPRESS_PRO100
 			tristate 'SysKonnect SK-98xx support' CONFIG_SK98LIN
 		fi
-#		bool 'FDDI driver support' CONFIG_FDDI
-#		if [ "$CONFIG_FDDI" = "y" ]; then
-#		fi
+		bool 'FDDI driver support' CONFIG_FDDI
+		if [ "$CONFIG_FDDI" = "y" ]; then
+			tristate '  SysKonnect FDDI PCI support' CONFIG_SKFP
+		fi
 	fi
 	endmenu
 fi
@@ -271,6 +276,12 @@ if [ "$CONFIG_VIDEO_DEV" != "n" ]; then
     dep_tristate 'BT848 Video For Linux' CONFIG_VIDEO_BT848 $CONFIG_VIDEO_DEV
   fi
 fi
+endmenu
+
+mainmenu_option next_comment
+comment 'XFree86 DRI support'
+bool 'Direct Rendering Manager (XFree86 DRI support)' CONFIG_DRM
+dep_tristate '  Creator/Creator3D' CONFIG_DRM_FFB $CONFIG_DRM
 endmenu
 
 source fs/Config.in

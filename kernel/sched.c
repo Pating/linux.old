@@ -696,6 +696,7 @@ asmlinkage void schedule(void)
 	struct task_struct *prev, *next, *p;
 	int this_cpu, c;
 
+	sti();
 	if (tq_scheduler)
 		goto handle_tq_scheduler;
 tq_scheduler_back:
@@ -1743,8 +1744,8 @@ static int setscheduler(pid_t pid, int policy,
 	/*
 	 * We play safe to avoid deadlocks.
 	 */
-	spin_lock_irq(&runqueue_lock);
-	read_lock(&tasklist_lock);
+	read_lock_irq(&tasklist_lock);
+	spin_lock(&runqueue_lock);
 
 	p = find_process_by_pid(pid);
 
@@ -1788,8 +1789,8 @@ static int setscheduler(pid_t pid, int policy,
 	current->need_resched = 1;
 
 out_unlock:
-	read_unlock(&tasklist_lock);
-	spin_unlock_irq(&runqueue_lock);
+	spin_unlock(&runqueue_lock);
+	read_unlock_irq(&tasklist_lock);
 
 out_nounlock:
 	return retval;
@@ -1930,13 +1931,21 @@ asmlinkage int sys_nanosleep(struct timespec *rqtp, struct timespec *rmtp)
 	if (t.tv_sec == 0 && t.tv_nsec <= 2000000L &&
 	    current->policy != SCHED_OTHER)
 	{
+		unsigned long delay;
+		
 		/*
 		 * Short delay requests up to 2 ms will be handled with
 		 * high precision by a busy wait for all real-time processes.
 		 *
 		 * Its important on SMP not to do this holding locks.
 		 */
-		udelay((t.tv_nsec + 999) / 1000);
+		 
+		delay=(t.tv_nsec + 999) / 1000;
+		
+		if(delay>10000)
+			mdelay(delay);
+		else
+			udelay(delay);
 		return 0;
 	}
 
@@ -2044,6 +2053,34 @@ void show_state(void)
 	for_each_task(p)
 		show_task((p->tarray_ptr - &task[0]),p);
 	read_unlock(&tasklist_lock);
+}
+
+/*
+ *      Put all the gunge required to become a kernel thread without
+ *      attached user resources in one place where it belongs.
+ */
+
+void daemonize(void)
+{
+	struct fs_struct *fs;
+
+	/*
+	 * If we were started as result of loading a module, close all of the
+	 * user space pages.  We don't need them, and if we didn't close them
+	 * they would be locked into memory.
+	 */
+	exit_mm(current);
+
+	current->session = 1;
+	current->pgrp = 1;
+
+	/* Become as one with the init task */
+
+	exit_fs(current);	/* current->fs->count--; */
+	fs = init_task.fs;
+	current->fs = fs;
+	atomic_inc(&fs->count);
+
 }
 
 void __init init_idle(void)

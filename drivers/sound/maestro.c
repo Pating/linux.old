@@ -210,11 +210,8 @@
 #include <linux/version.h>
 #include <linux/module.h>
 
-#define DECLARE_WAITQUEUE(QUEUE,INIT) struct wait_queue QUEUE = {INIT, NULL}
-#define wait_queue_head_t struct wait_queue *
 #define SILLY_PCI_BASE_ADDRESS(PCIDEV) (PCIDEV->base_address[0] & PCI_BASE_ADDRESS_IO_MASK)
 #define SILLY_INIT_SEM(SEM) SEM=MUTEX;
-#define init_waitqueue_head init_waitqueue
 #define SILLY_MAKE_INIT(FUNC) __initfunc(FUNC)
 #define SILLY_OFFSET(VMA) ((VMA)->vm_offset)
 
@@ -1965,6 +1962,7 @@ mixer_push_state(struct ess_card *card)
 static int mixer_ioctl(struct ess_card *card, unsigned int cmd, unsigned long arg)
 {
 	int i, val=0;
+       unsigned long flags;
 
 	VALIDATE_CARD(card);
         if (cmd == SOUND_MIXER_INFO) {
@@ -1987,19 +1985,19 @@ static int mixer_ioctl(struct ess_card *card, unsigned int cmd, unsigned long ar
 	if (cmd == OSS_GETVERSION)
 		return put_user(SOUND_VERSION, (int *)arg);
 
-	if (_IOC_TYPE(cmd) != 'M' || _IOC_SIZE(cmd) != sizeof(int))
+	if (_IOC_TYPE(cmd) != 'M' || _SIOC_SIZE(cmd) != sizeof(int))
                 return -EINVAL;
 
-        if (_IOC_DIR(cmd) == _IOC_READ) {
+        if (_SIOC_DIR(cmd) == _SIOC_READ) {
                 switch (_IOC_NR(cmd)) {
                 case SOUND_MIXER_RECSRC: /* give them the current record source */
 
 			if(!card->mix.recmask_io) {
 				val = 0;
 			} else {
-				spin_lock(&card->lock);
+                               spin_lock_irqsave(&card->lock, flags);
 				val = card->mix.recmask_io(card,1,0);
-				spin_unlock(&card->lock);
+                               spin_unlock_irqrestore(&card->lock, flags);
 			}
 			break;
 			
@@ -2026,9 +2024,9 @@ static int mixer_ioctl(struct ess_card *card, unsigned int cmd, unsigned long ar
 				return -EINVAL;
 
 			/* do we ever want to touch the hardware? */
-/*			spin_lock(&card->lock);
+/*                     spin_lock_irqsave(&card->lock, flags);
 			val = card->mix.read_mixer(card,i);
-			spin_unlock(&card->lock);*/
+                       spin_unlock_irqrestore(&card->lock, flags);*/
 
 			val = card->mix.mixer_state[i];
 /*			M_printk("returned 0x%x for mixer %d\n",val,i);*/
@@ -2038,7 +2036,7 @@ static int mixer_ioctl(struct ess_card *card, unsigned int cmd, unsigned long ar
 		return put_user(val,(int *)arg);
 	}
 	
-        if (_IOC_DIR(cmd) != (_IOC_WRITE|_IOC_READ))
+        if (_SIOC_DIR(cmd) != (_SIOC_WRITE|_SIOC_READ))
 		return -EINVAL;
 	
 	card->mix.modcnt++;
@@ -2052,9 +2050,9 @@ static int mixer_ioctl(struct ess_card *card, unsigned int cmd, unsigned long ar
 		if(!val) return 0;
 		if(! (val &= card->mix.record_sources)) return -EINVAL;
 
-		spin_lock(&card->lock);
+               spin_lock_irqsave(&card->lock, flags);
 		card->mix.recmask_io(card,0,val);
-		spin_unlock(&card->lock);
+               spin_unlock_irqrestore(&card->lock, flags);
 		return 0;
 
 	default:
@@ -2063,9 +2061,9 @@ static int mixer_ioctl(struct ess_card *card, unsigned int cmd, unsigned long ar
 		if ( ! supported_mixer(card,i)) 
 			return -EINVAL;
 
-		spin_lock(&card->lock);
+               spin_lock_irqsave(&card->lock, flags);
 		set_mixer(card,i,val);
-		spin_unlock(&card->lock);
+               spin_unlock_irqrestore(&card->lock, flags);
 
 		return 0;
 	}

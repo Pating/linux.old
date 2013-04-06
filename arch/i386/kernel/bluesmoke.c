@@ -22,7 +22,7 @@ void mcheck_fault(void)
 	if(mcgstl&(1<<0))	/* Recoverable ? */
 		recover=0;
 
-	printk(KERN_EMERG "CPU %d: Machine Check Exception: %08x%08x", smp_processor_id(), mcgstl, mcgsth);
+	printk(KERN_EMERG "CPU %d: Machine Check Exception: %08x%08x\n", smp_processor_id(), mcgsth, mcgstl);
 	
 	for(i=0;i<banks;i++)
 	{
@@ -37,7 +37,7 @@ void mcheck_fault(void)
 			high&=~(1<<31);
 			if(high&(1<<27))
 			{
-				rdmsr(0x402+i*4, alow, ahigh);
+				rdmsr(0x403+i*4, alow, ahigh);
 				printk("[%08x%08x]", alow, ahigh);
 			}
 			if(high&(1<<26))
@@ -46,7 +46,10 @@ void mcheck_fault(void)
 				printk(" at %08x%08x", 
 					high, low);
 			}
-			wrmsr(0x401+i*4, low, high);
+			/* Clear it */
+			wrmsr(0x401+i*4, 0UL, 0UL);
+			/* Serialize */
+			mb();
 		}
 	}
 	

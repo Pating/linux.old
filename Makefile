@@ -1,6 +1,6 @@
 VERSION = 2
 PATCHLEVEL = 2
-SUBLEVEL = 17
+SUBLEVEL = 18
 EXTRAVERSION =
 
 ARCH := $(shell uname -m | sed -e s/i.86/i386/ -e s/sun4u/sparc64/ -e s/arm.*/arm/ -e s/sa110/arm/)
@@ -22,7 +22,15 @@ CROSS_COMPILE 	=
 
 AS	=$(CROSS_COMPILE)as
 LD	=$(CROSS_COMPILE)ld
-CC	=$(CROSS_COMPILE)cc -D__KERNEL__ -I$(HPATH)
+#
+#	foo-bar-gcc for cross builds
+#	gcc272 for Debian's old compiler for kernels
+#	kgcc for Conectiva and Red Hat 7
+#	otherwise 'cc'
+#
+CC	=$(shell if [ -n "$(CROSS_COMPILE)" ]; then echo $(CROSS_COMPILE)gcc; else \
+	$(CONFIG_SHELL) scripts/kwhich gcc272 2>/dev/null || $(CONFIG_SHELL) scripts/kwhich kgcc 2>/dev/null || echo cc; fi) \
+	-D__KERNEL__ -I$(HPATH)
 CPP	=$(CC) -E
 AR	=$(CROSS_COMPILE)ar
 NM	=$(CROSS_COMPILE)nm
@@ -111,7 +119,7 @@ CORE_FILES	=kernel/kernel.o mm/mm.o fs/fs.o ipc/ipc.o
 FILESYSTEMS	=fs/filesystems.a
 NETWORKS	=net/network.a
 DRIVERS		=drivers/block/block.a \
-		 drivers/char/char.a \
+		 drivers/char/char.o \
 	         drivers/misc/misc.a
 LIBS		=$(TOPDIR)/lib/lib.a
 SUBDIRS		=kernel drivers mm fs net ipc lib
@@ -135,7 +143,7 @@ DRIVERS := $(DRIVERS) drivers/cdrom/cdrom.a
 endif
 
 ifeq ($(CONFIG_SOUND),y)
-DRIVERS := $(DRIVERS) drivers/sound/sound.a
+DRIVERS := $(DRIVERS) drivers/sound/sounddrivers.o
 endif
 
 ifdef CONFIG_PCI
@@ -162,8 +170,8 @@ ifeq ($(CONFIG_NET_FC),y)
 DRIVERS := $(DRIVERS) drivers/net/fc/fc.a
 endif
 
-ifdef CONFIG_PPC
-DRIVERS := $(DRIVERS) drivers/macintosh/macintosh.a
+ifdef CONFIG_POWERMAC
+DRIVERS := $(DRIVERS) drivers/macintosh/macintosh.o
 endif
 
 ifdef CONFIG_PNP
@@ -191,7 +199,7 @@ DRIVERS := $(DRIVERS) drivers/tc/tc.a
 endif
 
 ifeq ($(CONFIG_USB),y)
-DRIVERS := $(DRIVERS) drivers/usb/usb.a
+DRIVERS := $(DRIVERS) drivers/usb/usbdrv.o
 endif
 
 ifeq ($(CONFIG_I2O),y)
@@ -327,6 +335,7 @@ modules_install:
 	MODLIB=$(INSTALL_MOD_PATH)/lib/modules/$(KERNELRELEASE); \
 	mkdir -p $$MODLIB; \
 	rm -f $$MODLIB/build; \
+	[ `/sbin/insmod -V 2>&1 | head -1 | awk '/^insmod version /{split($$3, a, /\./); printf "%d%03d%03d\n", a[1], a[2], a[3];}'`0 -ge 20030140 ] && \
 	ln -s `pwd` $$MODLIB/build; \
 	cd modules; \
 	MODULES=""; \
@@ -348,7 +357,10 @@ modules_install:
 	if [ -f VIDEO_MODULES ]; then inst_mod VIDEO_MODULES video; fi; \
 	if [ -f FC4_MODULES   ]; then inst_mod FC4_MODULES   fc4;   fi; \
 	if [ -f IRDA_MODULES  ]; then inst_mod IRDA_MODULES  net;   fi; \
+	if [ -f USB_MODULES   ]; then inst_mod USB_MODULES   usb;   fi; \
+	if [ -f USB_SERIAL_MODULES ]; then inst_mod USB_SERIAL_MODULES usb; fi; \
 	if [ -f SK98LIN_MODULES ]; then inst_mod SK98LIN_MODULES  net;   fi; \
+	if [ -f SKFP_MODULES ]; then inst_mod SKFP_MODULES   net;   fi; \
 	\
 	for f in *.o; do [ -r $$f ] && echo $$f; done | sort > $$MODLIB/.allmods; \
 	echo $$MODULES | tr ' ' '\n' | sort | comm -23 $$MODLIB/.allmods - > $$MODLIB/.misc; \

@@ -20,6 +20,7 @@
 
 extern void dump_thread(struct pt_regs *, struct user *);
 extern int dump_fpu(elf_fpregset_t *);
+extern spinlock_t rtc_lock;
 
 #if defined(CONFIG_BLK_DEV_IDE) || defined(CONFIG_BLK_DEV_HD) || defined(CONFIG_BLK_DEV_IDE_MODULE) || defined(CONFIG_BLK_DEV_HD_MODULE)
 extern struct drive_info_struct drive_info;
@@ -41,7 +42,7 @@ EXPORT_SYMBOL(enable_irq);
 EXPORT_SYMBOL(disable_irq);
 EXPORT_SYMBOL(disable_irq_nosync);
 EXPORT_SYMBOL(kernel_thread);
-
+EXPORT_SYMBOL(rtc_lock);
 EXPORT_SYMBOL(init_mm);
 
 EXPORT_SYMBOL_NOVERS(__down_failed);
@@ -119,3 +120,4 @@ EXPORT_SYMBOL(mca_is_adapter_used);
 #ifdef CONFIG_VT
 EXPORT_SYMBOL(screen_info);
 #endif
+

@@ -31,6 +31,7 @@
 #include <linux/errno.h>
 #include <linux/init.h>
 #include <linux/netlink.h>
+#include <linux/divert.h>
 
 #define	NEXT_DEV	NULL
 
@@ -114,6 +115,7 @@ extern int etherh_probe (struct device *dev);
 extern int am79c961_probe(struct device *dev);
 extern int epic100_probe(struct device *dev);
 extern int rtl8139_probe(struct device *dev);
+extern int rtl8139too_probe(struct device *dev);
 extern int sis900_probe(struct device *dev);
 extern int hplance_probe(struct device *dev);
 extern int bagetlance_probe(struct device *);
@@ -140,6 +142,7 @@ extern int de620_probe(struct device *);
 /* FDDI adapters */
 extern int dfx_probe(struct device *dev);
 extern int apfddi_init(struct device *dev);
+extern int skfp_probe(struct device *dev);
 
 /* HIPPI boards */
 extern int rr_hippi_probe(struct device *);
@@ -171,13 +174,35 @@ __initfunc(static int probe_list(struct device *dev, struct devprobe *plist))
 	struct devprobe *p = plist;
 	unsigned long base_addr = dev->base_addr;
 
+#ifdef CONFIG_NET_DIVERT
+	int	ret;
+#endif
+
 	while (p->probe != NULL) {
 		if (base_addr && p->probe(dev) == 0)	/* probe given addr */
+#ifdef CONFIG_NET_DIVERT
+		{
+			ret=alloc_divert_blk(dev);
+			if (ret)
+				return ret;
 			return 0;
+		}
+#else
+			return 0;
+#endif
 		else if (p->status == 0) {		/* has autoprobe failed yet? */
 			p->status = p->probe(dev);	/* no, try autoprobe */
 			if (p->status == 0)
+#ifdef CONFIG_NET_DIVERT
+			{
+				ret=alloc_divert_blk(dev);
+				if (ret)
+					return ret;
 				return 0;
+			}
+#else
+				return 0;
+#endif
 		}
 		p++;
 	}
@@ -225,6 +250,9 @@ struct devprobe pci_probes[] __initdata = {
 #endif
 #ifdef CONFIG_RTL8139
 	{rtl8139_probe, 0},
+#endif
+#ifdef CONFIG_RTL8139TOO
+	{rtl8139too_probe, 0},
 #endif
 #ifdef CONFIG_SIS900
 	{sis900_probe, 0},
@@ -583,6 +611,9 @@ __initfunc(static int fddiif_probe(struct device *dev))
 #endif
 #ifdef CONFIG_APFDDI
 	&& apfddi_init(dev)
+#endif
+#ifdef CONFIG_SKFP
+	&& skfp_probe(dev)
 #endif
 	&& 1 ) {
 	    return 1;	/* -ENODEV or -EAGAIN would be more accurate. */

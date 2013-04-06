@@ -296,7 +296,8 @@ struct task_struct {
 	gid_t gid,egid,sgid,fsgid;
 	int ngroups;
 	gid_t	groups[NGROUPS];
-        kernel_cap_t   cap_effective, cap_inheritable, cap_permitted;
+	kernel_cap_t   cap_effective, cap_inheritable, cap_permitted;
+	int keep_capabilities:1;
 	struct user_struct *user;
 /* limits */
 	struct rlimit rlim[RLIM_NLIMITS];
@@ -385,7 +386,8 @@ struct task_struct {
 /* process credentials */					\
 /* uid etc */	0,0,0,0,0,0,0,0,				\
 /* suppl grps*/ 0, {0,},					\
-/* caps */      CAP_INIT_EFF_SET,CAP_INIT_INH_SET,CAP_FULL_SET, \
+/* caps */	CAP_INIT_EFF_SET,CAP_INIT_INH_SET,CAP_FULL_SET, \
+/* keep_caps */	0,						\
 /* user */	NULL,						\
 /* rlimits */   INIT_RLIMITS, \
 /* math */	0, \
@@ -496,6 +498,13 @@ extern void FASTCALL(wake_up_process(struct task_struct * tsk));
 
 #define wake_up(x)			__wake_up((x),TASK_UNINTERRUPTIBLE | TASK_INTERRUPTIBLE)
 #define wake_up_interruptible(x)	__wake_up((x),TASK_INTERRUPTIBLE)
+
+#define __set_current_state(state_value)	do { current->state = state_value; } while (0)
+#ifdef __SMP__
+#define set_current_state(state_value)		do { __set_current_state(state_value); mb(); } while (0)
+#else
+#define set_current_state(state_value)		__set_current_state(state_value)
+#endif
 
 extern int in_group_p(gid_t grp);
 extern int in_egroup_p(gid_t grp);
@@ -687,6 +696,8 @@ extern void exit_mm(struct task_struct *);
 extern void exit_fs(struct task_struct *);
 extern void exit_files(struct task_struct *);
 extern void exit_sighand(struct task_struct *);
+
+extern void daemonize(void);
 
 extern int do_execve(char *, char **, char **, struct pt_regs *);
 extern int do_fork(unsigned long, unsigned long, struct pt_regs *);

@@ -5,7 +5,7 @@
  *
  *		PF_INET protocol family socket handler.
  *
- * Version:	$Id: af_inet.c,v 1.87.2.6 2000/01/13 04:28:16 davem Exp $
+ * Version:	$Id: af_inet.c,v 1.87.2.11 2000/10/24 21:28:46 davem Exp $
  *
  * Authors:	Ross Biro, <bir7@leland.Stanford.Edu>
  *		Fred N. van Kempen, <waltje@uWalt.NL.Mugnet.ORG>
@@ -109,6 +109,11 @@
 #ifdef CONFIG_BRIDGE
 #include <net/br.h>
 #endif
+ 
+#ifdef CONFIG_NET_DIVERT
+#include <linux/divert.h>
+#endif /* CONFIG_NET_DIVERT */
+ 
 #ifdef CONFIG_KMOD
 #include <linux/kmod.h>
 #endif
@@ -536,7 +541,8 @@ static int inet_bind(struct socket *sock, struct sockaddr *uaddr, int addr_len)
 	snum = ntohs(addr->sin_port);
 #ifdef CONFIG_IP_MASQUERADE
 	/* The kernel masquerader needs some ports. */
-	if((snum >= PORT_MASQ_BEGIN) && (snum <= PORT_MASQ_END))
+	if((snum >= PORT_MASQ_BEGIN) && (snum <= PORT_MASQ_END) && 
+	   chk_addr_ret != RTN_MULTICAST)
 		return -EADDRINUSE;
 #endif		 
 	if (snum && snum < PROT_SOCK && !capable(CAP_NET_BIND_SERVICE))
@@ -912,6 +918,14 @@ static int inet_ioctl(struct socket *sock, unsigned int cmd, unsigned long arg)
 			return -ENOPKG;
 #endif						
 			
+		case SIOCGIFDIVERT:
+		case SIOCSIFDIVERT:
+#ifdef CONFIG_NET_DIVERT
+			return(divert_ioctl(cmd, (struct divert_cf *) arg));
+#else
+			return -ENOPKG;
+#endif	/* CONFIG_NET_DIVERT */
+
 		case SIOCADDDLCI:
 		case SIOCDELDLCI:
 #ifdef CONFIG_DLCI

@@ -5,7 +5,7 @@
 
 SUB_DIRS     := 
 MOD_SUB_DIRS := $(SUB_DIRS)
-ALL_SUB_DIRS := $(SUB_DIRS) hamradio irda fc sk98lin lmc
+ALL_SUB_DIRS := $(SUB_DIRS) hamradio irda fc sk98lin lmc skfp
 
 L_TARGET := net.a
 L_OBJS   :=
@@ -109,6 +109,11 @@ endif
 
 ifeq ($(CONFIG_DAYNAPORT), y)
 L_OBJS += daynaport.o
+CONFIG_8390_BUILTIN = y
+endif
+
+ifeq ($(CONFIG_MAC8390), y)
+L_OBJS += mac8390.o
 CONFIG_8390_BUILTIN = y
 endif
 
@@ -580,6 +585,14 @@ else
   endif
 endif
 
+ifeq ($(CONFIG_RTL8139TOO),y)
+L_OBJS += 8139too.o
+else
+  ifeq ($(CONFIG_RTL8139TOO),m)
+  M_OBJS += 8139too.o
+  endif
+endif
+
 ifeq ($(CONFIG_SIS900),y)
 L_OBJS += sis900.o
 else
@@ -620,6 +633,16 @@ ifeq ($(CONFIG_SK98LIN),y)
 else
   ifeq ($(CONFIG_SK98LIN),m)
     MOD_IN_SUB_DIRS += sk98lin
+  endif
+endif
+
+ifeq ($(CONFIG_SKFP),y)
+  SUB_DIRS += skfp
+  MOD_IN_SUB_DIRS += skfp
+  L_OBJS += skfp/skfp.o
+else
+  ifeq ($(CONFIG_SKFP),m)
+    MOD_IN_SUB_DIRS += skfp
   endif
 endif
 
@@ -958,6 +981,16 @@ else
   endif
 endif
 
+ifeq ($(CONFIG_XPEED),y)
+  SUB_DIRS += xpds
+  MOD_IN_SUB_DIRS += xpds
+  L_OBJS += xpds/xpds-fr.o
+else
+  ifeq ($(CONFIG_XPEED),m)
+    MOD_IN_SUB_DIRS += xpds
+  endif
+endif
+
 # If anything built-in uses Z85230, then build it into the kernel also.
 # If not, but a module uses it, build as a module.
 
@@ -1083,6 +1116,17 @@ else
   M_OBJS += hplance.o
   endif
 endif
+
+ifeq ($(CONFIG_MVME147_NET),y)
+L_OBJS += mvme147.o
+CONFIG_7990_BUILTIN = y
+else
+  ifeq ($(CONFIG_MVME147_NET),m)
+  CONFIG_7990_MODULE = y
+  M_OBJS += mvme147.o
+  endif
+endif
+
 # If we need generic LANCE support, either in the kernel or as a module,
 # build it in the appropriate way.
 ifdef CONFIG_7990_BUILTIN
@@ -1215,6 +1259,14 @@ else
   endif
 endif
 
+ifeq ($(CONFIG_MAC89x0),y)
+L_OBJS += mac89x0.o
+else
+  ifeq ($(CONFIG_MAC89x0),m)
+  M_OBJS += mac89x0.o
+  endif
+endif
+
 ifeq ($(CONFIG_LTPC),y)
 L_OBJS += ltpc.o
 else
@@ -1252,6 +1304,18 @@ L_OBJS += mace.o
 else
   ifeq ($(CONFIG_MACE),m)
   M_OBJS += mace.o
+  endif
+endif
+
+ifeq ($(CONFIG_MACMACE),y)
+L_OBJS += macmace.o
+endif
+
+ifeq ($(CONFIG_MACSONIC),y)
+L_OBJS += macsonic.o
+else
+  ifeq ($(CONFIG_MACSONIC),m)
+  M_OBJS += macsonic.o
   endif
 endif
 

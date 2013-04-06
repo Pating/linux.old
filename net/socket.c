@@ -579,7 +579,7 @@ int sock_create(int family, int type, int protocol, struct socket **res)
 	 *	Check protocol is in range
 	 */
 	if(family<0||family>=NPROTO)
-		return -EINVAL;
+		return -EAFNOSUPPORT;
 		
 #if defined(CONFIG_KMOD) && defined(CONFIG_NET)
 	/* Attempt to load a protocol module if the find failed. 
@@ -597,7 +597,7 @@ int sock_create(int family, int type, int protocol, struct socket **res)
 #endif
 
 	if (net_families[family]==NULL)
-		return -EINVAL;
+		return -EAFNOSUPPORT;
 
 /*
  *	Check that this is a type that we know how to manipulate and
@@ -1165,7 +1165,6 @@ asmlinkage int sys_sendmsg(int fd, struct msghdr *msg, unsigned flags)
 			/* Note - when this code becomes multithreaded on
 			 * SMP machines you have a race to fix here.
 			 */
-			err = -ENOBUFS;
 			ctl_buf = sock_kmalloc(sock->sk, ctl_len, GFP_KERNEL);
 			if (ctl_buf == NULL) 
 				goto out_freeiov;

@@ -43,6 +43,9 @@ dep_tristate 'BusLogic SCSI support' CONFIG_SCSI_BUSLOGIC $CONFIG_SCSI
 if [ "$CONFIG_SCSI_BUSLOGIC" != "n" ]; then
     bool '  Omit FlashPoint support' CONFIG_SCSI_OMIT_FLASHPOINT
 fi
+if [ "$CONFIG_PCI" = "y" ]; then
+  dep_tristate 'Compaq Fibre Channel 64-bit/66Mhz HBA support' CONFIG_SCSI_CPQFCTS $CONFIG_SCSI
+fi
 dep_tristate 'DTC3180/3280 SCSI support' CONFIG_SCSI_DTC3280 $CONFIG_SCSI
 dep_tristate 'EATA ISA/EISA/PCI (DPT and generic EATA/DMA-compliant boards) support' CONFIG_SCSI_EATA $CONFIG_SCSI
   if [ "$CONFIG_SCSI_EATA" != "n" ]; then
@@ -94,7 +97,6 @@ if [ "$CONFIG_PCI" = "y" -a "$CONFIG_SCSI_NCR53C7xx" != "y" ]; then
     int  '  default tagged command queue depth' CONFIG_SCSI_NCR53C8XX_DEFAULT_TAGS 8
     int  '  maximum number of queued commands' CONFIG_SCSI_NCR53C8XX_MAX_TAGS 32
     int  '  synchronous transfers frequency in MHz' CONFIG_SCSI_NCR53C8XX_SYNC 20
-    bool '  enable profiling' CONFIG_SCSI_NCR53C8XX_PROFILE
     bool '  use normal IO' CONFIG_SCSI_NCR53C8XX_IOMAPPED
     if [ "$CONFIG_SCSI_SYM53C8XX" != "n" ]; then
       bool '  include support for the NCR PQS/PDS SCSI card' CONFIG_SCSI_NCR53C8XX_PQS_PDS

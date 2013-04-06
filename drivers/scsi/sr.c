@@ -20,7 +20,7 @@
  *          Modified by Gerd Knorr <kraxel@cs.tu-berlin.de> to support the
  *          generic cdrom interface
  *
- *       Modified by Jens Axboe <axboe@image.dk> - Uniform sr_packet()
+ *       Modified by Jens Axboe <axboe@suse.de> - Uniform sr_packet()
  *       interface, capabilities probe additions, ioctl cleanups, etc.
  *
  *	Modified by Jens Axboe <axboe@suse.de> - support DVD-RAM
@@ -1213,6 +1213,8 @@ static void sr_detach(Scsi_Device * SDp)
 			cpnt->device = NULL;
 			cpnt->capacity = 0;
 			SDp->attached--;
+                        if (SDp->scsi_request_fn == do_sr_request)
+                                SDp->scsi_request_fn = NULL;
 			sr_template.nr_dev--;
 			sr_template.dev_noticed--;
 			sr_sizes[i] = 0;

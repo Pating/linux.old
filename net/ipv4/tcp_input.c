@@ -5,7 +5,7 @@
  *
  *		Implementation of the Transmission Control Protocol(TCP).
  *
- * Version:	$Id: tcp_input.c,v 1.164.2.15 2000/05/27 04:01:49 davem Exp $
+ * Version:	$Id: tcp_input.c,v 1.164.2.18 2000/12/08 20:29:33 davem Exp $
  *
  * Authors:	Ross Biro, <bir7@leland.Stanford.Edu>
  *		Fred N. van Kempen, <waltje@uWalt.NL.Mugnet.ORG>
@@ -187,7 +187,7 @@ static __inline__ void tcp_rtt_estimator(struct tcp_opt *tp, __u32 mrtt)
 
 static __inline__ void tcp_set_rto(struct tcp_opt *tp)
 {
-	tp->rto = (tp->srtt >> 3) + tp->mdev;
+	tp->rto = (tp->srtt >> 3) + max(HZ/5, tp->mdev);
 	tp->rto += (tp->rto >> 2) + (tp->rto >> (tp->snd_cwnd-1));
 }
  
@@ -367,16 +367,16 @@ void tcp_parse_options(struct sock *sk, struct tcphdr *th, struct tcp_opt *tp, i
 
 		switch (opcode) {
 			case TCPOPT_EOL:
-				return;
+				goto check_syn;
 			case TCPOPT_NOP:	/* Ref: RFC 793 section 3.1 */
 				length--;
 				continue;
 			default:
 				opsize=*ptr++;
 				if (opsize < 2) /* "silly options" */
-					return;
+					goto check_syn;
 				if (opsize > length)
-					break;	/* don't parse partial options */
+					goto check_syn;	/* don't parse partial options */
 	  			switch(opcode) {
 				case TCPOPT_MSS:
 					if(opsize==TCPOLEN_MSS && th->syn) {
@@ -439,7 +439,8 @@ void tcp_parse_options(struct sock *sk, struct tcphdr *th, struct tcp_opt *tp, i
 	  			length-=opsize;
 	  	};
 	}
-	if(th->syn && saw_mss == 0)
+check_syn:
+	if (th->syn && saw_mss == 0)
 		tp->mss_clamp = 536;
 }
 

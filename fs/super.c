@@ -187,9 +187,9 @@ int register_filesystem(struct file_system_type * fs)
         return 0;
 }
 
-#ifdef CONFIG_MODULES
 int unregister_filesystem(struct file_system_type * fs)
 {
+#ifdef CONFIG_MODULES
 	struct file_system_type ** tmp;
 
 	tmp = &file_systems;
@@ -201,9 +201,9 @@ int unregister_filesystem(struct file_system_type * fs)
 		}
 		tmp = &(*tmp)->next;
 	}
+#endif
 	return -EINVAL;
 }
-#endif
 
 static int fs_index(const char * __name)
 {
@@ -304,8 +304,10 @@ static struct proc_nfs_info {
 	{ NFS_MOUNT_SOFT, ",soft" },
 	{ NFS_MOUNT_INTR, ",intr" },
 	{ NFS_MOUNT_POSIX, ",posix" },
+	{ NFS_MOUNT_TCP, ",tcp" },
 	{ NFS_MOUNT_NOCTO, ",nocto" },
 	{ NFS_MOUNT_NOAC, ",noac" },
+	{ NFS_MOUNT_NONLM, ",nolock" },
 	{ 0, NULL }
 };
 
@@ -330,6 +332,8 @@ int get_filesystem_info( char *buf )
 		}
 		if (!strcmp("nfs", tmp->mnt_sb->s_type->name)) {
 			nfss = &tmp->mnt_sb->u.nfs_sb.s_server;
+			len += sprintf(buf+len, ",v%d", nfss->rpc_ops->version);
+
 			if (nfss->rsize != NFS_DEF_FILE_IO_BUFFER_SIZE) {
 				len += sprintf(buf+len, ",rsize=%d",
 					       nfss->rsize);
@@ -562,6 +566,7 @@ static struct super_block * read_super(kdev_t dev,const char *name,int flags,
 	s->s_flags = flags;
 	s->s_dirt = 0;
 	sema_init(&s->s_vfs_rename_sem,1);
+	sema_init(&s->s_nfsd_free_path_sem,1);
 	/* N.B. Should lock superblock now ... */
 	if (!type->read_super(s, data, silent))
 		goto out_fail;
@@ -1150,6 +1155,7 @@ void __init mount_root(void)
 			sb->s_dev = get_unnamed_dev();
 			sb->s_flags = root_mountflags;
 			sema_init(&sb->s_vfs_rename_sem,1);
+			sema_init(&sb->s_nfsd_free_path_sem,1);
 			vfsmnt = add_vfsmnt(sb, "/dev/root", "/");
 			if (vfsmnt) {
 				if (nfs_root_mount(sb) >= 0) {

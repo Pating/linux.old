@@ -137,7 +137,7 @@ __initfunc(void vmpoff_setup(char *str, char *ints))
 #ifndef CONFIG_SMP
 void machine_restart(char * __unused)
 {
-  reipl(S390_lowcore.ipl_device); 
+        reipl(S390_lowcore.ipl_device); 
 }
 
 void machine_halt(void)
@@ -145,14 +145,14 @@ void machine_halt(void)
         if (MACHINE_IS_VM && strlen(vmhalt_cmd) > 0) 
                 cpcmd(vmhalt_cmd, NULL, 0);
         signal_processor(smp_processor_id(), sigp_stop_and_store_status);
-        }
+}
 
 void machine_power_off(void)
 {
         if (MACHINE_IS_VM && strlen(vmpoff_cmd) > 0)
                 cpcmd(vmpoff_cmd, NULL, 0);
         signal_processor(smp_processor_id(), sigp_stop_and_store_status);
-        }
+}
 #endif
 
 /*
@@ -177,7 +177,7 @@ void tod_wait(unsigned long delay)
 __initfunc(void setup_arch(char **cmdline_p,
         unsigned long * memory_start_p, unsigned long * memory_end_p))
 {
-        static unsigned int smptrap=0;
+        static unsigned int smptrap = 0;
         unsigned long memory_start, memory_end;
         char c, cn, *to, *from;
 
@@ -332,8 +332,8 @@ int get_cpuinfo(char * buffer)
         p += sprintf(p,"vendor_id       : IBM/S390\n"
                        "# processors    : %i\n"
                        "bogomips per cpu: %lu.%02lu\n",
-                       smp_num_cpus, loops_per_sec/500000,
-                       (loops_per_sec/5000)%100);
+                       smp_num_cpus, loops_per_jiffy/(500000/HZ),
+                       (loops_per_jiffy/(5000/HZ)) % 100);
         for (i = 0; i < smp_num_cpus; i++) {
                 cpuinfo = &safe_get_cpu_lowcore(i).cpu_data;
                 p += sprintf(p,"processor %i: "

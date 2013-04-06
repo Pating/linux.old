@@ -16,19 +16,29 @@
  *  Intel Mobile Pentium II detection fix. Sean Gilley, June 1999.
  *
  *  IDT Winchip tweaks, misc clean ups.
- *	Dave Jones <dave@powertweak.com>, August 1999
+ *	Dave Jones <davej@suse.de>, August 1999
  *
  *	Added proper L2 cache detection for Coppermine
  *	Dragan Stancevic <visitor@valinux.com>, October 1999
  *
  *	Improved Intel cache detection.
- *	Dave Jones <dave@powertweak.com>, October 1999
+ *	Dave Jones <davej@suse.de>, October 1999
  *
  *	Added proper Cascades CPU and L2 cache detection for Cascades
  *	and 8-way type cache happy bunch from Intel:^)
  *	Dragan Stancevic <visitor@valinux.com>, May 2000
  *
  *	Transmeta CPU detection.  H. Peter Anvin <hpa@zytor.com>, May 2000
+ *
+ *	Cleaned up get_model_name(), AMD_model(), added display_cacheinfo().
+ *	Dave Jones <davej@suse.de>, September 2000
+ *
+ *	Added Cyrix III initial detection code
+ *	Alan Cox <alan@redhat.com>, Septembr 2000
+ *
+ *      Improve cache size calculation
+ *      Asit Mallick <asit.k.mallick@intel.com>, October 2000
+ *      Andrew Ip <aip@turbolinux.com>, October 2000
  */
 
 /*
@@ -428,19 +438,16 @@ __initfunc(void setup_arch(char **cmdline_p,
 	conswitchp = &dummy_con;
 #endif
 #endif
-	/*
-	 *	Check the bugs that will bite us before we get booting
-	 */
-
 }
+
 
 __initfunc(static int get_model_name(struct cpuinfo_x86 *c))
 {
-	unsigned int n, dummy, *v, ecx, edx;
+	unsigned int n, dummy, *v;
 
 	/* 
 	 * Actually we must have cpuid or we could never have
-	 * figured out that this was AMD/Cyrix/Transmeta
+	 * figured out that this was AMD/Centaur/Cyrix/Transmeta
 	 * from the vendor info :-).
 	 */
 
@@ -454,48 +461,43 @@ __initfunc(static int get_model_name(struct cpuinfo_x86 *c))
 	cpuid(0x80000004, &v[8], &v[9], &v[10], &v[11]);
 	c->x86_model_id[48] = 0;
 	
-	switch(c->x86_vendor)
-	{
-	case X86_VENDOR_AMD:
-		/*  Set MTRR capability flag if appropriate  */
-		if(boot_cpu_data.x86 == 5) {
-			if((boot_cpu_data.x86_model == 9) ||
-			   ((boot_cpu_data.x86_model == 8) && 
-			    (boot_cpu_data.x86_mask >= 8)))
-				c->x86_capability |= X86_FEATURE_MTRR;
-		}
-
-		/* Fall through */
-
-	case X86_VENDOR_TRANSMETA:
-		/* Cache information */
-		if (n >= 0x80000005){
-			cpuid(0x80000005, &dummy, &dummy, &ecx, &edx);
-			printk("CPU: L1 I Cache: %dK  L1 D Cache: %dK\n",
-				ecx>>24, edx>>24);
-			c->x86_cache_size=(ecx>>24)+(edx>>24);
-		}
-		if(boot_cpu_data.x86_vendor == X86_VENDOR_AMD &&
-			boot_cpu_data.x86 == 6 && 
-			boot_cpu_data.x86_model== 3 &&
-			boot_cpu_data.x86_mask == 0)
-		{
-			/* AMD errata T13 (order #21922) */
-			printk("CPU: L2 Cache: 64K\n");
-			c->x86_cache_size = 64;
-		}
-		else if (n >= 0x80000006){
-			cpuid(0x80000006, &dummy, &dummy, &ecx, &edx);
-			printk("CPU: L2 Cache: %dK\n", ecx>>16);
-			c->x86_cache_size = ecx>>16;
-		}
-		break;
-
-	default:		/* Cyrix */
-		break;
-	}
 	return 1;
 }
+
+
+__initfunc (static void display_cacheinfo(struct cpuinfo_x86 *c))
+{
+	unsigned int n, dummy, ecx, edx;
+
+	cpuid(0x80000000, &n, &dummy, &dummy, &dummy);
+
+	if (n >= 0x80000005){
+		cpuid(0x80000005, &dummy, &dummy, &ecx, &edx);
+		printk("CPU: L1 I Cache: %dK  L1 D Cache: %dK\n",
+			ecx>>24, edx>>24);
+		c->x86_cache_size=(ecx>>24)+(edx>>24);
+	}
+
+	/* Yes this can occur - the CyrixIII just has a large L1 */
+	if (n < 0x80000006)
+		return;	/* No function to get L2 info */
+
+	cpuid(0x80000006, &dummy, &dummy, &ecx, &edx);
+	c->x86_cache_size = ecx>>16;
+
+	/* AMD errata T13 (order #21922) */
+	if(boot_cpu_data.x86_vendor == X86_VENDOR_AMD &&
+		boot_cpu_data.x86 == 6 && 
+		boot_cpu_data.x86_model== 3 &&
+		boot_cpu_data.x86_mask == 0)
+	{
+		c->x86_cache_size = 64;
+	}
+
+	printk("CPU: L2 Cache: %dK\n", c->x86_cache_size);
+}
+
+
 
 __initfunc(static int amd_model(struct cpuinfo_x86 *c))
 {
@@ -517,7 +519,7 @@ __initfunc(static int amd_model(struct cpuinfo_x86 *c))
 				/* Anyone with a K5 want to fill this in */				
 				break;
 			}
-			
+
 			/* K6 with old style WHCR */
 			if( c->x86_model < 8 ||
 				(c->x86_model== 8 && c->x86_mask < 8))
@@ -537,16 +539,17 @@ __initfunc(static int amd_model(struct cpuinfo_x86 *c))
 					restore_flags(flags);
 					printk(KERN_INFO "Enabling old style K6 write allocation for %d Mb\n",
 						mbytes);
-					
+
 				}
 				break;
 			}
-			if (c->x86_model == 8 || c->x86_model == 9)
+			if (c->x86_model == 8 || c->x86_model == 9 || c->x86_model == 13)
 			{
 				/* The more serious chips .. */
 				
 				if(mbytes>4092)
 					mbytes=4092;
+
 				rdmsr(0xC0000082, l, h);
 				if((l&0xFFFF0000)==0)
 				{
@@ -559,16 +562,35 @@ __initfunc(static int amd_model(struct cpuinfo_x86 *c))
 					printk(KERN_INFO "Enabling new style K6 write allocation for %d Mb\n",
 						mbytes);
 				}
+
+				/*  Set MTRR capability flag if appropriate  */
+				if((boot_cpu_data.x86_model == 13) ||
+				   (boot_cpu_data.x86_model == 9) ||
+				  ((boot_cpu_data.x86_model == 8) && 
+				   (boot_cpu_data.x86_mask >= 8)))
+					c->x86_capability |= X86_FEATURE_MTRR;
 				break;
 			}
 			break;
+
 		case 6:	/* An Athlon. We can trust the BIOS probably */
 		{
 			break;
 		}
-		
 	}
+
+	display_cacheinfo(c);
 	return r;
+}
+
+__initfunc(static void intel_model(struct cpuinfo_x86 *c))
+{
+	unsigned int *v = (unsigned int *) c->x86_model_id;
+	cpuid(0x80000002, &v[0], &v[1], &v[2], &v[3]);
+	cpuid(0x80000003, &v[4], &v[5], &v[6], &v[7]);
+	cpuid(0x80000004, &v[8], &v[9], &v[10], &v[11]);
+	c->x86_model_id[48] = 0;
+	printk("CPU: %s\n", c->x86_model_id);
 }
 			
 
@@ -691,18 +713,17 @@ __initfunc(static void cyrix_model(struct cpuinfo_x86 *c))
 		 */
 		
 #ifdef CONFIG_PCI_QUIRKS
-                /* It isnt really a PCI quirk directly, but the cure is the
-       	           same. The MediaGX has deep magic SMM stuff that handles the
-                   SB emulation. It thows away the fifo on disable_dma() which
-                   is wrong and ruins the audio. 
+		/* It isnt really a PCI quirk directly, but the cure is the
+		   same. The MediaGX has deep magic SMM stuff that handles the
+		   SB emulation. It thows away the fifo on disable_dma() which
+		   is wrong and ruins the audio. 
                    
-                   Bug2: VSA1 has a wrap bug so that using maximum sized DMA 
-                   causes bad things. According to NatSemi VSA2 has another
-                   bug to do with 'hlt'. I've not seen any boards using VSA2
-                   and X doesn't seem to support it either so who cares 8).
-                   VSA1 we work around however.
-                   
-                  */
+		   Bug2: VSA1 has a wrap bug so that using maximum sized DMA 
+		   causes bad things. According to NatSemi VSA2 has another
+		   bug to do with 'hlt'. I've not seen any boards using VSA2
+		   and X doesn't seem to support it either so who cares 8).
+		   VSA1 we work around however.
+		*/
 
 		printk(KERN_INFO "Working around Cyrix MediaGX virtual DMA bug.\n");
                 isa_dma_bridge_buggy = 2;
@@ -759,12 +780,13 @@ __initfunc(static void cyrix_model(struct cpuinfo_x86 *c))
 
 __initfunc(static void transmeta_model(struct cpuinfo_x86 *c))
 {
-	unsigned int cap_mask, uk, max, dummy, n, ecx, edx;
+	unsigned int cap_mask, uk, max, dummy;
 	unsigned int cms_rev1, cms_rev2;
 	unsigned int cpu_rev, cpu_freq, cpu_flags;
 	char cpu_info[65];
 
 	get_model_name(c);	/* Same as AMD/Cyrix */
+	display_cacheinfo(c);
 
 	/* Print CMS and CPU revision */
 	cpuid(0x80860000, &max, &dummy, &dummy, &dummy);
@@ -895,8 +917,9 @@ __initfunc(void identify_cpu(struct cpuinfo_x86 *c))
 {
 	int i;
 	char *p = NULL;
-
-	c->loops_per_sec = loops_per_sec;
+	extern void mcheck_init(void);
+	
+	c->loops_per_jiffy = loops_per_jiffy;
 	c->x86_cache_size = -1;
 
 	get_cpu_vendor(c);
@@ -917,7 +940,7 @@ __initfunc(void identify_cpu(struct cpuinfo_x86 *c))
 		printk(KERN_INFO "CPU serial number disabled.\n");
 	}
 
-	mcheck_init(c);
+	mcheck_init();
 	
 	if (c->x86_vendor == X86_VENDOR_CYRIX) {
 		cyrix_model(c);
@@ -931,48 +954,110 @@ __initfunc(void identify_cpu(struct cpuinfo_x86 *c))
 		transmeta_model(c);
 		return;
 	}
+	
+	if(c->x86_vendor == X86_VENDOR_CENTAUR && c->x86==6)
+	{
+		/* The Cyrix III supports model naming and cache queries */
+		get_model_name(c);
+		display_cacheinfo(c);
+		return;
+	}
 
 	if (c->cpuid_level > 1) {
 		/* supports eax=2  call */
-		int edx, dummy;
-			
-		cpuid(2, &dummy, &dummy, &dummy, &edx);
+		int regs[4];
+		int l1c=0, l1d=0, l2=0, l3=0;	/* Cache sizes */
 
-		/* We need only the LSB */
-		edx &= 0xff;
+		cpuid(2, &regs[0], &regs[1], &regs[2], &regs[3]);
 
-		switch (edx) {
-			case 0x40:
-				c->x86_cache_size = 0;
-				break;
+		/* Least significant byte of eax says how many times
+		 * to call cpuid with value 2 to get cache and TLB
+		 * info.
+		 */
+		if ((regs[0] & 0xFF) != 1 )
+			printk(KERN_WARNING "Multiple cache reports are not supported yet\n");
 
-			case 0x41: /* 4-way 128 */
-				c->x86_cache_size = 128;
-				break;
+		c->x86_cache_size = 0;
 
-			case 0x42: /* 4-way 256 */
-			case 0x82: /* 8-way 256 */
-				c->x86_cache_size = 256;
-				break;
+		for ( i = 0 ; i < 4 ; i++ ) {
 
-			case 0x43: /* 4-way 512 */
-				c->x86_cache_size = 512;
-				break;
+			int j;
 
-			case 0x44: /* 4-way 1024 */
-			case 0x84: /* 8-way 1024 */
-				c->x86_cache_size = 1024;
-				break;
+			if ( regs[i] < 0 )
+				continue; /* no useful data */
 
-			case 0x45: /* 4-way 2048 */
-			case 0x85: /* 8-way 2048 */
-				c->x86_cache_size = 2048;
-				break;
+			/* look at all the bytes returned */
 
-			default:
-				c->x86_cache_size = 0;
-				break;
+			for ( j = ( i == 0 ? 8:0 ) ; j < 25 ; j+=8 ) {
+
+				unsigned char rh = regs[i]>>j;
+				unsigned char rl;
+
+				rl = rh & 0x0F;
+				rh >>=4;
+
+				switch(rh) {
+
+					case 2:
+						if(rl) {
+							printk("%dK L3 cache\n", (rl-1)*512);
+							l3 += (rl-1)*512;
+						}
+						break;
+
+					case 4:
+					case 8:
+						if(rl) {
+							printk("%dK L2 cache (%d way)\n",128<<(rl-1), rh);
+							l2 += 128<<(rl-1);
+						}
+						break;
+
+					/*
+					 *	L1 caches do not count for SMP switching weights,
+					 *	they are shadowed by L2.
+					 */
+
+					case 6:
+						if(rh==6 && rl > 5) {
+							printk("%dK L1 data cache\n", 8<<(rl - 6));
+							l1d+=8<<(rl-6);
+						}
+						break;
+
+					case 7:
+						printk("%dK L1 instruction cache\n",
+						rl?(16<<(rl-1)):12);
+						l1c+=rl?(16<<(rl-1)):12;
+						break;
+				}	              
+			}   			
 		}
+
+		if(l1c && l1d)
+			printk("CPU: L1 I Cache: %dK  L1 D Cache: %dK\n", l1c, l1d);
+		if(l2)
+			printk("CPU: L2 Cache: %dK\n", l2);
+		if(l3)
+			printk("CPU: L3 Cache: %dK\n", l3);
+
+		/*
+		 *	Assuming L3 is shared. The L1 cache is shadowed by L2
+		 *	so doesn't need to be included.
+		 */
+
+		c->x86_cache_size += l2;
+	}
+
+	/*
+	 *	Intel finally adopted the AMD/Cyrix extended id naming
+	 *	stuff for the 'Pentium IV'
+	 */
+
+	if(c->x86_vendor ==X86_VENDOR_INTEL && c->x86 == 15)
+	{
+		intel_model(c);
+		return;
 	}
 
 	for (i = 0; i < sizeof(cpu_models)/sizeof(struct cpu_model_info); i++) {
@@ -981,19 +1066,18 @@ __initfunc(void identify_cpu(struct cpuinfo_x86 *c))
 			if (c->x86_model <= 16)
 				p = cpu_models[i].model_names[c->x86_model];
 
-			/* Names for the Pentium II Celeron processors 
-                           detectable only by also checking the cache size */
+			/* Names for the Pentium II Celeron processors
+			   detectable only by also checking the cache size */
 			if ((cpu_models[i].vendor == X86_VENDOR_INTEL)
 			    && (cpu_models[i].x86 == 6)){ 
 				if(c->x86_model == 6 && c->x86_cache_size == 128) {
-                            		p = "Celeron (Mendocino)"; 
-                          	}
-			  	else { 
-                            	if (c->x86_model == 5 && c->x86_cache_size == 0) {
-				  	p = "Celeron (Covington)";
-			    	}
-                        }
-                    }
+					p = "Celeron (Mendocino)"; 
+				} else { 
+					if (c->x86_model == 5 && c->x86_cache_size == 0) {
+						p = "Celeron (Covington)";
+					}
+				}
+			}
 		}
 	}
 
@@ -1026,6 +1110,49 @@ static char *cpu_vendor_names[] __initdata = {
 	"Intel", "Cyrix", "AMD", "UMC", "NexGen", "Centaur", "Rise", "Transmeta" };
 
 
+__initfunc(void setup_centaur(struct cpuinfo_x86 *c))
+{
+	u32 hv,lv;
+	
+	/* Centaur C6 Series */
+	if(c->x86==5)
+	{
+		rdmsr(0x107, lv, hv);
+		printk("Centaur FSR was 0x%X ",lv);
+		lv|=(1<<1 | 1<<2 | 1<<7);
+		/* lv|=(1<<6);	- may help too if the board can cope */
+		printk("now 0x%X\n", lv);
+		wrmsr(0x107, lv, hv);
+		/* Emulate MTRRs using Centaur's MCR. */
+		c->x86_capability |= X86_FEATURE_MTRR;
+
+		/* Disable TSC on C6 as per errata. */
+		if (c->x86_model ==4) {
+			printk ("Disabling bugged TSC.\n");
+			c->x86_capability &= ~X86_FEATURE_TSC;
+		}
+
+		/* Set 3DNow! on Winchip 2 and above. */
+		if (c->x86_model >=8)
+		    c->x86_capability |= X86_FEATURE_AMD3D;
+
+		c->x86_capability |=X86_FEATURE_CX8;
+	}
+	/* Cyrix III 'Samuel' CPU */
+	if(c->x86 == 6 && c->x86_model == 6)
+	{
+		rdmsr(0x1107, lv, hv);
+		lv|=(1<<1);	/* Report CX8 */
+		lv|=(1<<7);	/* PGE enable */
+		wrmsr(0x1107, lv, hv);
+		/* Cyrix III */
+		c->x86_capability |= X86_FEATURE_CX8;
+		rdmsr(0x80000001, lv, hv);
+		if(hv&(1<<31))
+			c->x86_capability |= X86_FEATURE_AMD3D;
+	}	
+}
+
 __initfunc(void print_cpu_info(struct cpuinfo_x86 *c))
 {
 	char *vendor = NULL;
@@ -1049,27 +1176,7 @@ __initfunc(void print_cpu_info(struct cpuinfo_x86 *c))
 		printk("\n");
 
 	if(c->x86_vendor == X86_VENDOR_CENTAUR) {
-		u32 hv,lv;
-		rdmsr(0x107, lv, hv);
-		printk("Centaur FSR was 0x%X ",lv);
-		lv|=(1<<1 | 1<<2 | 1<<7);
-		/* lv|=(1<<6);	- may help too if the board can cope */
-		printk("now 0x%X\n", lv);
-		wrmsr(0x107, lv, hv);
-		/* Emulate MTRRs using Centaur's MCR. */
-		c->x86_capability |= X86_FEATURE_MTRR;
-
-		/* Disable TSC on C6 as per errata. */
-		if (c->x86_model ==4) {
-			printk ("Disabling bugged TSC.\n");
-			c->x86_capability &= ~X86_FEATURE_TSC;
-		}
-
-		/* Set 3DNow! on Winchip 2 and above. */
-		if (c->x86_model >=8)
-		    c->x86_capability |= X86_FEATURE_AMD3D;
-
-		c->x86_capability |=X86_FEATURE_CX8;
+		setup_centaur(c);
 	}
 }
 
@@ -1082,10 +1189,10 @@ int get_cpuinfo(char * buffer)
 	char *p = buffer;
 	int sep_bug;
 	static char *x86_cap_flags[] = {
-	        "fpu", "vme", "de", "pse", "tsc", "msr", "6", "mce",
-	        "cx8", "9", "10", "sep", "mtrr", "pge", "14", "cmov",
-	        "16", "17", "psn", "19", "20", "21", "22", "mmx",
-	        "24", "kni", "26", "27", "28", "29", "30", "31"
+	        "fpu", "vme", "de", "pse", "tsc", "msr", "pae", "mce",
+	        "cx8", "apic", "10", "sep", "mtrr", "pge", "mca", "cmov",
+	        "16", "pse36", "psn", "19", "20", "21", "22", "mmx",
+	        "24", "xmm", "26", "27", "28", "29", "30", "31"
 	};
 	struct cpuinfo_x86 *c = cpu_data;
 	int i, n;
@@ -1097,12 +1204,12 @@ int get_cpuinfo(char * buffer)
 #endif
 		p += sprintf(p,"processor\t: %d\n"
 			       "vendor_id\t: %s\n"
-			       "cpu family\t: %c\n"
+			       "cpu family\t: %d\n"
 			       "model\t\t: %d\n"
 			       "model name\t: %s\n",
 			       n,
 			       c->x86_vendor_id[0] ? c->x86_vendor_id : "unknown",
-			       c->x86 + '0',
+			       c->x86,
 			       c->x86_model,
 			       c->x86_model_id[0] ? c->x86_model_id : "unknown");
 
@@ -1132,7 +1239,8 @@ int get_cpuinfo(char * buffer)
 				x86_cap_flags[10] = "sep";
 			if (c->x86 < 6)
 				x86_cap_flags[16] = "fcmov";
-			x86_cap_flags[16] = "pat";
+			else
+				x86_cap_flags[16] = "pat";
 			x86_cap_flags[22] = "mmxext";
 			x86_cap_flags[24] = "fxsr";
 			x86_cap_flags[30] = "3dnowext";
@@ -1140,19 +1248,19 @@ int get_cpuinfo(char * buffer)
 			break;
 																																										
 		    case X86_VENDOR_INTEL:
-			x86_cap_flags[6] = "pae";
-			x86_cap_flags[9] = "apic";
-			x86_cap_flags[14] = "mca";
 			x86_cap_flags[16] = "pat";
-			x86_cap_flags[17] = "pse36";
-			x86_cap_flags[18] = "psn";
+			x86_cap_flags[19] = "cflush";
+			x86_cap_flags[21] = "dtrace";
+			x86_cap_flags[22] = "acpi";
 			x86_cap_flags[24] = "fxsr";
-			x86_cap_flags[25] = "xmm";
+			x86_cap_flags[26] = "xmm2";
+			x86_cap_flags[27] = "ssnp";
+			x86_cap_flags[29] = "acc";
 			break;
 
 		    case X86_VENDOR_CENTAUR:
 			if (c->x86_model >=8)	/* Only Winchip2 and above */
-			    x86_cap_flags[31] = "3dnow";
+				x86_cap_flags[31] = "3dnow";
 			break;
 
 		    default:
@@ -1191,8 +1299,8 @@ int get_cpuinfo(char * buffer)
 			if ( c->x86_capability & (1 << i) )
 				p += sprintf(p, " %s", x86_cap_flags[i]);
 		p += sprintf(p, "\nbogomips\t: %lu.%02lu\n\n",
-			     (c->loops_per_sec+2500)/500000,
-			     ((c->loops_per_sec+2500)/5000) % 100);
+			     c->loops_per_jiffy/(500000/HZ),
+			     (c->loops_per_jiffy/(5000/HZ)) % 100);
 	}
 	return p - buffer;
 }

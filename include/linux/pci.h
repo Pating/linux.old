@@ -190,6 +190,27 @@
 #define  PCI_CAP_ID_AGP		0x02	/* Accelerated Graphics Port */
 #define PCI_CAP_LIST_NEXT	1	/* Next capability in the list */
 
+/* Power Management Registers */
+
+#define  PCI_PM_CAP_VER_MASK	0x0007	/* Version */
+#define  PCI_PM_CAP_PME_CLOCK	0x0008	/* PME clock required */
+#define  PCI_PM_CAP_AUX_POWER	0x0010	/* Auxilliary power support */
+#define  PCI_PM_CAP_DSI		0x0020	/* Device specific initialization */
+#define  PCI_PM_CAP_D1		0x0200	/* D1 power state support */
+#define  PCI_PM_CAP_D2		0x0400	/* D2 power state support */
+#define  PCI_PM_CAP_PME		0x0800	/* PME pin supported */
+#define PCI_PM_CTRL		4	/* PM control and status register */
+#define  PCI_PM_CTRL_STATE_MASK	0x0003	/* Current power state (D0 to D3) */
+#define  PCI_PM_CTRL_PME_ENABLE	0x0100	/* PME pin enable */
+#define  PCI_PM_CTRL_DATA_SEL_MASK	0x1e00	/* Data select (??) */
+#define  PCI_PM_CTRL_DATA_SCALE_MASK	0x6000	/* Data scale (??) */
+#define  PCI_PM_CTRL_PME_STATUS	0x8000	/* PME pin status */
+#define PCI_PM_PPB_EXTENSIONS	6	/* PPB support extensions (??) */
+#define  PCI_PM_PPB_B2_B3	0x40	/* Stop clock when in D3hot (??) */
+#define  PCI_PM_BPCC_ENABLE	0x80	/* Bus power/clock control enable (??) */
+#define PCI_PM_DATA_REGISTER	7	/* (??) */
+#define PCI_PM_SIZEOF		8
+
 /* Device classes and subclasses */
 
 #define PCI_CLASS_NOT_DEFINED		0x0000
@@ -298,6 +319,7 @@
 #define PCI_DEVICE_ID_COMPAQ_NETEL100D	0xae40
 #define PCI_DEVICE_ID_COMPAQ_NETEL100PI	0xae43
 #define PCI_DEVICE_ID_COMPAQ_NETEL100I	0xb011
+#define PCI_DEVICE_ID_COMPAQ_CISS	0xb060
 #define PCI_DEVICE_ID_COMPAQ_THUNDER	0xf130
 #define PCI_DEVICE_ID_COMPAQ_NETFLEX3B	0xf150
 
@@ -415,6 +437,7 @@
 #define PCI_DEVICE_ID_IBM_TR_WAKE	0x003e
 #define PCI_DEVICE_ID_IBM_MPIC		0x0046
 #define PCI_DEVICE_ID_IBM_3780IDSP	0x007d
+#define PCI_DEVICE_ID_IBM_SERVERAIDI960	0x01bd
 #define PCI_DEVICE_ID_IBM_MPIC_2	0xffff
 
 #define PCI_VENDOR_ID_WD		0x101c
@@ -579,6 +602,14 @@
 #define PCI_DEVICE_ID_APPLE_BANDIT	0x0001
 #define PCI_DEVICE_ID_APPLE_GC		0x0002
 #define PCI_DEVICE_ID_APPLE_HYDRA	0x000e
+ 
+#define PCI_VENDOR_ID_YAMAHA		0x1073
+#define PCI_DEVICE_ID_YAMAHA_724	0x0004
+#define PCI_DEVICE_ID_YAMAHA_724F	0x000d
+#define PCI_DEVICE_ID_YAMAHA_740	0x000a
+#define PCI_DEVICE_ID_YAMAHA_740C	0x000c
+#define PCI_DEVICE_ID_YAMAHA_744	0x0010
+#define PCI_DEVICE_ID_YAMAHA_754	0x0012
 
 #define PCI_VENDOR_ID_NEXGEN		0x1074
 #define PCI_DEVICE_ID_NEXGEN_82C501	0x4e78
@@ -749,6 +780,9 @@
 #define PCI_VENDOR_ID_INTERG		0x10ea
 #define PCI_DEVICE_ID_INTERG_1680	0x1680
 #define PCI_DEVICE_ID_INTERG_1682	0x1682
+#define PCI_DEVICE_ID_INTERG_2000	0x2000
+#define PCI_DEVICE_ID_INTERG_2010	0x2010
+#define PCI_DEVICE_ID_INTERG_5000	0x5000
 
 #define PCI_VENDOR_ID_REALTEK		0x10ec
 #define PCI_DEVICE_ID_REALTEK_8029	0x8029
@@ -766,6 +800,7 @@
 #define PCI_DEVICE_ID_TTI_HPT343	0x0003
 
 #define PCI_VENDOR_ID_VIA		0x1106
+#define PCI_DEVICE_ID_VIA_8371_0        0x0391
 #define PCI_DEVICE_ID_VIA_82C505	0x0505
 #define PCI_DEVICE_ID_VIA_82C561	0x0561
 #define PCI_DEVICE_ID_VIA_82C586_1	0x0571
@@ -1054,10 +1089,15 @@
 #define PCI_DEVICE_ID_LAVA_PARALLEL	0x8000
 #define PCI_DEVICE_ID_LAVA_DUAL_PAR_A	0x8002 /* The Lava Dual Parallel is */
 #define PCI_DEVICE_ID_LAVA_DUAL_PAR_B	0x8003 /* two PCI devices on a card */
+#define PCI_DEVICE_ID_LAVA_BOCA_IOPPAR	0x8800
 
 #define PCI_VENDOR_ID_TIMEDIA		0x1409
 #define PCI_DEVICE_ID_TIMEDIA_1889	0x7168
 #define PCI_DEVICE_ID_TIMEDIA_4008A	0x7268
+
+#define PCI_VENDOR_ID_OXSEMI		0x1415
+#define PCI_DEVICE_ID_OXSEMI_12PCI840	0x8403
+#define PCI_DEVICE_ID_OXSEMI_16PCI954PP	0x9513
 
 #define PCI_VENDOR_ID_AFAVLAB		0x14db
 #define PCI_DEVICE_ID_AFAVLAB_TK9902	0x2120
@@ -1357,6 +1397,7 @@ int pci_proc_detach_device(struct pci_dev *dev);
 struct pci_dev *pci_find_device (unsigned int vendor, unsigned int device, struct pci_dev *from);
 struct pci_dev *pci_find_class (unsigned int class, struct pci_dev *from);
 struct pci_dev *pci_find_slot (unsigned int bus, unsigned int devfn);
+unsigned long pci_resource_len (struct pci_dev *dev, int n_base);
 
 #define pci_present pcibios_present
 int pci_read_config_byte(struct pci_dev *dev, u8 where, u8 *val);
@@ -1394,6 +1435,9 @@ extern inline struct pci_dev *pci_find_slot(unsigned int bus, unsigned int devfn
 
 extern inline void pci_set_master(struct pci_dev *dev)
 { return; }
+
+extern inline unsigned long pci_resource_len (struct pci_dev *dev, int n_base) 
+{ return 0; }
 
 #endif /* !CONFIG_PCI */
 

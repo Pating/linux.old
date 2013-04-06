@@ -330,7 +330,7 @@ __initfunc(static void check_cx686_slop(void))
 		if (ccr5 & 2) { /* possible wrong calibration done */
 			printk(KERN_INFO "Recalibrating delay loop with SLOP bit reset\n");
 			calibrate_delay();
-			boot_cpu_data.loops_per_sec = loops_per_sec;
+			boot_cpu_data.loops_per_jiffy = loops_per_jiffy;
 		}
 	}
 }
@@ -419,5 +419,13 @@ __initfunc(static void check_bugs(void))
 	check_amd_k6();
 	check_pentium_f00f();
 	check_cyrix_coma();
-	system_utsname.machine[1] = '0' + boot_cpu_data.x86;
+	/*
+	 *	Catch people using stupid model number data
+	 *	(Pentium IV) and report 686 still. The /proc data
+	 *	however does not lie and reports 15 as will cpuid.
+	 */
+	if(boot_cpu_data.x86 > 9)
+		system_utsname.machine[1] = '6';
+	else
+		system_utsname.machine[1] = '0' + boot_cpu_data.x86;
 }

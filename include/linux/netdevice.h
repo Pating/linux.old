@@ -39,6 +39,8 @@
 #endif
 #endif
 
+struct divert_blk;
+
 /*
  *	For future expansion when we will have different priorities. 
  */
@@ -317,6 +319,11 @@ struct device
 	/* Semi-private data. Keep it at the end of device struct. */
 	struct dst_entry	*fastpath[NETDEV_FASTROUTE_HMASK+1];
 #endif
+
+#ifdef CONFIG_NET_DIVERT
+	/* this will get initialized at each interface type init routine */
+	struct divert_blk	*divert;
+#endif /* CONFIG_NET_DIVERT */
 };
 
 

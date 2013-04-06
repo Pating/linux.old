@@ -33,6 +33,7 @@
 #include <linux/timex.h>
 #include <linux/pci.h>
 #include <linux/openpic.h>
+#include <linux/delay.h>
 
 #include <asm/mmu.h>
 #include <asm/processor.h>
@@ -46,9 +47,10 @@
 #include <asm/mk48t59.h>
 #include <asm/prep_nvram.h>
 #include <asm/raven.h>
-
-
+#include <asm/keyboard.h>
 #include <asm/time.h>
+#include <asm/vga.h>
+
 #include "local_irq.h"
 #include "i8259.h"
 #include "open_pic.h"
@@ -100,15 +102,11 @@ unsigned long empty_zero_page[1024];
 extern PTE *Hash, *Hash_end;
 extern unsigned long Hash_size, Hash_mask;
 extern int probingmem;
-extern unsigned long loops_per_sec;
 
 #ifdef CONFIG_BLK_DEV_RAM
 extern int rd_doload;		/* 1 = load ramdisk, 0 = don't load */
 extern int rd_prompt;		/* 1 = prompt for ramdisk, 0 = don't prompt */
 extern int rd_image_start;	/* starting block # of image */
-#endif
-#ifdef CONFIG_VGA_CONSOLE
-unsigned long vgacon_remap_base;
 #endif
 
 __prep
@@ -218,7 +216,7 @@ prep_setup_arch(unsigned long * memory_start_p, unsigned long * memory_end_p))
 	unsigned char ucEquipPres1;
 
 	/* init to some ~sane value until calibrate_delay() runs */
-	loops_per_sec = 50000000;
+	loops_per_jiffy = 50000000/HZ;
 	
 	/* Set up floppy in PS/2 mode */
 	outb(0x09, SIO_CONFIG_RA);
@@ -617,8 +615,14 @@ prep_init_IRQ(void))
                 irq_desc[i].ctl = &i8259_pic;
         i8259_init();
 #ifdef __SMP__
-	request_irq(openpic_to_irq(OPENPIC_VEC_SPURIOUS), openpic_ipi_action,
+	request_irq(OPENPIC_VEC_IPI, openpic_ipi_action,
 		    0, "IPI0", 0);
+	request_irq(OPENPIC_VEC_IPI+1, openpic_ipi_action,
+		    0, "IPI1 (invalidate TLB)", 0);
+	request_irq(OPENPIC_VEC_IPI+2, openpic_ipi_action,
+		    0, "IPI2 (stop CPU)", 0);
+	request_irq(OPENPIC_VEC_IPI+3, openpic_ipi_action,
+		    0, "IPI3 (reschedule)", 0);
 #endif /* __SMP__ */
 }
 
@@ -857,8 +861,8 @@ prep_init(unsigned long r3, unsigned long r4, unsigned long r5,
 	ppc_md.kbd_leds          = pckbd_leds;
 	ppc_md.kbd_init_hw       = pckbd_init_hw;
 #ifdef CONFIG_MAGIC_SYSRQ
-	ppc_md.kbd_sysrq_xlate	 = pckbd_sysrq_xlate;
-	ppc_md.SYSRQ_KEY	 = 0x54;
+	ppc_md.sysrq_xlate	 = pckbd_sysrq_xlate;
+	SYSRQ_KEY		 = 0x54;
 #endif
 #endif
 }

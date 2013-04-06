@@ -20,6 +20,11 @@
 #define SCB_ABORTED  0x5
 #define SCB_RESET    0x6
 
+/* IOCTL DRIVER INFO */
+#define DRIVER_IOCTL_INTERFACE 0x82
+/* Methods */
+#define GET_DRIVER_INFO 1
+
 #define MEGA_CMD_TIMEOUT        10
 
 /* Feel free to fiddle with these.. max values are:
@@ -94,13 +99,41 @@
 #define ENABLE_INTR(base)     WRITE_PORT(base,I_TOGGLE_PORT,ENABLE_INTR_BYTE)
 #define DISABLE_INTR(base)    WRITE_PORT(base,I_TOGGLE_PORT,DISABLE_INTR_BYTE)
 
+/* Special Adapter Commands */
+#define FW_FIRE_WRITE 	0x2C
+#define FW_FIRE_FLASH  	0x2D
+
+#define FC_NEW_CONFIG               0xA1
+#define DCMD_FC_CMD                 0xA1
+    #define DCMD_FC_PROCEED		0x02
+    #define DCMD_DELETE_LOGDRV		0x03
+    #define DCMD_FC_READ_NVRAM_CONFIG	0x04 
+    #define DCMD_FC_READ_FINAL_CONFIG	0x05
+    #define DCMD_GET_DISK_CONFIG	0x06
+    #define DCMD_CHANGE_LDNO		0x07
+    #define DCMD_COMPACT_CONFIG		0x08
+    #define DCMD_DELETE_DRIVEGROUP	0x09
+    #define DCMD_GET_LOOPID_INFO	0x0A
+    #define DCMD_CHANGE_LOOPID		0x0B
+    #define DCMD_GET_NUM_SCSI_CHANS	0x0C
+    #define DCMD_WRITE_CONFIG		0x0D /* writes 40-ld config */
+    #define NC_SUBOP_PRODUCT_INFO       0x0E
+    #define NC_SUBOP_ENQUIRY3           0x0F
+	#define ENQ3_GET_SOLICITED_NOTIFY_ONLY  0x01
+	#define ENQ3_GET_SOLICITED_FULL         0x02
+	#define ENQ3_GET_UNSOLICITED            0x03
+
 /* Define AMI's PCI codes */
 #undef PCI_VENDOR_ID_AMI
 #undef PCI_DEVICE_ID_AMI_MEGARAID
+#undef PCI_DEVICE_ID_AMI_MEGARAID2
+#undef PCI_DEVICE_ID_AMI_MEGARAID3
 
 #ifndef PCI_VENDOR_ID_AMI
 #define PCI_VENDOR_ID_AMI          0x101E
 #define PCI_DEVICE_ID_AMI_MEGARAID 0x9010
+#define PCI_DEVICE_ID_AMI_MEGARAID2 0x9060
+#define PCI_DEVICE_ID_AMI_MEGARAID3 0x1960
 #endif
 
 #define PCI_CONF_BASE_ADDR_OFFSET  0x10
@@ -526,8 +559,8 @@ struct _mega_mailbox {
     /* 0x10 */ u8 numstatus;
     /* 0x11 */ u8 status;
     /* 0x12 */ u8 completed[46];
-    u8 mraid_poll;
-    u8 mraid_ack;
+    volatile u8 mraid_poll;
+    volatile u8 mraid_ack;
     u8 pad[16]; /* for alignment purposes */
 }__attribute__((packed));
 typedef struct _mega_mailbox mega_mailbox;
@@ -572,9 +605,9 @@ struct _mega_scb {
     mega_passthru  pthru;
     Scsi_Cmnd     *SCpnt;
     mega_sglist   *sgList;
-    char          *kern_area;  /* Only used for large ioctl xfers */
-    struct wait_queue  *ioctl_wait;
-    struct semaphore   sem;
+    struct semaphore  ioctl_sem;
+    void	  *buff_ptr;
+	u32			iDataSize;
     mega_scb      *next;
 };
 
@@ -582,7 +615,12 @@ struct _mega_scb {
 typedef struct _mega_host_config {
     u8 numldrv;
     u32 flag;
+
+#ifdef __LP64__
+    u64 base;
+#else
     u32 base;
+#endif
  
     mega_scb *qFreeH;
     mega_scb *qFreeT;
@@ -596,8 +634,10 @@ typedef struct _mega_host_config {
     u32 qCcnt;
 
     u32 nReads[FC_MAX_LOGICAL_DRIVES];
+    u32 nReadBlocks[FC_MAX_LOGICAL_DRIVES];
     u32 nWrites[FC_MAX_LOGICAL_DRIVES];
-
+    u32 nWriteBlocks[FC_MAX_LOGICAL_DRIVES];
+    u32 nInterrupts;
     /* Host adapter parameters */
     u8 fwVer[7];
     u8 biosVer[7];
@@ -620,9 +660,22 @@ typedef struct _mega_host_config {
 
     u8 max_cmds;
     mega_scb scbList[MAX_COMMANDS];
+#define PROCBUFSIZE 4096
+    char procbuf[PROCBUFSIZE];
+    int   procidx;
+    struct proc_dir_entry *controller_proc_dir_entry;
+    struct proc_dir_entry *proc_read, *proc_stat, *proc_status, *proc_mbox;
 } mega_host_config;
 
+typedef struct _driver_info {
+	int size;
+	ulong version;
+} mega_driver_info;
+
+
+#if LINUX_VERSION_CODE < 0x20300
 extern struct proc_dir_entry proc_scsi_megaraid;
+#endif
 
 const char *megaraid_info(struct Scsi_Host *);
 int megaraid_detect(Scsi_Host_Template *);
@@ -635,4 +688,6 @@ int megaraid_biosparam(Disk *, kdev_t, int *);
 int megaraid_proc_info(char *buffer, char **start, off_t offset,
 		       int length, int hostno, int inout);
 
+void mega_build_kernel_sg(char *, ulong , mega_scb *, mega_ioctl_mbox *); 
+void mega_create_proc_entry(int index, struct proc_dir_entry *);
 #endif

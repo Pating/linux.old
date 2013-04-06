@@ -142,6 +142,10 @@ ifeq ($(CONFIG_BLK_DEV_PDC4030),y)
 IDE_OBJS += pdc4030.o
 endif
 
+ifeq ($(CONFIG_BLK_DEV_ALI15X3),y)
+IDE_OBJS += alim15x3.o
+endif
+
 ifeq ($(CONFIG_BLK_DEV_TRM290),y)
 IDE_OBJS += trm290.o
 endif
@@ -243,6 +247,14 @@ L_OBJS += cpqarray.o
 else
   ifeq ($(CONFIG_BLK_CPQ_DA),m)
   M_OBJS += cpqarray.o
+  endif
+endif
+
+ifeq ($(CONFIG_BLK_CPQ_CISS_DA),y)
+L_OBJS += cciss.o
+else
+  ifeq ($(CONFIG_BLK_CPQ_CISS_DA),m)
+  M_OBJS += cciss.o
   endif
 endif
 

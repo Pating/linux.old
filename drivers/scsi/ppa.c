@@ -654,7 +654,7 @@ static int ppa_completion(Scsi_Cmnd * cmd)
 	    (v == WRITE_10));
 
     /*
-     * We only get here if the drive is ready to comunicate,
+     * We only get here if the drive is ready to communicate,
      * hence no need for a full ppa_wait.
      */
     r = (r_str(ppb) & 0xf0);

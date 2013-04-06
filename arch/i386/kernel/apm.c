@@ -129,6 +129,7 @@
  *   1.13: Fix the Thinkpad (again) :-( (CONFIG_APM_IGNORE_MULTIPLE_SUSPENDS
  *         is now the way life works). 
  *         Fix thinko in suspend() (wrong return).
+ *   1.13ac: Added apm_battery_horked() for Compal boards (Dell 5000e etc)
  *
  * APM 1.1 Reference:
  *
@@ -169,18 +170,6 @@
 #include <asm/uaccess.h>
 #include <asm/desc.h>
 #include <asm/softirq.h>
-
-/* 2.2-2.3 Compatability defines */
-#define DECLARE_WAIT_QUEUE_HEAD(w) struct wait_queue *w = NULL
-#define DECLARE_WAITQUEUE(w,c) struct wait_queue w = {(c), NULL}
-#define __setup(x, y)
-#define module_init(x)
-#define set_current_state(a) current->state = (a)
-#define create_proc_info_entry(n, m, b, g) \
-	{ \
-		struct proc_dir_entry *r = create_proc_entry(n, m, b); \
-		if (r) r->get_info = g; \
-	}
 
 EXPORT_SYMBOL(apm_register_callback);
 EXPORT_SYMBOL(apm_unregister_callback);
@@ -337,6 +326,7 @@ static int			power_off_enabled = 0;
 #else
 static int			power_off_enabled = 1;
 #endif
+static int 			dell_crap = 0;	/*Set if we find a 5000e */
 
 static DECLARE_WAIT_QUEUE_HEAD(apm_waitqueue);
 static DECLARE_WAIT_QUEUE_HEAD(apm_suspend_waitqueue);
@@ -1254,6 +1244,18 @@ static int do_open(struct inode * inode, struct file * filp)
 	return 0;
 }
 
+/*
+ *	This is called by the DMI code when it finds an Inspiron 5000e
+ *	(aka compal reference board). We actually do the check by the BIOS
+ *	vendor name, version and serial so we can extend it to try and catch
+ *	non Dell stuff later.
+ */
+ 
+void apm_battery_horked(void)
+{
+	dell_crap = 1;
+}
+
 static int apm_get_info(char *buf, char **start, off_t fpos, int length, int dummy)
 {
 	char *		p;
@@ -1270,7 +1272,7 @@ static int apm_get_info(char *buf, char **start, off_t fpos, int length, int dum
 
 	p = buf;
 
-	if ((smp_num_cpus == 1) &&
+	if ((smp_num_cpus == 1) && (!dell_crap) && 
 	    !(error = apm_get_power_status(&bx, &cx, &dx))) {
 		ac_line_status = (bx >> 8) & 0xff;
 		battery_status = bx & 0xff;
@@ -1438,7 +1440,7 @@ static int __init apm(void *unused)
 	return 0;
 }
 
-void __init apm_setup(char *str, int *dummy)
+static int __init apm_setup(char *str)
 {
 	int	invert;
 
@@ -1458,6 +1460,7 @@ void __init apm_setup(char *str, int *dummy)
 		if (str != NULL)
 			str += strspn(str, ", \t");
 	}
+	return 1;
 }
 
 __setup("apm=", apm_setup);
@@ -1476,13 +1479,12 @@ static struct miscdevice apm_device = {
 	&apm_bios_fops
 };
 
-#define APM_INIT_ERROR_RETURN	return
 
-void __init apm_init(void)
+static int __init apm_init(void)
 {
 	if (apm_bios_info.version == 0) {
 		printk(KERN_INFO "apm: BIOS not found.\n");
-		APM_INIT_ERROR_RETURN;
+		return -ENODEV;
 	}
 	printk(KERN_INFO
 		"apm: BIOS version %d.%d Flags 0x%02x (Driver version %s)\n",
@@ -1492,7 +1494,7 @@ void __init apm_init(void)
 		driver_version);
 	if ((apm_bios_info.flags & APM_32_BIT_SUPPORT) == 0) {
 		printk(KERN_INFO "apm: no 32 bit BIOS support\n");
-		APM_INIT_ERROR_RETURN;
+		return -ENODEV;
 	}
 
 	/*
@@ -1521,11 +1523,11 @@ void __init apm_init(void)
 
 	if (apm_disabled) {
 		printk(KERN_NOTICE "apm: disabled on user request.\n");
-		APM_INIT_ERROR_RETURN;
+		return -ENODEV;
 	}
 	if ((smp_num_cpus > 1) && !power_off_enabled) {
 		printk(KERN_NOTICE "apm: disabled - APM is not SMP safe.\n");
-		APM_INIT_ERROR_RETURN;
+		return -ENODEV;
 	}
 
 	/*
@@ -1573,7 +1575,7 @@ void __init apm_init(void)
 	if (smp_num_cpus > 1) {
 		printk(KERN_NOTICE
 		   "apm: disabled - APM is not SMP safe (power off active).\n");
-		APM_INIT_ERROR_RETURN;
+		return 0;
 	}
 
 	init_timer(&apm_timer);
@@ -1586,6 +1588,7 @@ void __init apm_init(void)
 #ifdef CONFIG_APM_CPU_IDLE
 	acpi_idle = apm_cpu_idle;
 #endif
+	return 0;
 }
 
 module_init(apm_init)

@@ -1,4 +1,4 @@
-/*  $Id: atyfb.c,v 1.106.2.9 2000/06/23 12:06:38 davem Exp $
+/*  $Id: atyfb.c,v 1.106.2.12 2000/09/05 00:10:55 davem Exp $
  *  linux/drivers/video/atyfb.c -- Frame buffer device for ATI Mach64
  *
  *	Copyright (C) 1997-1998  Geert Uytterhoeven
@@ -70,6 +70,7 @@
 #include <video/macmodes.h>
 #include <asm/adb.h>
 #include <asm/pmu.h>
+#include <asm/backlight.h>
 #endif
 #ifdef __sparc__
 #include <asm/pbm.h>
@@ -235,7 +236,6 @@ struct fb_info_aty {
 #endif
 #ifdef CONFIG_PMAC_PBOOK
     unsigned char *save_framebuffer;
-    unsigned long save_pll[64];
     struct fb_info_aty* next;
 #endif
 };
@@ -394,7 +394,7 @@ static int read_aty_sense(const struct fb_info_aty *info);
      *  Interface used by the world
      */
 
-void atyfb_init(void);
+int atyfb_init(void);
 #ifdef CONFIG_FB_OF
 void atyfb_of_init(struct device_node *dp);
 #endif
@@ -411,6 +411,16 @@ static struct fb_ops atyfb_ops = {
     NULL
 #endif
 };
+
+#ifdef CONFIG_PPC
+static int aty_set_backlight_enable(int on, int level, void* data);
+static int aty_set_backlight_level(int level, void* data);
+
+static struct backlight_controller aty_backlight_controller = {
+	aty_set_backlight_enable,
+	aty_set_backlight_level
+};
+#endif
 
 static char atyfb_name[16] = "ATY Mach64";
 static char fontname[40] __initdata = { 0 };
@@ -2783,6 +2793,8 @@ __initfunc(static int aty_init(struct fb_info_aty *info, const char *name))
 	aty_st_lcd(LCD_POWER_MANAGEMENT, aty_ld_lcd(LCD_POWER_MANAGEMENT, info)
 		| (USE_F32KHZ | TRISTATE_MEM_EN), info);
     }
+    if ((Gx == LN_CHIP_ID) || (Gx == LM_CHIP_ID))
+	register_backlight_controller(&aty_backlight_controller, info, "ati");
 
     if (default_vmode == VMODE_NVRAM) {
 #if 0 /* This is not really supported */
@@ -2880,7 +2892,7 @@ __initfunc(static int aty_init(struct fb_info_aty *info, const char *name))
     return 1;
 }
 
-__initfunc(void atyfb_init(void))
+int __init atyfb_init(void)
 {
 #if defined(CONFIG_FB_OF)
     /* We don't want to be called like this. */
@@ -2900,7 +2912,7 @@ __initfunc(void atyfb_init(void))
 
     /* Do not attach when we have a serial console. */
     if (!con_is_present())
-	return;
+	return 0;
 #else
     u16 tmp;
 #endif
@@ -2912,7 +2924,7 @@ __initfunc(void atyfb_init(void))
 	    info = kmalloc(sizeof(struct fb_info_aty), GFP_ATOMIC);
 	    if (!info) {
 		printk("atyfb_init: can't alloc fb_info_aty\n");
-		return;
+		return 0;
 	    }
 	    memset(info, 0, sizeof(struct fb_info_aty));
 
@@ -2948,7 +2960,7 @@ __initfunc(void atyfb_init(void))
 	    if (!info->mmap_map) {
 		printk("atyfb_init: can't alloc mmap_map\n");
 		kfree(info);
-		return;
+		return 0;
 	    }
 	    memset(info->mmap_map, 0, j * sizeof(*info->mmap_map));
 
@@ -3133,7 +3145,7 @@ __initfunc(void atyfb_init(void))
 
 	    if(!info->ati_regbase) {
 		    kfree(info);
-		    return;
+		    return 0;
 	    }
 
 	    info->ati_regbase_phys += 0xc00;
@@ -3160,7 +3172,7 @@ __initfunc(void atyfb_init(void))
 
 	    if(!info->frame_buffer) {
 		    kfree(info);
-		    return;
+		    return 0;
 	    }
 
 #endif /* __sparc__ */
@@ -3169,7 +3181,7 @@ __initfunc(void atyfb_init(void))
 		if (info->mmap_map)
 		    kfree(info->mmap_map);
 		kfree(info);
-		return;
+		return 0;
 	    }
 
 #ifdef __sparc__
@@ -3207,7 +3219,7 @@ __initfunc(void atyfb_init(void))
 	info = kmalloc(sizeof(struct fb_info_aty), GFP_ATOMIC);
 	if (!info) {
 	    printk("atyfb_init: can't alloc fb_info_aty\n");
-	    return;
+	    return 0;
 	}
 	memset(info, 0, sizeof(struct fb_info_aty));
 
@@ -3223,10 +3235,11 @@ __initfunc(void atyfb_init(void))
 	if (!aty_init(info, "ISA bus")) {
 	    kfree(info);
 	    /* This is insufficient! kernel_map has added two large chunks!! */
-	    return;
+	    return 0;
 	}
     }
 #endif
+    return 1;
 }
 
 #ifdef CONFIG_FB_OF
@@ -3493,7 +3506,7 @@ static void atyfbcon_blank(int blank, struct fb_info *fb)
 
 #if defined(CONFIG_PPC)
     if ((_machine == _MACH_Pmac) && blank)
-    	pmu_enable_backlight(0);
+    	set_backlight_enable(0);
 #endif
 
     gen_cntl = aty_ld_8(CRTC_GEN_CNTL, info);
@@ -3518,7 +3531,7 @@ static void atyfbcon_blank(int blank, struct fb_info *fb)
 
 #if defined(CONFIG_PPC)
     if ((_machine == _MACH_Pmac) && !blank)
-    	pmu_enable_backlight(1);
+    	set_backlight_enable(1);
 #endif
 }
 
@@ -4213,3 +4226,78 @@ aty_sleep_notify(struct pmu_sleep_notifier *self, int when)
 	return result;
 }
 #endif /* CONFIG_PMAC_PBOOK */
+
+#ifdef CONFIG_PPC
+static int backlight_conv[] = {
+	0x00, 0x3f, 0x4c, 0x59, 0x66, 0x73, 0x80, 0x8d,
+	0x9a, 0xa7, 0xb4, 0xc1, 0xcf, 0xdc, 0xe9, 0xff
+};
+
+static int
+aty_set_backlight_enable(int on, int level, void* data)
+{
+	struct fb_info_aty *info = (struct fb_info_aty *)data;
+	unsigned int reg = aty_ld_lcd(LCD_MISC_CNTL, info);
+	
+	reg |= (BLMOD_EN | BIASMOD_EN);
+	if (on && level > BACKLIGHT_OFF) {
+		reg &= ~BIAS_MOD_LEVEL_MASK;
+		reg |= (backlight_conv[level] << BIAS_MOD_LEVEL_SHIFT);
+	} else {
+		reg &= ~BIAS_MOD_LEVEL_MASK;
+		reg |= (backlight_conv[0] << BIAS_MOD_LEVEL_SHIFT);
+	}
+	aty_st_lcd(LCD_MISC_CNTL, reg, info);
+	return 0;
+}
+
+static int
+aty_set_backlight_level(int level, void* data)
+{
+	return aty_set_backlight_enable(1, level, data);
+}
+#endif /* CONFIG_PPC */
+
+ 
+#ifdef MODULE
+
+int blink = 1;
+static u32 vram = 0;
+static int pll = 0;
+static int mclk = 0;
+#if defined(CONFIG_PPC)
+static int vmode = VMODE_CHOOSE;
+static int cmode = CMODE_NVRAM;
+#endif
+
+MODULE_PARM(noaccel, "i");
+MODULE_PARM_DESC(noaccel, "Do not use accelerating engine (0 or 1=disabled) (default=0)");
+MODULE_PARM(blink, "i");
+MODULE_PARM_DESC(blink, "Enables hardware cursor blinking (0 or 1) (default=1)");
+#ifdef CONFIG_PPC
+MODULE_PARM(vmode, "i");
+MODULE_PARM_DESC(vmode, "Specify the vmode mode number that should be used (640x480 default)");
+MODULE_PARM(cmode, "i");
+MODULE_PARM_DESC(cmode, "Specify the video depth that should be used (8bit default)");
+#endif
+
+int init_module(void)
+{
+	curblink = blink;
+	default_vram = vram;
+	default_pll = pll;
+	default_mclk = mclk;
+#ifdef CONFIG_PPC
+	default_vmode = vmode;
+	default_cmode = cmode;
+#endif
+	if (!atyfb_init())
+		return -ENXIO;
+	MOD_INC_USE_COUNT;
+	return 0;
+}
+
+void cleanup_module(void)
+{
+}
+#endif	/* MODULE */

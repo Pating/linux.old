@@ -279,6 +279,7 @@ static inline int buffer_protected(struct buffer_head * bh)
 #include <linux/hfs_fs_i.h>
 #include <linux/adfs_fs_i.h>
 #include <linux/qnx4_fs_i.h>
+#include <linux/usbdev_fs_i.h>
 
 /*
  * Attribute flags.  These should be or-ed together to figure out what
@@ -360,6 +361,7 @@ struct inode {
 	struct wait_queue	*i_wait;
 	struct file_lock	*i_flock;
 	struct vm_area_struct	*i_mmap;
+	struct vm_area_struct	*i_mmap_shared;
 	struct page		*i_pages;
 	struct dquot		*i_dquot[MAXQUOTAS];
 
@@ -392,6 +394,7 @@ struct inode {
 		struct hfs_inode_info		hfs_i;
 		struct adfs_inode_info		adfs_i;
 		struct qnx4_inode_info		qnx4_i;
+		struct usbdev_inode_info	usbdev_i;
 		struct socket			socket_i;
 		void				*generic_ip;
 	} u;
@@ -466,6 +469,8 @@ struct file_lock {
 	off_t fl_end;
 
 	void (*fl_notify)(struct file_lock *);	/* unblock callback */
+	void (*fl_insert)(struct file_lock *);	/* lock insertion callback */
+	void (*fl_remove)(struct file_lock *);	/* lock removal callback */
 
 	union {
 		struct nfs_lock_info	nfs_fl;
@@ -514,6 +519,7 @@ extern int fasync_helper(int, struct file *, int, struct fasync_struct **);
 #include <linux/hfs_fs_sb.h>
 #include <linux/adfs_fs_sb.h>
 #include <linux/qnx4_fs_sb.h>
+#include <linux/usbdev_fs_sb.h>
 
 extern struct list_head super_blocks;
 
@@ -557,6 +563,7 @@ struct super_block {
 		struct hfs_sb_info	hfs_sb;
 		struct adfs_sb_info	adfs_sb;
 		struct qnx4_sb_info	qnx4_sb;	   
+		struct usbdev_sb_info	usbdevfs_sb;
 		void			*generic_sbp;
 	} u;
 	/*
@@ -564,6 +571,15 @@ struct super_block {
 	 * even looking at it. You had been warned.
 	 */
 	struct semaphore s_vfs_rename_sem;	/* Kludge */
+
+	/* The next field is used by knfsd when converting a (inode number based)
+	 * file handle into a dentry. As it builds a path in the dcache tree from
+	 * the bottom up, there may for a time be a subpath of dentrys which is not
+	 * connected to the main tree.  This semaphore ensure that there is only ever
+	 * one such free path per filesystem.  Note that unconnected files (or other
+	 * non-directories) are allowed, but not unconnected diretories.
+	 */
+	struct semaphore s_nfsd_free_path_sem;
 };
 
 /*
@@ -621,6 +637,8 @@ struct inode_operations {
 	int (*smap) (struct inode *,int);
 	int (*updatepage) (struct file *, struct page *, unsigned long, unsigned int, int);
 	int (*revalidate) (struct dentry *);
+	int (*prepare_write) (struct file *, struct page *, unsigned, unsigned);
+	int (*sync_page) (struct page *);
 };
 
 struct super_operations {
@@ -653,6 +671,13 @@ struct file_system_type {
 	struct super_block *(*read_super) (struct super_block *, void *, int);
 	struct file_system_type * next;
 };
+
+#define DECLARE_FSTYPE(var,type,read,flags) \
+struct file_system_type var = { \
+        name:           type, \
+        read_super:     read, \
+        fs_flags:       flags, \
+}
 
 extern int register_filesystem(struct file_system_type *);
 extern int unregister_filesystem(struct file_system_type *);
@@ -701,8 +726,6 @@ extern inline int locks_verify_area(int read_write, struct inode *inode,
 asmlinkage int sys_open(const char *, int, int);
 asmlinkage int sys_close(unsigned int);		/* yes, it's really unsigned */
 extern int do_truncate(struct dentry *, unsigned long);
-extern int get_unused_fd(void);
-extern void put_unused_fd(unsigned int);
 
 extern struct file *filp_open(const char *, int, int);
 extern int filp_close(struct file *, fl_owner_t id);
@@ -798,6 +821,7 @@ extern int fsync_dev(kdev_t dev);
 extern void sync_supers(kdev_t dev);
 extern int bmap(struct inode * inode,int block);
 extern int notify_change(struct dentry *, struct iattr *);
+extern int vfs_permission(struct inode * inode,int mask);
 extern int permission(struct inode * inode,int mask);
 extern int get_write_access(struct inode *inode);
 extern void put_write_access(struct inode *inode);
@@ -842,7 +866,10 @@ extern struct dentry * __namei(const char *, unsigned int);
 extern void iput(struct inode *);
 extern struct inode * igrab(struct inode *inode);
 extern ino_t iunique(struct super_block *, ino_t);
-extern struct inode * iget(struct super_block *, unsigned long);
+
+typedef int (*find_inode_t)(struct inode *, unsigned long, void *);
+extern struct inode * iget4(struct super_block *, unsigned long, find_inode_t, void *);
+extern struct inode * iget(struct super_block *sb, unsigned long ino);
 extern struct inode * iget_in_use (struct super_block *, unsigned long);
 extern void clear_inode(struct inode *);
 extern struct inode * get_empty_inode(void);

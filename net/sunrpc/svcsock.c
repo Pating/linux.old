@@ -344,8 +344,9 @@ svc_udp_data_ready(struct sock *sk, int count)
 		return;
 	dprintk("svc: socket %p(inet %p), count=%d, busy=%d\n",
 		svsk, sk, count, svsk->sk_busy);
-	svsk->sk_data = 1;
+	svsk->sk_data++;
 	svc_sock_enqueue(svsk);
+	wake_up_interruptible(sk->sleep);
 }
 
 /*
@@ -358,19 +359,10 @@ svc_udp_recvfrom(struct svc_rqst *rqstp)
 	struct svc_serv	*serv = svsk->sk_server;
 	struct sk_buff	*skb;
 	u32		*data;
-	int		err, len;
+	int		err, len, recvd = svsk->sk_data;
 
-	svsk->sk_data = 0;
-	while ((skb = skb_recv_datagram(svsk->sk_sk, 0, 1, &err)) == NULL) {
-		svc_sock_received(svsk, 0);
-		if (err == -EAGAIN)
-			return err;
-		/* possibly an icmp error */
-		dprintk("svc: recvfrom returned error %d\n", -err);
-	}
-
-	/* There may be more data */
-	svsk->sk_data = 1;
+	if ((skb = skb_recv_datagram(svsk->sk_sk, 0, 1, &err)) == NULL)
+		goto out_err;
 
 	len  = skb->len - sizeof(struct udphdr);
 	data = (u32 *) (skb->h.raw + sizeof(struct udphdr));
@@ -390,15 +382,24 @@ svc_udp_recvfrom(struct svc_rqst *rqstp)
 #else
 	rqstp->rq_addr.sin_addr.s_addr = skb->saddr;
 #endif
+	memset(rqstp->rq_addr.sin_zero, 0, sizeof(rqstp->rq_addr.sin_zero));
 
 	if (serv->sv_stats)
 		serv->sv_stats->netudpcnt++;
 
 	/* One down, maybe more to go... */
 	svsk->sk_sk->stamp = skb->stamp;
-	svc_sock_received(svsk, 0);
+	svc_sock_received(svsk, 1);
 
 	return len;
+ out_err:
+	if (err != -EAGAIN) {
+		/* possibly an icmp error */
+		dprintk("svc: recvfrom returned error %d\n", -err);
+		svc_sock_received(svsk, 0);
+	} else
+		svc_sock_received(svsk, recvd);
+	return -EAGAIN;
 }
 
 static int
@@ -458,6 +459,7 @@ svc_tcp_state_change1(struct sock *sk)
 	}
 	svsk->sk_conn++;
 	svc_sock_enqueue(svsk);
+	wake_up_interruptible(sk->sleep);
 }
 
 /*
@@ -477,6 +479,7 @@ svc_tcp_state_change2(struct sock *sk)
 	}
 	svsk->sk_close = 1;
 	svc_sock_enqueue(svsk);
+	wake_up_interruptible(sk->sleep);
 }
 
 static void
@@ -548,15 +551,18 @@ svc_tcp_accept(struct svc_sock *svsk)
 
 	/* Ideally, we would want to reject connections from unauthorized
 	 * hosts here, but we have no generic client tables. For now,
-	 * we just punt connects from unprivileged ports. */
-	if (ntohs(sin.sin_port) >= 1024) {
-		if (net_ratelimit())
-			printk(KERN_WARNING
-				   "%s: connect from unprivileged port: %s:%d",
-				   serv->sv_name, 
-				   in_ntoa(sin.sin_addr.s_addr), ntohs(sin.sin_port));
-		goto failed;
-	}
+	 * we just punt connects from unprivileged ports. 
+         * hosts here, but when we get encription, the IP of the host won't
+         * tell us anything. For now just warn about unpriv connections.
+         */
+        if (ntohs(sin.sin_port) >= 1024) {
+                if (net_ratelimit())
+                        printk(KERN_WARNING
+                                   "%s: connect from unprivileged port: %u.%u.%u.%u:%d\n",
+                                   serv->sv_name, 
+                                   NIPQUAD(sin.sin_addr.s_addr), 
+			           ntohs(sin.sin_port));
+        }
 
 	dprintk("%s: connect from %s:%04x\n", serv->sv_name,
 			in_ntoa(sin.sin_addr.s_addr), ntohs(sin.sin_port));
@@ -590,7 +596,7 @@ svc_tcp_recvfrom(struct svc_rqst *rqstp)
 	struct svc_sock	*svsk = rqstp->rq_sock;
 	struct svc_serv	*serv = svsk->sk_server;
 	struct svc_buf	*bufp = &rqstp->rq_argbuf;
-	int		len, ready;
+	int		len, ready, used;
 
 	dprintk("svc: tcp_recv %p data %d conn %d close %d\n",
 			svsk, svsk->sk_data, svsk->sk_conn, svsk->sk_close);
@@ -624,10 +630,11 @@ svc_tcp_recvfrom(struct svc_rqst *rqstp)
 
 		svsk->sk_reclen = ntohl(svsk->sk_reclen);
 		if (!(svsk->sk_reclen & 0x80000000)) {
-			/* FIXME: shutdown socket */
-			printk(KERN_NOTICE "RPC: bad TCP reclen %08lx",
-			       (unsigned long) svsk->sk_reclen);
-			return -EIO;
+			if (net_ratelimit())
+				printk(KERN_NOTICE "RPC: bad TCP reclen %08lx",
+			       		(unsigned long) svsk->sk_reclen);
+			svc_delete_socket(svsk);
+			return 0;
 		}
 		svsk->sk_reclen &= 0x7fffffff;
 		dprintk("svc: TCP record, %d bytes\n", svsk->sk_reclen);
@@ -642,8 +649,19 @@ svc_tcp_recvfrom(struct svc_rqst *rqstp)
 		dprintk("svc: incomplete TCP record (%d of %d)\n",
 			len, svsk->sk_reclen);
 		svc_sock_received(svsk, ready);
-		len = -EAGAIN;	/* record not complete */
+		return -EAGAIN;	/* record not complete */
 	}
+
+        /* if we think there is only one more record to read, but
+         * it is bigger than we expect, then two records must have arrived
+         * together, so pretend we aren't using the record.. */
+        if (len > svsk->sk_reclen && ready == 1){
+                used = 0;
+		dprintk("svc_recv: more data at hte socket len %d > svsk->sk_reclen %d",
+                        len, svsk->sk_reclen);
+	}
+        else    used = 1;
+ 
 
 	/* Frob argbuf */
 	bufp->iov[0].iov_base += 4;
@@ -670,7 +688,7 @@ svc_tcp_recvfrom(struct svc_rqst *rqstp)
 	svsk->sk_reclen = 0;
 	svsk->sk_tcplen = 0;
 
-	svc_sock_received(svsk, 1);
+	svc_sock_received(svsk, used);
 	if (serv->sv_stats)
 		serv->sv_stats->nettcpcnt++;
 

@@ -22,6 +22,9 @@
  *	along with this program; if not, write to the Free Software
  *	Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  *
+ *	Changes:
+ *	20000909	Changed cs_read, cs_write and drain_dac
+ *			Nils Faerber <nils@kernelconcepts.de>
  */
  
 #include <linux/module.h>
@@ -777,7 +780,7 @@ static int drain_dac(struct cs_state *state, int nonblock)
 
 		tmo = (dmabuf->dmasize * HZ) / dmabuf->rate;
 		tmo >>= sample_shift[dmabuf->fmt];
-		tmo += (4096*HZ)/dmabuf->rate;
+		tmo += (2048*HZ)/dmabuf->rate;
 		
 		if (!schedule_timeout(tmo ? tmo : 1) && tmo){
 			printk(KERN_ERR "cs461x: drain_dac, dma timeout? %d\n", count);
@@ -921,6 +924,7 @@ static ssize_t cs_read(struct file *file, char *buffer, size_t count, loff_t *pp
 {
 	struct cs_state *state = (struct cs_state *)file->private_data;
 	struct dmabuf *dmabuf = &state->dmabuf;
+	DECLARE_WAITQUEUE(wait, current);
 	ssize_t ret;
 	unsigned long flags;
 	unsigned swptr;
@@ -940,6 +944,7 @@ static ssize_t cs_read(struct file *file, char *buffer, size_t count, loff_t *pp
 		return -EFAULT;
 	ret = 0;
 
+	add_wait_queue(&state->dmabuf.wait, &wait);
 	while (count > 0) {
 		spin_lock_irqsave(&state->card->lock, flags);
 		if (dmabuf->count > (signed) dmabuf->dmasize) {
@@ -952,6 +957,8 @@ static ssize_t cs_read(struct file *file, char *buffer, size_t count, loff_t *pp
 		cnt = dmabuf->dmasize - swptr;
 		if (dmabuf->count < cnt)
 			cnt = dmabuf->count;
+		if (cnt <= 0)
+			__set_current_state(TASK_INTERRUPTIBLE);
 		spin_unlock_irqrestore(&state->card->lock, flags);
 
 		if (cnt > count)
@@ -963,38 +970,20 @@ static ssize_t cs_read(struct file *file, char *buffer, size_t count, loff_t *pp
 			start_adc(state);
 			if (file->f_flags & O_NONBLOCK) {
 				if (!ret) ret = -EAGAIN;
-				return ret;
+				remove_wait_queue(&state->dmabuf.wait, &wait);
+				break;
 			}
-			/* This isnt strictly right for the 810  but it'll do */
-			tmo = (dmabuf->dmasize * HZ) / (dmabuf->rate * 2);
-			tmo >>= sample_shift[dmabuf->fmt];
-			/* There are two situations when sleep_on_timeout returns, one is when
-			   the interrupt is serviced correctly and the process is waked up by
-			   ISR ON TIME. Another is when timeout is expired, which means that
-			   either interrupt is NOT serviced correctly (pending interrupt) or it
-			   is TOO LATE for the process to be scheduled to run (scheduler latency)
-			   which results in a (potential) buffer overrun. And worse, there is
-			   NOTHING we can do to prevent it. */
-			if (!interruptible_sleep_on_timeout(&dmabuf->wait, tmo)) {
-#ifdef DEBUG
-				printk(KERN_ERR "cs461x: recording schedule timeout, "
-				       "dmasz %u fragsz %u count %i hwptr %u swptr %u\n",
-				       dmabuf->dmasize, dmabuf->fragsize, dmabuf->count,
-				       dmabuf->hwptr, dmabuf->swptr);
-#endif
-				/* a buffer overrun, we delay the recovery untill next time the
-				   while loop begin and we REALLY have space to record */
-			}
+			schedule();
 			if (signal_pending(current)) {
 				ret = ret ? ret : -ERESTARTSYS;
-				return ret;
+				break;
 			}
 			continue;
 		}
 
 		if (copy_to_user(buffer, dmabuf->rawbuf + swptr, cnt)) {
 			if (!ret) ret = -EFAULT;
-			return ret;
+			break;
 		}
 
 		swptr = (swptr + cnt) % dmabuf->dmasize;
@@ -1009,6 +998,8 @@ static ssize_t cs_read(struct file *file, char *buffer, size_t count, loff_t *pp
 		ret += cnt;
 		start_adc(state);
 	}
+	remove_wait_queue(&state->dmabuf.wait, &wait);
+	set_current_state(TASK_RUNNING);
 	return ret;
 }
 
@@ -1017,8 +1008,9 @@ static ssize_t cs_read(struct file *file, char *buffer, size_t count, loff_t *pp
 static ssize_t cs_write(struct file *file, const char *buffer, size_t count, loff_t *ppos)
 {
 	struct cs_state *state = (struct cs_state *)file->private_data;
+	DECLARE_WAITQUEUE(wait, current);
 	struct dmabuf *dmabuf = &state->dmabuf;
-	ssize_t ret;
+	ssize_t ret = 0;
 	unsigned long flags;
 	unsigned swptr;
 	int cnt;
@@ -1035,8 +1027,7 @@ static ssize_t cs_write(struct file *file, const char *buffer, size_t count, lof
 		return ret;
 	if (!access_ok(VERIFY_READ, buffer, count))
 		return -EFAULT;
-	ret = 0;
-
+	add_wait_queue(&state->dmabuf.wait, &wait);
 	while (count > 0) {
 		spin_lock_irqsave(&state->card->lock, flags);
 		if (dmabuf->count < 0) {
@@ -1049,6 +1040,8 @@ static ssize_t cs_write(struct file *file, const char *buffer, size_t count, lof
 		cnt = dmabuf->dmasize - swptr;
 		if (dmabuf->count + cnt > dmabuf->dmasize)
 			cnt = dmabuf->dmasize - dmabuf->count;
+		if (cnt <= 0)
+			__set_current_state(TASK_INTERRUPTIBLE);
 		spin_unlock_irqrestore(&state->card->lock, flags);
 
 		if (cnt > count)
@@ -1060,37 +1053,18 @@ static ssize_t cs_write(struct file *file, const char *buffer, size_t count, lof
 			start_dac(state);
 			if (file->f_flags & O_NONBLOCK) {
 				if (!ret) ret = -EAGAIN;
-				return ret;
+				break;
 			}
-			/* Not strictly correct but works */
-			tmo = (dmabuf->dmasize * HZ) / (dmabuf->rate * 2);
-			tmo >>= sample_shift[dmabuf->fmt];
-			/* There are two situations when sleep_on_timeout returns, one is when
-			   the interrupt is serviced correctly and the process is waked up by
-			   ISR ON TIME. Another is when timeout is expired, which means that
-			   either interrupt is NOT serviced correctly (pending interrupt) or it
-			   is TOO LATE for the process to be scheduled to run (scheduler latency)
-			   which results in a (potential) buffer underrun. And worse, there is
-			   NOTHING we can do to prevent it. */
-			if (!interruptible_sleep_on_timeout(&dmabuf->wait, tmo)) {
-#ifdef DEBUG
-				printk(KERN_ERR "cs461x: playback schedule timeout, "
-				       "dmasz %u fragsz %u count %i hwptr %u swptr %u\n",
-				       dmabuf->dmasize, dmabuf->fragsize, dmabuf->count,
-				       dmabuf->hwptr, dmabuf->swptr);
-#endif
-				/* a buffer underrun, we delay the recovery untill next time the
-				   while loop begin and we REALLY have data to play */
-			}
+			schedule();
 			if (signal_pending(current)) {
 				if (!ret) ret = -ERESTARTSYS;
-				return ret;
+				break;
 			}
 			continue;
 		}
 		if (copy_from_user(dmabuf->rawbuf + swptr, buffer, cnt)) {
 			if (!ret) ret = -EFAULT;
-			return ret;
+			break;
 		}
 
 		swptr = (swptr + cnt) % dmabuf->dmasize;
@@ -1106,6 +1080,8 @@ static ssize_t cs_write(struct file *file, const char *buffer, size_t count, lof
 		ret += cnt;
 		start_dac(state);
 	}
+	remove_wait_queue(&state->dmabuf.wait, &wait);
+	set_current_state(TASK_RUNNING);
 	return ret;
 }
 
@@ -1141,10 +1117,16 @@ static unsigned int cs_poll(struct file *file, struct poll_table_struct *wait)
 	return mask;
 }
 
+/*
+ *	We let users mmap the ring buffer. Its not the real DMA buffer but
+ *	that side of the code is hidden in the IRQ handling. We do a software
+ *	emulation of DMA from a 64K or so buffer into a 2K FIFO. 
+ *	(the hardware probably deserves a moan here but Crystal send me nice
+ *	toys ;)).
+ */
+ 
 static int cs_mmap(struct file *file, struct vm_area_struct *vma)
 {
-	return -EINVAL;
-#if 0	
 	struct cs_state *state = (struct cs_state *)file->private_data;
 	struct dmabuf *dmabuf = &state->dmabuf;
 	int ret;
@@ -1171,7 +1153,6 @@ static int cs_mmap(struct file *file, struct vm_area_struct *vma)
 	dmabuf->mapped = 1;
 
 	return 0;
-#endif	
 }
 
 static int cs_ioctl(struct inode *inode, struct file *file, unsigned int cmd, unsigned long arg)
@@ -1822,34 +1803,15 @@ static u16 cs_ac97_get(struct ac97_codec *dev, u8 reg)
 	return cs461x_peekBA0(card, BA0_ACSDA);
 }
 
-/*
- *	Do we have the CD potentially enabled either left or right ?
- */
- 
-static int cd_active(int r)
-{
-	int l=(r>>8)&0x7;
-	r&=7;
-	if(l==1 || r==1)
-		return 1;		/* CD input */
-	if(l==5 || r==5)
-		return 1;		/* Mixer input */
-	if(l==6 || r==6)
-		return 1;		/* Mixer 16bit input */
-	return 0;
-}
-
 static void cs_ac97_set(struct ac97_codec *dev, u8 reg, u16 val)
 {
 	struct cs_card *card = dev->private_data;
 	int count;
 	int val2;
-	int val3;
 	
-	if(reg==AC97_RECORD_SELECT || reg == AC97_CD_VOL)
+	if(reg == AC97_CD_VOL)
 	{
-		val2 = cs_ac97_get(dev, AC97_RECORD_SELECT);
-		val3 = cs_ac97_get(dev, AC97_CD_VOL);
+		val2 = cs_ac97_get(dev, AC97_CD_VOL);
 	}
 	
 	/*
@@ -1907,35 +1869,31 @@ static void cs_ac97_set(struct ac97_codec *dev, u8 reg, u16 val)
 	 *
 	 *	When the CD mute changes we adjust the power level if the
 	 *	CD was a valid input.
+	 *
+	 *      We also check for CD volume != 0, as the CD mute isn't
+	 *      normally tweaked from userspace.
 	 */
 	 
-	if(reg==AC97_RECORD_SELECT && cd_active(val)!=cd_active(val2))
-	{
-		int n=-1;
-		/* If we are turning on the port and it is not muted then
-		   bump the power level. If we are turning it off and its
-		   not muted drop the power level */
-		if(cd_active(val))
-			n=1;
-		if(!(val3 & 0x8000))
-			card->amplifier_ctrl(card, n);
-	}
-	
 	/* CD mute change ? */
 	
 	if(reg==AC97_CD_VOL)
 	{
-		if(cd_active(val2))
+		/* Mute bit change ? */
+		if((val2^val)&0x8000 || ((val2 == 0x1f1f || val == 0x1f1f) && val2 != val))
 		{
-			/* Mute bit change ? */
-			if((val3^val)&0x8000)
-			{
-				/* Mute on */
-				if(val&0x8000)
-					card->amplifier_ctrl(card, -1);
-				else /* Mute off power on */
-					card->amplifier_ctrl(card, 1);
-			}
+			/* This is a hack but its cleaner than the alternatives.
+			   Right now card->ac97_codec[0] might be NULL as we are
+			   still doing codec setup. This does an early assignment
+			   to avoid the problem if it occurs */
+			   
+			if(card->ac97_codec[0]==NULL)
+				card->ac97_codec[0]=dev;
+				
+			/* Mute on */
+			if(val&0x8000 || val == 0x1f1f)
+				card->amplifier_ctrl(card, -1);
+			else /* Mute off power on */
+				card->amplifier_ctrl(card, 1);
 		}
 	}
 }
@@ -2035,12 +1993,6 @@ static int __init cs_ac97_init(struct cs_card *card)
 		}
 		
 		card->ac97_features = eid;
-			
-		/* If the card has the CD enabled then bump the power to
-		   account for it */
-		   	
-		if(cd_active(cs_ac97_get(codec, AC97_RECORD_SELECT)))
-			card->amplifier_ctrl(card, 1);
 			
 		if ((codec->dev_mixer = register_sound_mixer(&cs_mixer_fops, -1)) < 0) {
 			printk(KERN_ERR "cs461x: couldn't register mixer!\n");
@@ -2343,7 +2295,7 @@ static int cs_hardware_init(struct cs_card *card)
 	 *  generating bit clock (so we don't try to start the PLL without an
 	 *  input clock).
 	 */
-	mdelay(5);		/* 1 should be enough ?? */
+	mdelay(5);		/* 1 should be enough ?? (and pigs might fly) */
 
 	/*
 	 *  Set the serial port timing configuration, so that
@@ -2548,7 +2500,7 @@ static struct cs_card_type __initdata cards[]={
 	{PCI_VENDOR_ID_IBM, 0x0153, "Thinkpad 600X/A20/T20", amp_none, clkrun_hack},
 	{PCI_VENDOR_ID_IBM, 0x1010, "Thinkpad 600E (unsupported)", NULL, NULL},
 	{0, 0, "Card without SSID set", NULL, NULL },
-	{0, 0, NULL, NULL}
+	{0, 0, NULL, NULL, NULL}
 };
 
 static int __init cs_install(struct pci_dev *pci_dev)

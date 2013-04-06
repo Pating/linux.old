@@ -1,4 +1,4 @@
-/* $Id: sys_sparc32.c,v 1.107.2.9 2000/06/20 17:12:25 davem Exp $
+/* $Id: sys_sparc32.c,v 1.107.2.14 2000/10/10 04:50:50 davem Exp $
  * sys_sparc32.c: Conversion between 32bit and 64bit native syscalls.
  *
  * Copyright (C) 1997,1998 Jakub Jelinek (jj@sunsite.mff.cuni.cz)
@@ -45,6 +45,9 @@
 #include <linux/stat.h>
 #include <linux/timex.h>
 #include <linux/filter.h>
+#include <linux/in6.h>
+#include <linux/ipv6.h>
+#include <linux/icmpv6.h>
 
 #include <asm/types.h>
 #include <asm/ipc.h>
@@ -1377,7 +1380,7 @@ struct ncp_mount_data32 {
 
 static void *do_ncp_super_data_conv(void *raw_data)
 {
-	struct ncp_mount_data *n = (struct ncp_mount_data *)raw_data;
+	struct ncp_mount_data news, *n = &news; 
 	struct ncp_mount_data32 *n32 = (struct ncp_mount_data32 *)raw_data;
 
 	n->dir_mode = n32->dir_mode;
@@ -1387,6 +1390,7 @@ static void *do_ncp_super_data_conv(void *raw_data)
 	memmove (n->mounted_vol, n32->mounted_vol, (sizeof (n32->mounted_vol) + 3 * sizeof (unsigned int)));
 	n->wdog_pid = n32->wdog_pid;
 	n->mounted_uid = n32->mounted_uid;
+	memcpy(raw_data, n, sizeof(struct ncp_mount_data)); 
 	return raw_data;
 }
 
@@ -1401,7 +1405,7 @@ struct smb_mount_data32 {
 
 static void *do_smb_super_data_conv(void *raw_data)
 {
-	struct smb_mount_data *s = (struct smb_mount_data *)raw_data;
+	struct smb_mount_data news, *s = &news;
 	struct smb_mount_data32 *s32 = (struct smb_mount_data32 *)raw_data;
 
 	s->version = s32->version;
@@ -1410,6 +1414,7 @@ static void *do_smb_super_data_conv(void *raw_data)
 	s->gid = s32->gid;
 	s->file_mode = s32->file_mode;
 	s->dir_mode = s32->dir_mode;
+	memcpy(raw_data, s, sizeof(struct smb_mount_data)); 
 	return raw_data;
 }
 
@@ -2665,42 +2670,86 @@ out:
 extern asmlinkage int sys_setsockopt(int fd, int level, int optname,
 				     char *optval, int optlen);
 
+static int do_set_attach_filter(int fd, int level, int optname,
+				char *optval, int optlen)
+{
+	struct sock_fprog32 {
+		__u16 len;
+		__u32 filter;
+	} *fprog32 = (struct sock_fprog32 *)optval;
+	struct sock_fprog kfprog;
+	struct sock_filter *kfilter;
+	unsigned int fsize;
+	mm_segment_t old_fs;
+	__u32 uptr;
+	int ret;
+
+	if (get_user(kfprog.len, &fprog32->len) ||
+	    __get_user(uptr, &fprog32->filter))
+		return -EFAULT;
+
+	kfprog.filter = (struct sock_filter *)A(uptr);
+	fsize = kfprog.len * sizeof(struct sock_filter);
+
+	kfilter = (struct sock_filter *)kmalloc(fsize, GFP_KERNEL);
+	if (kfilter == NULL)
+		return -ENOMEM;
+
+	if (copy_from_user(kfilter, kfprog.filter, fsize)) {
+		kfree(kfilter);
+		return -EFAULT;
+	}
+
+	kfprog.filter = kfilter;
+
+	old_fs = get_fs();
+	set_fs(KERNEL_DS);
+	ret = sys_setsockopt(fd, level, optname,
+			     (char *)&kfprog, sizeof(kfprog));
+	set_fs(old_fs);
+
+	kfree(kfilter);
+
+	return ret;
+}
+
+static int do_set_icmpv6_filter(int fd, int level, int optname,
+				char *optval, int optlen)
+{
+	struct icmp6_filter kfilter;
+	mm_segment_t old_fs;
+	int ret, i;
+
+	if (copy_from_user(&kfilter, optval, sizeof(kfilter)))
+		return -EFAULT;
+
+
+	for (i = 0; i < 8; i += 2) {
+		u32 tmp = kfilter.data[i];
+
+		kfilter.data[i] = kfilter.data[i + 1];
+		kfilter.data[i + 1] = tmp;
+	}
+
+	old_fs = get_fs();
+	set_fs(KERNEL_DS);
+	ret = sys_setsockopt(fd, level, optname,
+			     (char *) &kfilter, sizeof(kfilter));
+	set_fs(old_fs);
+
+	return ret;
+}
+
 asmlinkage int sys32_setsockopt(int fd, int level, int optname,
 				char *optval, int optlen)
 {
-	if (optname == SO_ATTACH_FILTER) {
-		struct sock_fprog32 {
-			__u16 len;
-			__u32 filter;
-		} *fprog32 = (struct sock_fprog32 *)optval;
-		struct sock_fprog kfprog;
-		struct sock_filter *kfilter;
-		unsigned int fsize;
-		mm_segment_t old_fs;
-		__u32 uptr;
-		int ret;
+	if (optname == SO_ATTACH_FILTER)
+		return do_set_attach_filter(fd, level, optname,
+					    optval, optlen);
+	if (level == SOL_ICMPV6 && optname == ICMPV6_FILTER)
+		return do_set_icmpv6_filter(fd, level, optname,
+					    optval, optlen);
 
-		if (get_user(kfprog.len, &fprog32->len) ||
-		    __get_user(uptr, &fprog32->filter))
-			return -EFAULT;
-		kfprog.filter = (struct sock_filter *)A(uptr);
-		fsize = kfprog.len * sizeof(struct sock_filter);
-		kfilter = (struct sock_filter *)kmalloc(fsize, GFP_KERNEL);
-		if (kfilter == NULL)
-			return -ENOMEM;
-		if (copy_from_user(kfilter, kfprog.filter, fsize)) {
-			kfree(kfilter);
-			return -EFAULT;
-		}
-		kfprog.filter = kfilter;
-		old_fs = get_fs();
-		set_fs(KERNEL_DS);
-		ret = sys_setsockopt(fd, level, optname,
-				     (char *)&kfprog, sizeof(kfprog));
-		set_fs(old_fs);
-		kfree(kfilter);
-		return ret;
-	}
 	return sys_setsockopt(fd, level, optname, optval, optlen);
 }
 
@@ -2875,7 +2924,7 @@ sys32_rt_sigaction(int sig, struct sigaction32 *act, struct sigaction32 *oact,
 /*
  * count32() counts the number of arguments/envelopes
  */
-static int count32(u32 * argv)
+static int count32(u32 * argv, int max)
 {
 	int i = 0;
 
@@ -2884,9 +2933,13 @@ static int count32(u32 * argv)
 			u32 p; int error;
 
 			error = get_user(p,argv);
-			if (error) return error;
-			if (!p) break;
-			argv++; i++;
+			if (error)
+				return error;
+			if (!p)
+				break;
+			argv++;
+			if (++i > max)
+				return -E2BIG;
 		}
 	}
 	return i;
@@ -2903,18 +2956,24 @@ copy_strings32(int argc,u32 * argv,unsigned long *page,
 {
 	u32 str;
 
-	if (!p) return 0;	/* bullet-proofing */
+	if ((long)p <= 0)
+		return p;	/* bullet-proofing */
 	while (argc-- > 0) {
 		int len;
 		unsigned long pos;
 
 		get_user(str, argv+argc);
-		if (!str) panic("VFS: argc is wrong");
-		len = strlen_user((char *)A(str));	/* includes the '\0' */
-		if (p < len)	/* this shouldn't happen - 128kB */
-			return 0;
-		p -= len; pos = p;
-		while (len) {
+		if (!str)
+			return -EFAULT;
+
+		len = strnlen_user((char *)A(str), p);	/* includes the '\0' */
+		if (!len)
+			return -EFAULT;
+		if (len > p)
+			return -E2BIG;
+		p -= len;
+		pos = p;
+		while (len > 0) {
 			char *pag;
 			int offset, bytes_to_copy;
 
@@ -2961,11 +3020,11 @@ do_execve32(char * filename, u32 * argv, u32 * envp, struct pt_regs * regs)
 	bprm.java = 0;
 	bprm.loader = 0;
 	bprm.exec = 0;
-	if ((bprm.argc = count32(argv)) < 0) {
+	if ((bprm.argc = count32(argv, bprm.p / sizeof(u32))) < 0) {
 		dput(dentry);
 		return bprm.argc;
 	}
-	if ((bprm.envc = count32(envp)) < 0) {
+	if ((bprm.envc = count32(envp, bprm.p / sizeof(u32))) < 0) {
 		dput(dentry);
 		return bprm.envc;
 	}
@@ -2977,11 +3036,11 @@ do_execve32(char * filename, u32 * argv, u32 * envp, struct pt_regs * regs)
 		bprm.exec = bprm.p;
 		bprm.p = copy_strings32(bprm.envc,envp,bprm.page,bprm.p);
 		bprm.p = copy_strings32(bprm.argc,argv,bprm.page,bprm.p);
-		if (!bprm.p)
-			retval = -E2BIG;
+		if ((long)bprm.p < 0)
+			retval = (int) bprm.p;
 	}
 
-	if(retval>=0)
+	if (retval >= 0)
 		retval = search_binary_handler(&bprm,regs);
 	if(retval>=0)
 		/* execve success */
@@ -4021,4 +4080,56 @@ asmlinkage int sys32_adjtimex(struct timex32 *utp)
 		ret = -EFAULT;
 
 	return ret;
+}
+
+struct __sysctl_args32 {
+	u32 name;
+	int nlen;
+	u32 oldval;
+	u32 oldlenp;
+	u32 newval;
+	u32 newlen;
+	u32 __unused[4];
+};
+
+extern int do_sysctl(int *name, int nlen,
+		     void *oldval, size_t *oldlenp,
+		     void *newval, size_t newlen);
+
+asmlinkage long sys32_sysctl(struct __sysctl_args32 *args)
+{
+	struct __sysctl_args32 tmp;
+	int error;
+	size_t oldlen, *oldlenp = NULL;
+	unsigned long addr = (((long)&args->__unused[0]) + 7) & ~7;
+
+	if (copy_from_user(&tmp, args, sizeof(tmp)))
+		return -EFAULT;
+
+	if (tmp.oldval && tmp.oldlenp) {
+		/* Duh, this is ugly and might not work if sysctl_args
+		   is in read-only memory, but do_sysctl does indirectly
+		   a lot of uaccess in both directions and we'd have to
+		   basically copy the whole sysctl.c here, and
+		   glibc's __sysctl uses rw memory for the structure
+		   anyway.  */
+		if (get_user(oldlen, (u32 *)A(tmp.oldlenp)) ||
+		    put_user(oldlen, (size_t *)addr))
+			return -EFAULT;
+		oldlenp = (size_t *)addr;
+	}
+
+	lock_kernel();
+	error = do_sysctl((int *)A(tmp.name), tmp.nlen, (void *)A(tmp.oldval),
+			  oldlenp, (void *)A(tmp.newval), tmp.newlen);
+	unlock_kernel();
+	if (oldlenp) {
+		if (!error) {
+			if (get_user(oldlen, (size_t *)addr) ||
+			    put_user(oldlen, (u32 *)A(tmp.oldlenp)))
+				error = -EFAULT;
+		}
+		copy_to_user(args->__unused, tmp.__unused, sizeof(tmp.__unused));
+	}
+	return error;
 }

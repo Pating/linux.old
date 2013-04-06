@@ -46,6 +46,10 @@ W: http://www.pdos.lcs.mit.edu/~cananian
 P: 1024/85AD9EED AD C0 49 08 91 67 DF D7  FA 04 1A EE 09 E8 44 B0
 D: Unix98 pty support.
 D: APM update to 1.2 spec.
+D: /devfs hacking.
+S: 322 N. Riverside Dr.
+S: Neptune, NJ 07753
+S: USA
 
 N: Erik Andersen
 E: andersee@debian.org
@@ -202,6 +206,14 @@ S: Bouwensstraat 22
 S: 6369 BG Simpelveld
 S: The Netherlands
 
+N: Peter Berger
+E: pberger@brimson.com
+W: http://www.brimson.com
+D: Author/maintainer of Digi AccelePort USB driver
+S: 1549 Hiironen Rd.
+S: Brimson, MN  55602
+S: USA
+
 N: Hennus Bergman
 E: hennus@cybercomm.nl
 W: http://www.cybercomm.nl/~hennus/
@@ -220,6 +232,14 @@ P: 1024/8462A731 4C 55 86 34 44 59 A7 99  2B 97 88 4A 88 9A 0D 97
 D: sun4 port
 S: 47 Robert Street
 S: Marrickville NSW 2204
+S: Australia
+
+N: Hugh Blemings
+E: hugh@linuxcare.com
+W: http://www.linuxcare.com.au/hugh/
+D: Author and maintainer of the Keyspan USB to Serial drivers
+S: Po Box 234
+S: Belconnen ACT 2616
 S: Australia
 
 N: Philip Blundell
@@ -252,6 +272,14 @@ E: boldt@math.ucsb.edu
 W: http://math-www.uni-paderborn.de/~axel/
 D: Configuration help text support
 D: Linux CD and Support Giveaway List
+
+N: Al Borchers
+E: alborchers@steinerpoint.com
+D: Author/maintainer of Digi AccelePort USB driver
+D: work on usbserial and keyspan_pda drivers
+S: 4912 Zenith Ave. S.
+S: Minneapolis, MN  55410
+S: USA
 
 N: Zoltán Böszörményi
 E: zboszor@mail.externet.hu
@@ -289,6 +317,11 @@ D: IrDA Subsystem
 S: 19. Wellington Road
 S: Lancaster, LA1 4DN
 S: UK, England
+
+N: Paul Bristow
+E: paul@paulbristow.net
+W: http://paulbristow.net/linux
+D: ide-floppy maintainer
 
 N: Andries Brouwer
 E: aeb@cwi.nl
@@ -392,6 +425,13 @@ N: Neil Conway
 E: nconway.list@ukaea.org.uk
 D: Assorted sched/mm titbits
 S: Oxfordshire, UK.
+
+N: Mark Corner
+E: mcorner@umich.edu
+W: http://www.eecs.umich.edu/~mcorner/
+D: USB Bluetooth Driver
+S: University of Michigan
+S: Ann Arbor, MI
 
 N: Alan Cox
 W: http://roadrunner.swansea.linux.org.uk/alan.shtml
@@ -500,6 +540,15 @@ S: Virginia Tech
 S: Blacksburg, Virginia 24061
 S: USA
 
+N: Randy Dunlap
+E: randy.dunlap@intel.com
+W: http://home.att.net/~randy.dunlap/
+W: http://www.linux-usb.org
+D: Linux-USB subsystem, USB core/UHCI/printer/storage drivers
+S: 5200 NE Elam Young Pkwy., M/S HF3-77
+S: Hillsboro, Oregon 97124
+S: USA
+
 N: Cyrus Durgin
 E: cider@speakeasy.org
 W: http://www.speakeasy.org/~cider/
@@ -552,6 +601,13 @@ E: engstad@intermetrics.com
 D: Kernel smbfs (to mount WfW, NT and OS/2 network drives.)
 S: 17101 Springdale Street #225
 S: Huntington Beach, California 92649
+S: USA
+
+N: Johannes Erdfelt
+E: jerdfelt@valinux.com
+D: USB
+S: 6350 Stoneridge Mall Road
+S: Pleasanton, CA 94588
 S: USA
 
 N: Doug Evans
@@ -681,6 +737,7 @@ E: rgooch@atnf.csiro.au
 D: parent process death signal to children
 D: prctl() syscall
 D: /proc/mtrr support to manipulate MTRRs on Intel P6 family
+D: Device FileSystem (devfs)
 S: CSIRO Australia Telescope National Facility
 S: P.O. Box 76, Epping
 S: New South Wales, 2121
@@ -705,6 +762,15 @@ E: jgotts@engin.umich.edu
 D: kernel hacker
 S: 8124 Constitution Apt. 7
 S: Sterling Heights, Michigan 48313
+S: USA
+
+N: William Greathouse
+E: wgreathouse@smva.com
+E: wgreathouse@myfavoritei.com
+D: Current Belkin USB Serial Adapter F5U103 hacker
+D: Kernel hacker, embedded systems
+S: 7802 Fitzwater Road   
+S: Brecksville, OH  44141-1334
 S: USA
 
 N: Tristan Greaves
@@ -1128,6 +1194,18 @@ S: Markham, Ontario
 S: L3R 8B2
 S: Canada
 
+N: Andrzej M. Krzysztofowicz
+E: ankry@mif.pg.gda.pl
+D: Some 8-bit XT disk driver and /devfs hacking 
+
+N: Greg Kroah-Hartman
+E: greg@kroah.com
+W: http://www.kroah.com/linux-usb/
+D: USB Serial Converter driver framework, USB Handspring Visor driver
+D: ConnectTech WHITEHeat USB driver, Generic USB Serial driver
+D: USB Bluetooth driver,
+D: bits and pieces of USB core code.
+
 N: Russell Kroll
 E: rkroll@exploits.org
 W: http://www.exploits.org/
@@ -1287,7 +1365,7 @@ D: Initial implementation of VC's, pty's and select()
 N: Pavel Machek
 E: pavel@atrey.karlin.mff.cuni.cz
 D: Softcursor for vga, hypertech cdrom support, vcsa bugfix
-D: Network block device, sun4/330 port 
+D: Network block device, sun4/330 port, USB
 S: Volkova 1131
 S: 198 00 Praha 9
 S: Czech Republic
@@ -1316,6 +1394,15 @@ D: Program in DOSEMU
 S: PO BOX 220, HFX. CENTRAL
 S: Halifax, Nova Scotia
 S: Canada B3J 3C8
+
+N: Petko Manolov
+E: petkan@dce.bg
+D: USB ethernet (pegasus) driver
+D: optimizing i[45]86 string routines
+D: i386 task swithing hacks
+S: 5, Vrah Mancho str.
+S: 1324 Sofia
+S: Bulgaria
 
 N: Martin Mares
 E: mj@atrey.karlin.mff.cuni.cz
@@ -1380,10 +1467,19 @@ S: Germany
 
 N: Arnaldo Carvalho de Melo
 E: acme@conectiva.com.br
+E: acme@gnu.org
+W: http://bazar.conectiva.com.br/~acme
+W: http://advogato.org/person/acme
+P: 1024D/9224DF01 D5DF E3BB E3C8 BCBB F8AD  841A B6AB 4681 9224 DF01
 D: wanrouter hacking
-D: cyclades 2X sync card driver (still in early devel stage)
-S: R. Prof. Rubens Elke Braga, 558 - Parolin
-S: 80220-320 Curitiba - Parana
+D: USB hacking
+D: misc Makefile, Config.in, drivers and network stacks fixes
+D: IPX Multithreading for 2.4
+D: Cyclom 2X synchronous card driver
+D: i18n for minicom, net-tools, util-linux, fetchmail, etc
+S: Conectiva S.A.
+S: R. Tocantins, 89 - Cristo Rei
+S: 80050-430 - Curitiba - Paraná
 S: Brazil
 
 N: Michael Meskes
@@ -1472,6 +1568,13 @@ D: Linux/Alpha
 S: 35706 Runckel Lane
 S: Fremont, California 94536
 S: USA
+
+N: Sam Mosel
+E: sam.mosel@computer.org
+D: Wacom Intuos USB Support
+S: 22 Seaview St
+S: Fullarton 5063
+S: South Australia
 
 N: Ian A. Murdock
 E: imurdock@gnu.ai.mit.edu
@@ -1576,7 +1679,7 @@ E: vojtech@suse.cz
 D: Joystick driver
 D: arcnet-hardware readme
 D: Minor ARCnet hacking
-D: USB development
+D: USB (HID, ACM, Printer ...)
 S: Ucitelska 1576
 S: Prague 8
 S: 182 00 Czech Republic
@@ -1711,10 +1814,10 @@ S: 79098 Freiburg
 S: Germany
 
 N: Joerg Reuter
-E: jreuter@poboxes.com
-W: http://poboxes.com/jreuter/
-W: http://qsl.net/dl1bke/
-D: Generic Z8530 driver, AX.25 DAMA slave implementation
+E: jreuter@yaina.de
+W: http://yaina.de/jreuter
+W: http://www.qsl.net/dl1bke/
+D: Generic Z8530 driver for AX.25, AX.25 DAMA slave implementation
 D: Several AX.25 hacks
 
 N: Francois-Rene Rideau
@@ -1799,6 +1902,14 @@ W: http://www.samba.org/netfilter/ipchains
 W: http://netfilter.kernelnotes.org/ipchains
 D: Ruggedly handsome.
 D: Developed Generic IP Firewalling Chains with Michael Neuling.
+
+N: Bill Ryder
+E: bryder@sgi.com
+D: FTDI_SIO usb/serial converter driver
+W: http://reality.sgi.com/bryder_wellington/ftdi_sio
+S: I/3 Walter St
+S: Wellington
+S: New Zealand
 
 N: Thomas Sailer
 E: sailer@ife.ee.ethz.ch
@@ -2084,17 +2195,14 @@ S: Rockville, Maryland 20853
 S: USA
 
 N: Stephen Tweedie
-E: sct@dcs.ed.ac.uk
+E: sct@redhat.com
 P: 1024/E7A417AD E2 FE A4 20 34 EC ED FC 7D 7E 67 8D E0 31 D1 69
+P: 1024D/43BE7544 D2A4 8556 08E6 90E7 076C  BA3F 243F 20A4 43BE 7544
 D: Second extended file system developer
 D: General filesystem hacker
 D: kswap vm management code
-S: Dept. of Computer Science
-S: University of Edinburgh
-S: JCMB, The King's Buildings
-S: Mayfield Road
-S: Edinburgh 
-S: EH9 3JZ
+S: 44 Campbell Park Crescent
+S: Edinburgh EH13 0HT
 S: United Kingdom
 
 N: Thomas Uhl
@@ -2314,9 +2422,10 @@ D: ARCnet stuff, Applicom board driver, SO_BINDTODEVICE,
 D: some Alpha platform porting from 2.0, Memory Technology Devices,
 D: Acquire watchdog timer, PC speaker driver maintenance,
 D: various other stuff that annoyed me by not working.
-S: c/o Red Hat UK Limited
-S: 35-36 Cambridge Place
-S: Cambridge. CB2 1NS
+S: c/o Red Hat Engineering
+S: Rustat House
+S: 60 Clifton Road
+S: Cambridge. CB1 7EG
 S: England
 
 N: Frank Xia

@@ -29,7 +29,7 @@
 #include <linux/compatmac.h>
 #include <linux/generic_serial.h>
 
-#define DEBUG 
+#define DEBUG 1
 
 static char *                  tmp_buf; 
 static DECLARE_MUTEX(tmp_buf_sem);
@@ -367,7 +367,7 @@ static int gs_wait_tx_flushed (void * ptr, int timeout)
 	struct gs_port *port = ptr;
 	long end_jiffies;
 	int jiffies_to_transmit, charsleft = 0, rv = 0;
-	int to, rcib;
+	int rcib;
 
 	func_enter();
 
@@ -391,6 +391,7 @@ static int gs_wait_tx_flushed (void * ptr, int timeout)
 		return rv;
 	}
 	/* stop trying: now + twice the time it would normally take +  seconds */
+	if (timeout == 0) timeout = MAX_SCHEDULE_TIMEOUT;
 	end_jiffies  = jiffies; 
 	if (timeout !=  MAX_SCHEDULE_TIMEOUT)
 		end_jiffies += port->baud?(2 * rcib * 10 * HZ / port->baud):0;
@@ -399,11 +400,9 @@ static int gs_wait_tx_flushed (void * ptr, int timeout)
 	gs_dprintk (GS_DEBUG_FLUSH, "now=%lx, end=%lx (%ld).\n", 
 		    jiffies, end_jiffies, end_jiffies-jiffies); 
 
-	to = 100;
 	/* the expression is actually jiffies < end_jiffies, but that won't
 	   work around the wraparound. Tricky eh? */
-	while (to-- &&
-	       (charsleft = gs_real_chars_in_buffer (port->tty)) &&
+	while ((charsleft = gs_real_chars_in_buffer (port->tty)) &&
 	        time_after (end_jiffies, jiffies)) {
 		/* Units check: 
 		   chars * (bits/char) * (jiffies /sec) / (bits/sec) = jiffies!
@@ -576,7 +575,7 @@ void gs_hangup(struct tty_struct *tty)
 	port->flags &= ~(ASYNC_NORMAL_ACTIVE|ASYNC_CALLOUT_ACTIVE |GS_ACTIVE);
 	port->tty = NULL;
 	port->count = 0;
-
+	port->event = 0;
 	wake_up_interruptible(&port->open_wait);
 	func_exit ();
 }
@@ -751,9 +750,13 @@ void gs_close(struct tty_struct * tty, struct file * filp)
 	if (!port) return;
 
 	if (!port->tty) {
+		port->rd->hungup (port);
+		return;
+#if 0
 		/* This seems to happen when this is called from vhangup. */
 		gs_dprintk (GS_DEBUG_CLOSE, "gs: Odd: port->tty is NULL\n");
 		port->tty = tty;
+#endif
 	}
 
 	save_flags(flags); cli();

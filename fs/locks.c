@@ -339,7 +339,7 @@ int fcntl_getlk(unsigned int fd, struct flock *l)
 		goto out;
 
 	error = -EINVAL;
-	if (!filp->f_dentry || !filp->f_dentry->d_inode)
+	if (!filp->f_dentry || !filp->f_dentry->d_inode || !filp->f_op)
 		goto out_putf;
 
 	if (!posix_make_lock(filp, &file_lock, &flock))
@@ -409,19 +409,17 @@ int fcntl_setlk(unsigned int fd, unsigned int cmd, struct flock *l)
 		goto out_putf;
 	if (!(inode = dentry->d_inode))
 		goto out_putf;
+	if (!filp->f_op)
+		goto out_putf;
 
 	/* Don't allow mandatory locks on files that may be memory mapped
 	 * and shared.
 	 */
 	if (IS_MANDLOCK(inode) &&
 	    (inode->i_mode & (S_ISGID | S_IXGRP)) == S_ISGID &&
-	    inode->i_mmap) {
-		struct vm_area_struct *vma = inode->i_mmap;
+	    inode->i_mmap_shared) {
 		error = -EAGAIN;
-		do {
-			if (vma->vm_flags & VM_MAYSHARE)
-				goto out_putf;
-		} while ((vma = vma->vm_next_share) != NULL);
+		goto out_putf;
 	}
 
 	error = -EINVAL;
@@ -493,7 +491,9 @@ repeat:
 	while ((fl = *before) != NULL) {
 		if ((fl->fl_flags & FL_POSIX) && fl->fl_owner == owner) {
 			int (*lock)(struct file *, int, struct file_lock *);
-			lock = filp->f_op->lock;
+			lock = NULL;
+			if(filp->f_op)
+				lock = filp->f_op->lock;
 			if (lock) {
 				file_lock = *fl;
 				file_lock.fl_type = F_UNLCK;
@@ -1134,6 +1134,8 @@ static struct file_lock *locks_init_lock(struct file_lock *new,
 		new->fl_start = fl->fl_start;
 		new->fl_end = fl->fl_end;
 		new->fl_notify = fl->fl_notify;
+		new->fl_insert = fl->fl_insert;
+		new->fl_remove = fl->fl_remove;
 		new->fl_u = fl->fl_u;
 	}
 	return new;
@@ -1151,6 +1153,9 @@ static void locks_insert_lock(struct file_lock **pos, struct file_lock *fl)
 	file_lock_table = fl;
 	fl->fl_next = *pos;	/* insert into file's list */
 	*pos = fl;
+
+	if (fl->fl_insert)
+		fl->fl_insert(fl);
 
 	return;
 }
@@ -1179,6 +1184,9 @@ static void locks_delete_lock(struct file_lock **thisfl_p, unsigned int wait)
 		prevfl->fl_nextlink = nextfl;
 	else
 		file_lock_table = nextfl;
+
+	if (thisfl->fl_remove)
+		thisfl->fl_remove(thisfl);
 	
 	locks_wake_up_blocks(thisfl, wait);
 	locks_free_lock(thisfl);

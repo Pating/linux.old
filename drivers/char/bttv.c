@@ -95,7 +95,6 @@ MODULE_PARM(pll,"1-4i");
 /* Anybody who uses more than four? */
 #define BTTV_MAX 4
 
-static int find_vga(void);
 static void bt848_set_risc_jmps(struct bttv *btv);
 
 static unsigned int vidmem=0;   /* manually set video mem address */
@@ -559,7 +558,7 @@ static struct tvcard tvcards[] =
         /* TurboTV */
         { 3, 1, 0, 2, 3, { 2, 3, 1, 1}, { 1, 1, 2, 3, 0}},
         /* Newer Hauppauge (bt878) */
-	{ 3, 1, 0, 2, 7, { 2, 0, 1, 1}, { 0, 1, 2, 3, 4}},
+	{ 4, 1, 0, 2, 7, { 2, 0, 1, 1}, { 0, 1, 2, 3, 4}},
         /* MIRO PCTV pro */
         { 3, 1, 0, 2, 65551, { 2, 3, 1, 1}, {1,65537, 0, 0,10}},
 	/* ADS Technologies Channel Surfer TV (and maybe TV+FM) */
@@ -1196,6 +1195,7 @@ static void make_clip_tab(struct bttv *btv, struct video_clip *cr, int ncr)
 		*(ro++)=cpu_to_le32(btv->bus_vbi_even);
 		*(re++)=cpu_to_le32(BT848_RISC_JUMP);
 		*(re++)=cpu_to_le32(btv->bus_vbi_odd);
+		return;
 	}
 	if (ncr < 0) {	/* bitmap was pased */
 		memcpy(clipmap, (unsigned char *)cr, VIDEO_CLIPMAP_SIZE);
@@ -1307,8 +1307,8 @@ static void bt848_set_geo(struct bttv *btv, u16 width, u16 height, u16 fmt, int 
 
 	tvn=&tvnorms[btv->win.norm];
 	
-        btv->win.cropheight=tvn->sheight;
-        btv->win.cropwidth=tvn->swidth;
+/*        btv->win.cropheight=tvn->sheight;
+          btv->win.cropwidth=tvn->swidth; set somewhere else now */
 
 /*
 	if (btv->win.cropwidth>tvn->cropwidth)
@@ -1413,6 +1413,62 @@ static void bt848_set_winsize(struct bttv *btv)
  *	Set TSA5522 synthesizer frequency in 1/16 Mhz steps
  */
 
+static void reset_cropwin(struct bttv * btv)
+{
+        btv->win.cropx=0;
+        btv->win.cropy=0;
+        btv->win.cropheight=tvnorms[btv->win.norm].sheight;
+        btv->win.cropwidth=tvnorms[btv->win.norm].swidth;
+}                       
+
+static void clip_cropwin(struct bttv * btv, u16 width, u16 height)
+{
+        /* don't allow values beyond max */
+
+        if (btv->win.cropwidth>tvnorms[btv->win.norm].swidth)
+                btv->win.cropwidth=tvnorms[btv->win.norm].swidth;
+
+	if (btv->win.cropheight>tvnorms[btv->win.norm].sheight)
+	        btv->win.cropheight=tvnorms[btv->win.norm].sheight;
+
+        /* horizontal: downscaling only (bt848 limitation)*/
+	if (width>btv->win.cropwidth)
+                btv->win.cropwidth=width;
+
+        /* horizontal scaling is kinda limited by the registers
+         probably irrelevant */
+        if (btv->win.cropwidth>((65535UL+4096UL)*width)/4096UL)
+                btv->win.cropwidth = ((65535UL+4096UL)*width)/4096UL;
+
+        /* vertical: downscaling only (not mentioned in the specs
+         but doesnt work anyways */
+        if (height>btv->win.cropheight)
+                btv->win.cropheight = height;
+
+        if (btv->win.interlace == 0)
+        {
+                if (btv->win.cropheight>127UL*height)
+                        btv->win.cropheight = 127UL*height;
+/*                if (((127UL*512UL-1023UL)*height)/512UL>btv->win.cropheight)
+                  btv->win.cropheight = (127UL*512UL-1023UL)*height/512UL;*/
+        } else
+        {
+                if (btv->win.cropheight>2UL*127UL*height)
+                        btv->win.cropheight = 2UL*127UL*height;
+                btv->win.cropheight = (btv->win.cropheight/2)*2;  /*even number */
+/*                if (((127UL*512UL-1023UL)*height)/256UL>btv->win.cropheight)
+                        btv->win.cropheight = (127UL*512UL-1023UL)*height/256UL;*/
+        }
+        
+        if (btv->win.cropx>tvnorms[btv->win.norm].swidth-btv->win.cropwidth)
+                btv->win.cropx = tvnorms[btv->win.norm].swidth-btv->win.cropwidth;
+
+        if (btv->win.cropy>tvnorms[btv->win.norm].sheight-btv->win.cropheight)
+                btv->win.cropy = tvnorms[btv->win.norm].sheight-btv->win.cropheight;
+
+        return;
+}
+
 static void set_freq(struct bttv *btv, unsigned short freq)
 {
 	int fixme = freq; /* XXX */
@@ -1496,6 +1552,10 @@ static int vgrab(struct bttv *btv, struct video_mmap *mp)
 	 *	like QCIF has meaning as a capture.
 	 */
 	 
+
+        clip_cropwin(btv, mp->width, mp->height);
+        bt848_set_geo(btv, mp->width, mp->height, mp->format, 1);
+
 	/*
 	 *	Ok load up the BT848
 	 */
@@ -1602,8 +1662,6 @@ static int bttv_open(struct video_device *dev, int flags)
         audio(btv, AUDIO_UNMUTE);
         for (i=users=0; i<bttv_num; i++)
                 users+=bttvs[i].user;
-        if (users==1)
-                find_vga();
         btv->fbuffer=NULL;
         if (!btv->fbuffer)
                 btv->fbuffer=(unsigned char *) rvmalloc(2*BTTV_MAX_FBUF);
@@ -1721,6 +1779,7 @@ static int bttv_ioctl(struct video_device *dev, unsigned int cmd, void *arg)
 			b.type = VID_TYPE_CAPTURE|
 				VID_TYPE_TELETEXT|
 				VID_TYPE_OVERLAY|
+                                VID_TYPE_SUBCAPTURE|
 				VID_TYPE_CLIPPING|
 				VID_TYPE_FRAMERAM|
 				VID_TYPE_SCALES|
@@ -1780,7 +1839,8 @@ static int bttv_ioctl(struct video_device *dev, unsigned int cmd, void *arg)
 			btv->win.norm = v.norm;
                         make_vbitab(btv);
 			bt848_set_winsize(btv);
-			btv->channel=v.channel;
+                        reset_cropwin(btv);
+ 			btv->channel=v.channel;
 			return 0;
 		}
 		case VIDIOCGTUNER:
@@ -1905,6 +1965,7 @@ static int bttv_ioctl(struct video_device *dev, unsigned int cmd, void *arg)
 			on=(btv->cap&3);
 			
 			bt848_cap(btv,0);
+                        clip_cropwin(btv, vw.width, vw.height);
 			bt848_set_winsize(btv);
 
 			/*
@@ -2226,6 +2287,8 @@ static int bttv_ioctl(struct video_device *dev, unsigned int cmd, void *arg)
 				return -EIO;
                         if (btv->frame_stat[vm.frame] == GBUFFER_GRABBING)
                                 return -EBUSY;
+
+                     
 		        return vgrab(btv, &vm);
 		}
 		
@@ -2263,7 +2326,38 @@ static int bttv_ioctl(struct video_device *dev, unsigned int cmd, void *arg)
 			return 0;
 		}
 		
-	        case BTTV_BURST_ON:
+                case VIDIOCGCAPTURE:
+                {
+                        struct video_capture vc;
+                        vc.x=btv->win.cropx;
+                        vc.y=btv->win.cropy;
+                        vc.width=btv->win.cropwidth;
+                        vc.height=btv->win.cropheight;
+                        vc.decimation=0; /* not implemented at the moment */
+                        vc.flags=0; /* dito */
+                        if(copy_to_user((void *)arg, (void *)&vc, sizeof(vc)))
+                                return -EFAULT;
+                        return 0;
+                }
+
+                case VIDIOCSCAPTURE:
+                {
+                        struct video_capture vc;
+                        if(copy_from_user((void *) &vc, (void *) arg, sizeof(vc)))
+                             return -EFAULT;
+                        if (vc.x>tvnorms[btv->win.norm].swidth||
+                            vc.y>tvnorms[btv->win.norm].sheight||
+                            vc.width>tvnorms[btv->win.norm].swidth||
+                            vc.height>tvnorms[btv->win.norm].sheight)
+                                return -EFAULT;
+                        btv->win.cropx=vc.x;
+                        btv->win.cropy=(vc.y>>1)<<1; // make even
+                        btv->win.cropwidth=vc.width;
+                        btv->win.cropheight=vc.height;                        
+                        return 0;
+                }
+
+                case BTTV_BURST_ON:
 		{
 			tvnorms[0].scaledtwidth=1135-BURSTOFFSET-2;
 			tvnorms[0].hdelayx1=186-BURSTOFFSET;
@@ -2576,242 +2670,12 @@ static struct video_device radio_template=
 };
 
 
-struct vidbases 
-{
-	unsigned short vendor, device;
-	char *name;
-	uint badr;
-};
-
-static struct vidbases vbs[] = {
-        { PCI_VENDOR_ID_ALLIANCE, PCI_DEVICE_ID_ALLIANCE_AT3D,
-                "Alliance AT3D", PCI_BASE_ADDRESS_0},
-	{ PCI_VENDOR_ID_ATI, PCI_DEVICE_ID_ATI_215CT222,
-                "ATI MACH64 CT", PCI_BASE_ADDRESS_0},
-	{ PCI_VENDOR_ID_ATI, PCI_DEVICE_ID_ATI_210888GX,
-		"ATI MACH64 Winturbo", PCI_BASE_ADDRESS_0},
- 	{ PCI_VENDOR_ID_ATI, PCI_DEVICE_ID_ATI_215GT,
-                "ATI MACH64 GT", PCI_BASE_ADDRESS_0},
-	{ PCI_VENDOR_ID_CIRRUS, 0, "Cirrus Logic", PCI_BASE_ADDRESS_0},
-	{ PCI_VENDOR_ID_DEC, PCI_DEVICE_ID_DEC_TGA,
-		"DEC DC21030", PCI_BASE_ADDRESS_0},
-	{ PCI_VENDOR_ID_MATROX, PCI_DEVICE_ID_MATROX_MIL,
-		"Matrox Millennium", PCI_BASE_ADDRESS_1},
-	{ PCI_VENDOR_ID_MATROX, PCI_DEVICE_ID_MATROX_MIL_2,
-		"Matrox Millennium II", PCI_BASE_ADDRESS_0},
-	{ PCI_VENDOR_ID_MATROX, PCI_DEVICE_ID_MATROX_MIL_2_AGP,
-		"Matrox Millennium II AGP", PCI_BASE_ADDRESS_0},
-	{ PCI_VENDOR_ID_MATROX, 0x051a, "Matrox Mystique", PCI_BASE_ADDRESS_1},
-	{ PCI_VENDOR_ID_MATROX, 0x0521, "Matrox G200", PCI_BASE_ADDRESS_0},
-	{ PCI_VENDOR_ID_N9, PCI_DEVICE_ID_N9_I128, 
-		"Number Nine Imagine 128", PCI_BASE_ADDRESS_0},
-	{ PCI_VENDOR_ID_N9, PCI_DEVICE_ID_N9_I128_2, 
-		"Number Nine Imagine 128 Series 2", PCI_BASE_ADDRESS_0},
-	{ PCI_VENDOR_ID_S3, 0, "S3", PCI_BASE_ADDRESS_0},
-	{ PCI_VENDOR_ID_TSENG, 0, "TSENG", PCI_BASE_ADDRESS_0},
-	{ PCI_VENDOR_ID_NVIDIA_SGS, PCI_DEVICE_ID_NVIDIA_SGS_RIVA128,
-                "Riva128", PCI_BASE_ADDRESS_1},
-};
-
-
-/* DEC TGA offsets stolen from XFree-3.2 */
-
-static uint dec_offsets[4] = {
-	0x200000,
-	0x804000,
-	0,
-	0x1004000
-};
-
-#define NR_CARDS (sizeof(vbs)/sizeof(struct vidbases))
-
-/* Scan for PCI display adapter
-   if more than one card is present the last one is used for now */
-
-#if LINUX_VERSION_CODE >= 0x020100
-
-static int find_vga(void)
-{
-	unsigned short badr;
-	int found = 0, i, tga_type;
-	unsigned int vidadr=0;
-	struct pci_dev *dev;
-
-
-	for (dev = pci_devices; dev != NULL; dev = dev->next) 
-	{
-		if (dev->class != PCI_CLASS_NOT_DEFINED_VGA &&
-			((dev->class) >> 16 != PCI_BASE_CLASS_DISPLAY))
-		{
-			continue;
-		}
-		if (PCI_FUNC(dev->devfn) != 0)
-			continue;
-
-		badr=0;
-		printk(KERN_INFO "bttv: PCI display adapter: ");
-		for (i=0; i<NR_CARDS; i++) 
-		{
-			if (dev->vendor == vbs[i].vendor) 
-			{
-				if (vbs[i].device) 
-					if (vbs[i].device!=dev->device)
-						continue;
-				printk("%s.\n", vbs[i].name);
-				badr=vbs[i].badr;
-				break;
-			}
-		}
-		if (!badr) 
-		{
-			printk(KERN_ERR "bttv: Unknown video memory base address.\n");
-			continue;
-		}
-		pci_read_config_dword(dev, badr, &vidadr);
-		if (vidadr & PCI_BASE_ADDRESS_SPACE_IO) 
-		{
-			printk(KERN_ERR "bttv: Memory seems to be I/O memory.\n");
-			printk(KERN_ERR "bttv: Check entry for your card type in bttv.c vidbases struct.\n");
-			continue;
-		}
-		vidadr &= PCI_BASE_ADDRESS_MEM_MASK;
-		if (!vidadr) 
-		{
-			printk(KERN_ERR "bttv: Memory @ 0, must be something wrong!");
-			continue;
-		}
-     
-		if (dev->vendor == PCI_VENDOR_ID_DEC &&
-			dev->device == PCI_DEVICE_ID_DEC_TGA) 
-		{
-			tga_type = (readl((unsigned long)vidadr) >> 12) & 0x0f;
-			if (tga_type != 0 && tga_type != 1 && tga_type != 3) 
-			{
-				printk(KERN_ERR "bttv: TGA type (0x%x) unrecognized!\n", tga_type);
-				found--;
-			}
-			vidadr+=dec_offsets[tga_type];
-		}
-		DEBUG(printk(KERN_DEBUG "bttv: memory @ 0x%08x, ", vidadr));
-		DEBUG(printk(KERN_DEBUG "devfn: 0x%04x.\n", dev->devfn));
-		found++;
-	}
-  
-	if (vidmem)
-	{
-		vidadr=vidmem<<20;
-		printk(KERN_INFO "bttv: Video memory override: 0x%08x\n", vidadr);
-		found=1;
-	}
-	for (i=0; i<BTTV_MAX; i++)
-		bttvs[i].win.vidadr=vidadr;
-
-	return found;
-}
-
-#else
-static int find_vga(void)
-{
-	unsigned int devfn, class, vendev;
-	unsigned short vendor, device, badr;
-	int found=0, bus=0, i, tga_type;
-	unsigned int vidadr=0;
-
-
-	for (devfn = 0; devfn < 0xff; devfn++) 
-	{
-		if (PCI_FUNC(devfn) != 0)
-			continue;
-		pcibios_read_config_dword(bus, devfn, PCI_VENDOR_ID, &vendev);
-		if (vendev == 0xffffffff || vendev == 0x00000000) 
-			continue;
-		pcibios_read_config_word(bus, devfn, PCI_VENDOR_ID, &vendor);
-		pcibios_read_config_word(bus, devfn, PCI_DEVICE_ID, &device);
-		pcibios_read_config_dword(bus, devfn, PCI_CLASS_REVISION, &class);
-		class = class >> 16;
-/*		if (class == PCI_CLASS_DISPLAY_VGA) {*/
-		if ((class>>8) == PCI_BASE_CLASS_DISPLAY ||
-			/* Number 9 GXE64Pro needs this */
-			class == PCI_CLASS_NOT_DEFINED_VGA) 
-		{
-			badr=0;
-			printk(KERN_INFO "bttv: PCI display adapter: ");
-			for (i=0; i<NR_CARDS; i++) 
-			{
-				if (vendor==vbs[i].vendor) 
-				{
-					if (vbs[i].device) 
-						if (vbs[i].device!=device)
-							continue;
-					printk("%s.\n", vbs[i].name);
-					badr=vbs[i].badr;
-					break;
-				}
-			}
-                        if (NR_CARDS == i)
-                            printk("UNKNOWN.\n");
-			if (!badr) 
-			{
-				printk(KERN_ERR "bttv: Unknown video memory base address.\n");
-				continue;
-			}
-			pcibios_read_config_dword(bus, devfn, badr, &vidadr);
-			if (vidadr & PCI_BASE_ADDRESS_SPACE_IO) 
-			{
-				printk(KERN_ERR "bttv: Memory seems to be I/O memory.\n");
-				printk(KERN_ERR "bttv: Check entry for your card type in bttv.c vidbases struct.\n");
-				continue;
-			}
-			vidadr &= PCI_BASE_ADDRESS_MEM_MASK;
-			if (!vidadr) 
-			{
-				printk(KERN_ERR "bttv: Memory @ 0, must be something wrong!\n");
-				continue;
-			}
-      
-			if (vendor==PCI_VENDOR_ID_DEC)
-				if (device==PCI_DEVICE_ID_DEC_TGA) 
-			{
-				tga_type = (readl((unsigned long)vidadr) >> 12) & 0x0f;
-				if (tga_type != 0 && tga_type != 1 && tga_type != 3) 
-				{
-					printk(KERN_ERR "bttv: TGA type (0x%x) unrecognized!\n", tga_type);
-					found--;
-				}
-				vidadr+=dec_offsets[tga_type];
-			}
-
-			DEBUG(printk(KERN_DEBUG "bttv: memory @ 0x%08x, ", vidadr));
-			DEBUG(printk(KERN_DEBUG "devfn: 0x%04x.\n", devfn));
-			found++;
-		}
-	}
-  
-	if (vidmem)
-	{
-                if (vidmem < 0x1000)
-                        vidadr=vidmem<<20;
-                else
-                        vidadr=vidmem;
-		printk(KERN_INFO "bttv: Video memory override: 0x%08x\n", vidadr);
-		found=1;
-	}
-	for (i=0; i<BTTV_MAX; i++)
-		bttvs[i].win.vidadr=vidadr;
-
-	return found;
-}
-#endif
-
-
 #define  TRITON_PCON	           0x50 
 #define  TRITON_BUS_CONCURRENCY   (1<<0)
 #define  TRITON_STREAMING	  (1<<1)
 #define  TRITON_WRITE_BURST	  (1<<2)
 #define  TRITON_PEER_CONCURRENCY  (1<<3)
   
-
-#if LINUX_VERSION_CODE >= 0x020100
 
 static void handle_chipset(void)
 {
@@ -2876,78 +2740,6 @@ static void handle_chipset(void)
 #endif
 	}
 }
-#else
-static void handle_chipset(void)
-{
-	int index;
-  
-	for (index = 0; index < 8; index++)
-	{
-		unsigned char bus, devfn;
-		unsigned char b;
-    
-		/* Beware the SiS 85C496 my friend - rev 49 don't work with a bttv */
-		
-		if (!pcibios_find_device(PCI_VENDOR_ID_SI, 
-					 PCI_DEVICE_ID_SI_496, 
-					 index, &bus, &devfn))
-		{
-			printk(KERN_WARNING "BT848 and SIS 85C496 chipset don't always work together.\n");
-		}			
-
-		if (!pcibios_find_device(PCI_VENDOR_ID_INTEL, 
-					 PCI_DEVICE_ID_INTEL_82441,
-					 index, &bus, &devfn)) 
-		{
-			pcibios_read_config_byte(bus, devfn, 0x53, &b);
-			DEBUG(printk(KERN_INFO "bttv: Host bridge: 82441FX Natoma, "));
-			DEBUG(printk("bufcon=0x%02x\n",b));
-		}
-
-		if (!pcibios_find_device(PCI_VENDOR_ID_INTEL, PCI_DEVICE_ID_INTEL_82437,
-			    index, &bus, &devfn)) 
-		{
-			printk(KERN_INFO "bttv: Host bridge 82437FX Triton PIIX\n");
-			triton1=BT848_INT_ETBF;
-			
-#if 0			
-			/* The ETBF bit SHOULD make all this unnecessary */
-			/* 430FX (Triton I) freezes with bus concurrency on -> switch it off */
-			{   
-			        unsigned char bo;
-
-				pcibios_read_config_byte(bus, devfn, TRITON_PCON, &b);
-				bo=b;
-				DEBUG(printk(KERN_DEBUG "bttv: 82437FX: PCON: 0x%x\n",b));
-
-				if(!(b & TRITON_BUS_CONCURRENCY)) 
-				{
-					printk(KERN_WARNING "bttv: 82437FX: disabling bus concurrency\n");
-					b |= TRITON_BUS_CONCURRENCY;
-				}
-
-				if(b & TRITON_PEER_CONCURRENCY) 
-				{
-					printk(KERN_WARNING "bttv: 82437FX: disabling peer concurrency\n");
-					b &= ~TRITON_PEER_CONCURRENCY;
-				}
-				if(!(b & TRITON_STREAMING)) 
-				{
-					printk(KERN_WARNING "bttv: 82437FX: disabling streaming\n");
-					b |=  TRITON_STREAMING;
-				}
-
-				if (b!=bo) 
-				{
-					pcibios_write_config_byte(bus, devfn, TRITON_PCON, b); 
-					printk(KERN_DEBUG "bttv: 82437FX: PCON changed to: 0x%x\n",b);
-				}
-			}
-#endif
-		}
-	}
-}
-#endif
 
 static void init_tea6300(struct i2c_bus *bus) 
 {
@@ -3444,6 +3236,7 @@ static void bttv_irq(int irq, void *dev_id, struct pt_regs * regs)
 					btv->grf = btv->grf_next;
                                         btv->risc_jmp[5]=cpu_to_le32(btv->gro);
 					btv->risc_jmp[11]=cpu_to_le32(btv->gre);
+                                        clip_cropwin(btv, btv->gwidth, btv->gheight);
 					bt848_set_geo(btv, btv->gwidth,
 						      btv->gheight,
 						      btv->gfmt, 0);
@@ -3451,7 +3244,9 @@ static void bttv_irq(int irq, void *dev_id, struct pt_regs * regs)
 					bt848_set_risc_jmps(btv);
 					btand(~BT848_VSCALE_COMB, BT848_E_VSCALE_HI);
 					btand(~BT848_VSCALE_COMB, BT848_O_VSCALE_HI);
-                                        bt848_set_geo(btv, btv->win.width, 
+					clip_cropwin(btv, btv->win.width, 
+                                                        btv->win.height);
+					bt848_set_geo(btv, btv->win.width, 
 						      btv->win.height,
 						      btv->win.color_fmt, 0);
 				}
@@ -3463,7 +3258,8 @@ static void bttv_irq(int irq, void *dev_id, struct pt_regs * regs)
 			        btv->risc_jmp[5]=cpu_to_le32(btv->gro);
 				btv->risc_jmp[11]=cpu_to_le32(btv->gre);
 				btv->risc_jmp[12]=cpu_to_le32(BT848_RISC_JUMP);
-				bt848_set_geo(btv, btv->gwidth, btv->gheight,
+                                clip_cropwin(btv, btv->gwidth, btv->gheight);
+                                bt848_set_geo(btv, btv->gwidth, btv->gheight,
 					      btv->gfmt, 0);
 			}
 		}

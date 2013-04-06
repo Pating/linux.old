@@ -220,6 +220,8 @@ static char *mpc_family(int family,int model)
 		return("Pentium(tm)");
 	if (family==0x0F && model==0x0F)
 		return("Special controller");
+	if (family==0x0F && model==0x00)
+		return("Pentium 4(tm)");
 	if (family==0x04 && model<9)
 		return model_defs[model];
 	sprintf(n,"Unknown CPU [%d:%d]",family, model);
@@ -364,13 +366,20 @@ static int __init smp_read_mpc(struct mp_config_table *mpc)
 					(struct mpc_config_ioapic *)mpt;
 				if (m->mpc_flags&MPC_APIC_USABLE)
 				{
-					ioapics++;
-					printk("I/O APIC #%d Version %d at 0x%lX.\n",
-						m->mpc_apicid,m->mpc_apicver,
-						m->mpc_apicaddr);
-					mp_apics [mp_apic_entries] = *m;
-					if (++mp_apic_entries > MAX_IO_APICS)
-						--mp_apic_entries;
+					if(m->mpc_apicaddr == 0)
+					{
+						printk(KERN_ERR "Error - Non MP compliant BIOS. Skipping invalid io-apic!\n");
+					}
+					else
+					{
+						ioapics++;
+						printk("I/O APIC #%d Version %d at 0x%lX.\n",
+							m->mpc_apicid,m->mpc_apicver,
+							m->mpc_apicaddr);
+						mp_apics [mp_apic_entries] = *m;
+						if (++mp_apic_entries > MAX_IO_APICS)
+							--mp_apic_entries;
+					}
 				}
 				mpt+=sizeof(*m);
 				count+=sizeof(*m);
@@ -405,6 +414,12 @@ static int __init smp_read_mpc(struct mp_config_table *mpc)
 	if (ioapics > MAX_IO_APICS)
 	{
 		printk("Warning: Max I/O APICs exceeded (max %d, found %d).\n", MAX_IO_APICS, ioapics);
+		printk("Warning: switching to non APIC mode.\n");
+		skip_ioapic_setup=1;
+	}
+	if (ioapics == 0)
+	{
+		printk("Warning: BIOS table gives no I/O APIC.\n");
 		printk("Warning: switching to non APIC mode.\n");
 		skip_ioapic_setup=1;
 	}
@@ -658,7 +673,7 @@ static unsigned long __init setup_trampoline(void)
 	return virt_to_phys(trampoline_base);
 }
 
-extern unsigned long i386_endbase __initdata;
+extern unsigned long i386_endbase;
 /*
  *	We are called very early to get the low memory for the
  *	SMP bootup trampoline page.
@@ -1107,7 +1122,8 @@ int __init start_secondary(void *unused)
 	 */
 	smp_callin();
 	while (!atomic_read(&smp_commenced))
-		/* nothing */ ;
+		rep_nop() /* bus friendly nothing */ ;
+		
 	return cpu_idle(NULL);
 }
 
@@ -1596,12 +1612,12 @@ void __init smp_boot_cpus(void)
 		for(i=0;i<32;i++)
 		{
 			if (cpu_online_map&(1<<i))
-				bogosum+=cpu_data[i].loops_per_sec;
+				bogosum+=cpu_data[i].loops_per_jiffy;
 		}
 		printk(KERN_INFO "Total of %d processors activated (%lu.%02lu BogoMIPS).\n",
 			cpucount+1,
-			(bogosum+2500)/500000,
-			((bogosum+2500)/5000)%100);
+			bogosum/(500000/HZ),
+			(bogosum/(5000/HZ))%100);
 		SMP_PRINTK(("Before bogocount - setting activated=1.\n"));
 		smp_activated=1;
 		smp_num_cpus=cpucount+1;
@@ -1813,7 +1829,7 @@ static inline void send_IPI_single(int dest, int vector)
 void smp_flush_tlb(void)
 {
 	int cpu = smp_processor_id();
-	int stuck;
+	long long stuck;
 	unsigned long flags;
 
 	/*
@@ -1853,7 +1869,7 @@ void smp_flush_tlb(void)
 		 * guessed from the TSC calibration.
 		 */
 
-		stuck = 50000000 + cpu_data[cpu].loops_per_sec/2;
+		stuck = 50000000 + cpu_data[cpu].loops_per_jiffy*(HZ/2);
 		while (smp_invalidate_needed) {
 			/*
 			 * Take care of "crossing" invalidates

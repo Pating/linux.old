@@ -41,6 +41,9 @@ extern int nr_queued_signals, max_queued_signals;
 
 #ifdef CONFIG_KMOD
 extern char modprobe_path[];
+#ifdef CONFIG_HOTPLUG
+extern char hotplug_path[];
+#endif
 #endif
 #ifdef CONFIG_CHR_DEV_SG
 extern int sg_big_buff;
@@ -55,6 +58,13 @@ extern int shmall_max;
 extern char reboot_command [];
 extern int stop_a_enabled;
 #endif
+
+#ifdef CONFIG_ARCH_S390
+#ifdef CONFIG_IEEEFPU_EMULATION
+extern int sysctl_ieee_emulation_warnings;
+#endif
+#endif
+
 #ifdef __powerpc__
 extern unsigned long htab_reclaim_on, zero_paged_on, powersave_nap;
 int proc_dol2crvec(ctl_table *table, int write, struct file *filp,
@@ -207,6 +217,10 @@ static ctl_table kern_table[] = {
 #ifdef CONFIG_KMOD
 	{KERN_MODPROBE, "modprobe", &modprobe_path, 256,
 	 0644, NULL, &proc_dostring, &sysctl_string },
+#ifdef CONFIG_HOTPLUG
+	{KERN_HOTPLUG, "hotplug", &hotplug_path, 256,
+	 0644, NULL, &proc_dostring, &sysctl_string },
+#endif
 #endif
 #ifdef CONFIG_CHR_DEV_SG
 	{KERN_SG_BIG_BUFF, "sg-big-buff", &sg_big_buff, sizeof (int),
@@ -230,7 +244,13 @@ static ctl_table kern_table[] = {
 #ifdef CONFIG_MAGIC_SYSRQ
 	{KERN_SYSRQ, "sysrq", &sysrq_enabled, sizeof (int),
 	 0644, NULL, &proc_dointvec},
-#endif	 
+#endif
+#ifdef CONFIG_ARCH_S390
+#ifdef CONFIG_IEEEFPU_EMULATION
+	{KERN_IEEE_EMULATION_WARNINGS,"ieee_emulation_warnings",
+	 &sysctl_ieee_emulation_warnings,sizeof(int),0644,NULL,&proc_dointvec},
+#endif
+#endif 
 	{0}
 };
 
@@ -1147,6 +1167,13 @@ int sysctl_string(ctl_table *table, int *name, int nlen,
 }
 
 int sysctl_intvec(ctl_table *table, int *name, int nlen,
+		void *oldval, size_t *oldlenp,
+		void *newval, size_t newlen, void **context)
+{
+	return -ENOSYS;
+}
+
+int sysctl_jiffies(ctl_table *table, int *name, int nlen,
 		void *oldval, size_t *oldlenp,
 		void *newval, size_t newlen, void **context)
 {

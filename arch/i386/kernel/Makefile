@@ -15,7 +15,7 @@ all: kernel.o head.o init_task.o
 O_TARGET := kernel.o
 O_OBJS   := process.o signal.o entry.o traps.o irq.o vm86.o \
             ptrace.o ioport.o ldt.o setup.o time.o sys_i386.o \
-	    bluesmoke.o
+	    bluesmoke.o dmi_scan.o
 OX_OBJS  := i386_ksyms.o
 MX_OBJS  :=
 
@@ -32,6 +32,30 @@ OX_OBJS += mtrr.o
 else
   ifeq ($(CONFIG_MTRR),m)
   MX_OBJS += mtrr.o
+  endif
+endif
+
+ifeq ($(CONFIG_MICROCODE),y)
+OX_OBJS += microcode.o
+else
+  ifeq ($(CONFIG_MICROCODE),m)
+  MX_OBJS += microcode.o
+  endif
+endif
+
+ifeq ($(CONFIG_X86_MSR),y)
+OX_OBJS += msr.o
+else
+  ifeq ($(CONFIG_X86_MSR),m)
+  MX_OBJS += msr.o
+  endif
+endif
+
+ifeq ($(CONFIG_X86_CPUID),y)
+OX_OBJS += cpuid.o
+else
+  ifeq ($(CONFIG_X86_CPUID),m)
+  MX_OBJS += cpuid.o
   endif
 endif
 

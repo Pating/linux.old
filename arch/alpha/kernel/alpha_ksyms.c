@@ -37,6 +37,7 @@
 extern struct hwrpb_struct *hwrpb;
 extern void dump_thread(struct pt_regs *, struct user *);
 extern int dump_fpu(struct pt_regs *, elf_fpregset_t *);
+extern spinlock_t rtc_lock;
 
 /* these are C runtime functions with special calling conventions: */
 extern void __divl (void);
@@ -188,6 +189,8 @@ EXPORT_SYMBOL(local_bh_count);
 EXPORT_SYMBOL(local_irq_count);
 #endif /* __SMP__ */
 
+EXPORT_SYMBOL(rtc_lock);
+
 /*
  * The following are special because they're not called
  * explicitly (the C compiler or assembler generates them in
@@ -207,5 +210,6 @@ EXPORT_SYMBOL_NOVERS(__remq);
 EXPORT_SYMBOL_NOVERS(__remqu);
 EXPORT_SYMBOL_NOVERS(memcpy);
 EXPORT_SYMBOL_NOVERS(memset);
+EXPORT_SYMBOL_NOVERS(memscan);
 
 

@@ -23,8 +23,6 @@
 #include <linux/serial.h>
 #include <linux/locks.h>
 #include <linux/delay.h>
-#include <linux/minix_fs.h>
-#include <linux/ext2_fs.h>
 #include <linux/random.h>
 #include <linux/reboot.h>
 #include <linux/pagemap.h>
@@ -76,6 +74,9 @@ __attribute__((section("__ksymtab"))) = {
 #ifdef CONFIG_KMOD
 EXPORT_SYMBOL(request_module);
 EXPORT_SYMBOL(exec_usermodehelper);
+#ifdef CONFIG_HOTPLUG
+EXPORT_SYMBOL(hotplug_path);
+#endif
 #endif
 
 #ifdef CONFIG_MODULES
@@ -90,6 +91,7 @@ EXPORT_SYMBOL(exit_mm);
 EXPORT_SYMBOL(exit_files);
 EXPORT_SYMBOL(exit_fs);
 EXPORT_SYMBOL(exit_sighand);
+EXPORT_SYMBOL(daemonize);
 
 /* internal kernel memory management */
 EXPORT_SYMBOL(__get_free_pages);
@@ -98,6 +100,7 @@ EXPORT_SYMBOL(__free_pages);
 EXPORT_SYMBOL(kmem_find_general_cachep);
 EXPORT_SYMBOL(kmem_cache_create);
 EXPORT_SYMBOL(kmem_cache_shrink);
+EXPORT_SYMBOL(kmem_cache_destroy);
 EXPORT_SYMBOL(kmem_cache_alloc);
 EXPORT_SYMBOL(kmem_cache_free);
 EXPORT_SYMBOL(kmalloc);
@@ -126,6 +129,7 @@ EXPORT_SYMBOL(__fput);
 EXPORT_SYMBOL(igrab);
 EXPORT_SYMBOL(iunique);
 EXPORT_SYMBOL(iget);
+EXPORT_SYMBOL(iget4);
 EXPORT_SYMBOL(iget_in_use);
 EXPORT_SYMBOL(iput);
 EXPORT_SYMBOL(__namei);
@@ -156,6 +160,7 @@ EXPORT_SYMBOL(invalidate_inodes);
 EXPORT_SYMBOL(invalidate_inode_pages);
 EXPORT_SYMBOL(truncate_inode_pages);
 EXPORT_SYMBOL(fsync_dev);
+EXPORT_SYMBOL(vfs_permission);
 EXPORT_SYMBOL(permission);
 EXPORT_SYMBOL(inode_setattr);
 EXPORT_SYMBOL(inode_change_ok);
@@ -195,8 +200,15 @@ EXPORT_SYMBOL(vfs_rmdir);
 EXPORT_SYMBOL(vfs_unlink);
 EXPORT_SYMBOL(vfs_rename);
 EXPORT_SYMBOL(__pollwait);
+EXPORT_SYMBOL(read_cache_page);
 EXPORT_SYMBOL(ROOT_DEV);
 EXPORT_SYMBOL(inode_generation_count);
+
+EXPORT_SYMBOL(page_cache_size);
+EXPORT_SYMBOL(page_hash_table);
+EXPORT_SYMBOL(page_hash_mask);
+EXPORT_SYMBOL(page_hash_bits);
+EXPORT_SYMBOL(__wait_on_page);
 
 #if !defined(CONFIG_NFSD) && defined(CONFIG_NFSD_MODULE)
 EXPORT_SYMBOL(do_nfsservctl);
@@ -272,6 +284,7 @@ EXPORT_SYMBOL(unregister_exec_domain);
 EXPORT_SYMBOL(register_sysctl_table);
 EXPORT_SYMBOL(unregister_sysctl_table);
 EXPORT_SYMBOL(sysctl_string);
+EXPORT_SYMBOL(sysctl_jiffies);
 EXPORT_SYMBOL(sysctl_intvec);
 EXPORT_SYMBOL(proc_dostring);
 EXPORT_SYMBOL(proc_dointvec);
@@ -338,7 +351,7 @@ EXPORT_SYMBOL(schedule_timeout);
 EXPORT_SYMBOL(jiffies);
 EXPORT_SYMBOL(xtime);
 EXPORT_SYMBOL(do_gettimeofday);
-EXPORT_SYMBOL(loops_per_sec);
+EXPORT_SYMBOL(loops_per_jiffy);
 EXPORT_SYMBOL(kstat);
 EXPORT_SYMBOL(pidhash); 
 
@@ -427,7 +440,7 @@ EXPORT_SYMBOL(strnicmp);
 EXPORT_SYMBOL(init_task_union);
 
 /* Support for external backtracer */ 
-extern char _stext[], _etext[];
+extern char _stext, _etext;
 EXPORT_SYMBOL(_stext);
 EXPORT_SYMBOL(_etext); 
 EXPORT_SYMBOL(module_list); 

@@ -732,7 +732,7 @@ static void ixj_timeout(unsigned long ptr)
 						if (j->m_DAAShadowRegs.XOP_REGS.XOP.xr0.bitreg.Caller_ID) {
 							if (j->daa_mode == SOP_PU_RINGING && j->flags.pstn_ringing) {
 								j->pstn_cid_intr = 1;
-								j->pstn_cid_recieved = jiffies;
+								j->pstn_cid_received = jiffies;
 							}
 						}
 					} else {
@@ -740,7 +740,7 @@ static void ixj_timeout(unsigned long ptr)
 							daa_int_read(board);
 						}
 						j->ex.bits.pstn_ring = 0;
-						if (j->pstn_cid_intr && jiffies > j->pstn_cid_recieved + (hertz * 3)) {
+						if (j->pstn_cid_intr && jiffies > j->pstn_cid_received + (hertz * 3)) {
 							if (j->daa_mode == SOP_PU_RINGING) {
 								ixj_daa_cid_read(board);
 								j->ex.bits.caller_id = 1;
@@ -4473,14 +4473,21 @@ static int ixj_build_cadence(int board, IXJ_CADENCE * cp)
 	if (lcp == NULL)
 		return -ENOMEM;
 	if (copy_from_user(lcp, (char *) cp, sizeof(IXJ_CADENCE)))
+	{
+		kfree(lcp);
 		return -EFAULT;
+	}
 	lcep = kmalloc(sizeof(IXJ_CADENCE_ELEMENT) * lcp->elements_used, GFP_KERNEL);
 	if (lcep == NULL) {
 		kfree(lcp);
 		return -ENOMEM;
 	}
 	if (copy_from_user(lcep, lcp->ce, sizeof(IXJ_CADENCE_ELEMENT) * lcp->elements_used))
+	{
+		kfree(lcep);
+		kfree(lcp);
 		return -EFAULT;
+	}
 	if (j->cadence_t) {
 		kfree(j->cadence_t->ce);
 		kfree(j->cadence_t);

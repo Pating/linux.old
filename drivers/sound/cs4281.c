@@ -75,24 +75,6 @@ EXPORT_NO_SYMBOLS;
 
 #include <linux/version.h>
 
-#if LINUX_VERSION_CODE < 0x02030d
-#ifdef MODULE
-#define __exit
-#define module_exit(x) void cleanup_module(void) { x(); }
-#define module_init(x) int init_module(void) { return x(); }
-#else
-#define __exit __attribute__ ((unused, __section__ (".text.init")))
-#define module_exit(x) // nothing 
-#define module_init(x) // nothing 
-#endif
-
-#define DECLARE_WAIT_QUEUE_HEAD(w) struct wait_queue *w = NULL
-#define DECLARE_WAITQUEUE(w,c) struct wait_queue w = {(c), NULL}
-#define wait_queue_head_t struct wait_queue *
-#define init_waitqueue_head(w) *(w) = 0
-#define init_MUTEX(m) *(m) = MUTEX
-#endif
-
 // MIDI buffer sizes 
 #define MIDIINBUF  500
 #define MIDIOUTBUF 500
@@ -123,7 +105,6 @@ struct cs4281_state {
         unsigned int pBA0phys, pBA1phys;
         char *pBA0, *pBA1; 
         unsigned int irq;
-	int endofbuffer;
 
         // mixer registers 
         struct {
@@ -182,7 +163,7 @@ struct cs4281_state {
 };
 
 
-struct cs4281_state *devs = NULL;
+static struct cs4281_state *devs = NULL;
 // --------------------------------------------------------------------- 
 //
 //		Hardware Interfaces For the CS4281
@@ -870,7 +851,7 @@ static void clear_advance(void *buf, unsigned bsize, unsigned bptr, unsigned len
 static void cs4281_update_ptr(struct cs4281_state *s)
 {
         int diff;
-        unsigned hwptr, va, temp1;
+        unsigned hwptr, va;
 
         // update ADC pointer 
         if (s->ena & FMODE_READ) {
@@ -895,7 +876,7 @@ static void cs4281_update_ptr(struct cs4281_state *s)
 	// check for end of buffer, means that we are going to wait for another interrupt
 	// to allow silence to fill the fifos on the part, to keep pops down to a minimum.
 	//
-        if ( (s->ena & FMODE_WRITE) && (!s->endofbuffer) )
+        if (s->ena & FMODE_WRITE)
 	{
                 hwptr = readl(s->pBA0+BA0_DCA0);          // Read play DMA address.
                 va = virt_to_bus(s->dma_dac.rawbuf);
@@ -910,15 +891,12 @@ static void cs4281_update_ptr(struct cs4281_state *s)
                 } else {
                         s->dma_dac.count -= diff;
                         if (s->dma_dac.count <= 0) {
-                                s->ena &= ~FMODE_WRITE;
-                                temp1 = readl(s->pBA0+BA0_DCR0);
 			//
-			// fill with silence, and wait on turning off the DAC until interrupt routine.
-			// wait on "Poke(pBA0+BA0_DCR0, temp1 | DCRn_MSK);    // Stop Play DMA"
+			// fill with silence, and do not shut down the DAC.
+			// Continue to play silence until the _release.
 			//
 				memset(s->dma_dac.rawbuf, (s->fmt & (AFMT_U8 | AFMT_U16_LE)) ? 0x80 : 0, 
 					s->dma_dac.dmasize); 
-				s->endofbuffer = 1;
                         } else if (s->dma_dac.count <= (signed)s->dma_dac.fragsize
                                                          && !s->dma_dac.endcleared) {
                                 clear_advance(s->dma_dac.rawbuf, 
@@ -1086,12 +1064,12 @@ static int mixer_ioctl(struct cs4281_state *s, unsigned int cmd, unsigned long a
         if (cmd == OSS_GETVERSION)
                 return put_user(SOUND_VERSION, (int *)arg);
         
-        if (_IOC_TYPE(cmd) != 'M' || _IOC_SIZE(cmd) != sizeof(int))
+        if (_IOC_TYPE(cmd) != 'M' || _SIOC_SIZE(cmd) != sizeof(int))
                 return -EINVAL;
         
              // If ioctl has only the IOC_READ bit(bit 31)
              // on, process the only-read commands. 
-        if (_IOC_DIR(cmd) == _IOC_READ) {
+        if (_SIOC_DIR(cmd) == _SIOC_READ) {
                 switch (_IOC_NR(cmd)) {
                 case SOUND_MIXER_RECSRC: // Arg contains a bit for each recording source 
                     cs4281_read_ac97(s, BA0_AC97_RECORD_SELECT, &temp1);
@@ -1125,7 +1103,7 @@ static int mixer_ioctl(struct cs4281_state *s, unsigned int cmd, unsigned long a
         
              // If ioctl doesn't have both the IOC_READ and 
              // the IOC_WRITE bit set, return invalid.
-        if (_IOC_DIR(cmd) != (_IOC_READ|_IOC_WRITE))
+        if (_SIOC_DIR(cmd) != (_SIOC_READ|_SIOC_WRITE))
                 return -EINVAL;
         
              // Increment the count of volume writes.
@@ -1927,7 +1905,6 @@ static int cs4281_open(struct inode *inode, struct file *file)
         s->rate = 8000;
         s->clkdiv = 96 | 0x80;
         s->ena = 0;
-	s->endofbuffer = 0;
         s->dma_adc.ossfragshift = s->dma_adc.ossmaxfrags = s->dma_adc.subdivision = 0;
         s->dma_dac.ossfragshift = s->dma_dac.ossmaxfrags = s->dma_dac.subdivision = 0;
         s->open_mode |= file->f_mode & (FMODE_READ | FMODE_WRITE);
@@ -2023,22 +2000,7 @@ static void cs4281_interrupt(int irq, void *dev_id, struct pt_regs *regs)
         writel(HICR_IEV| HICR_CHGM, s->pBA0+BA0_HICR);  // Local EOI
         
         spin_lock(&s->lock);
-	//
-	// ok, at this point we assume that the fifos have been filled
-	// with silence and so we now turn off the DMA engine.
-	// if FMODE_WRITE is set that means that some thread
-	// attempted to start_dac, which probably means that an open
-	// occurred, so do not stop the dac in this case.
-	//
-	if(s->endofbuffer && !(s->ena & FMODE_WRITE))
-	{
-		writel(temp1|DCRn_MSK, s->pBA0+BA0_DCR0);    // Stop Play DMA
-		s->endofbuffer = 0;
-	}
-	else
-	{
-        	cs4281_update_ptr(s);
-	}
+        cs4281_update_ptr(s);
         cs4281_handle_midi(s);
         spin_unlock(&s->lock);
 }

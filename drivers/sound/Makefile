@@ -60,7 +60,6 @@ obj-$(CONFIG_SOUND_CS4232)	+= cs4232.o ad1848.o
 obj-$(CONFIG_SOUND_CS4232)	+= uart401.o
 obj-$(CONFIG_SOUND_GUS)		+= gus.o ad1848.o
 obj-$(CONFIG_SOUND_MAD16)	+= mad16.o ad1848.o sb.o uart401.o
-obj-$(CONFIG_SOUND_VIA82CXXX)	+= via82cxxx.o sb.o uart401.o 
 obj-$(CONFIG_SOUND_YMPCI)	+= ymfsb.o sb.o uart401.o ac97.o
 obj-$(CONFIG_SOUND_MAUI)	+= maui.o mpu401.o
 obj-$(CONFIG_SOUND_MPU401)	+= mpu401.o
@@ -97,6 +96,8 @@ obj-$(CONFIG_SOUND_ICH)		+= i810_audio.o ac97_codec.o
 obj-$(CONFIG_SOUND_MAESTRO)	+= maestro.o
 obj-$(CONFIG_SOUND_SONICVIBES)	+= sonicvibes.o
 obj-$(CONFIG_SOUND_TRIDENT)     += trident.o ac97_codec.o
+obj-$(CONFIG_SOUND_VIA82CXXX)	+= via82cxxx_audio.o ac97_codec.o
+obj-$(CONFIG_SOUND_YMFPCI)	+= ymfpci.o ac97_codec.o
 
 ifeq ($(CONFIG_SOUND_EMU10K1),y)
   obj-y				+= emu10k1/emu10k1.o
@@ -121,7 +122,7 @@ pas2-objs	:= pas2_card.o pas2_midi.o pas2_mixer.o pas2_pcm.o
 sb-objs		:= sb_audio.o sb_card.o sb_common.o sb_midi.o sb_mixer.o	\
 			   sb_ess.o
 softoss2-objs	:= softoss.o softoss_rs.o
-vidc_mod-objs	:= vidc.o vidc_audio.o vidc_fill.o vidc_mixer.o vidc_synth.o
+vidc_mod-objs	:= vidc.o vidc_fill.o vidc_synth.o
 wavefront-objs  := wavfront.o wf_midi.o yss225.o
 nm256-objs	:= nm256_audio.o ac97.o
 via82cxxx-objs  := via82cxxx_audio.o ac97.o
@@ -166,19 +167,19 @@ obj-y		:= $(filter-out $(list-multi), $(obj-y)) $(int-y)
 
 # Translate to Rules.make lists.
 
-L_TARGET	:= sound.a
+O_TARGET	:= sounddrivers.o
 # This is a nice idea but needs depmod altering
 #MOD_LIST_NAME	:= SOUND_MODULES
 
-L_OBJS		:= $(sort $(filter-out $(export-objs), $(obj-y)))
-LX_OBJS		:= $(sort $(filter     $(export-objs), $(obj-y)))
+O_OBJS		:= $(sort $(filter-out $(export-objs), $(obj-y)))
+OX_OBJS		:= $(sort $(filter     $(export-objs), $(obj-y)))
 M_OBJS		:= $(sort $(filter-out $(export-objs), $(obj-m)))
 MX_OBJS		:= $(sort $(filter     $(export-objs), $(obj-m)))
 MI_OBJS		:= $(sort $(filter-out $(export-objs), $(int-m)))
 MIX_OBJS	:= $(sort $(filter     $(export-objs), $(int-m)))
 
 ifeq ($(CONFIG_LOWLEVEL_SOUND),y)
-    L_OBJS	+= lowlevel/lowlevel.o
+    O_OBJS	+= lowlevel/lowlevel.o
 endif
 
 include $(TOPDIR)/Rules.make

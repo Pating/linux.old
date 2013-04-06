@@ -133,21 +133,10 @@
 #if LINUX_VERSION_CODE < 0x02030d
 #ifdef MODULE
 #define __exit
-#define module_exit(x) void cleanup_module(void) { x(); }
-#define module_init(x) int init_module(void) { return x(); }
 #else
 #define __exit __attribute__ ((unused, __section__ (".text.init")))
-#define module_exit(x) /* nothing */
-#define module_init(x) /* nothing */
 #endif
 
-#define DECLARE_WAIT_QUEUE_HEAD(w) struct wait_queue *w = NULL
-#define DECLARE_WAITQUEUE(w,c) struct wait_queue w = {(c), NULL}
-#define wait_queue_head_t struct wait_queue *
-#define init_waitqueue_head(w) *(w) = 0
-#define init_MUTEX(m) *(m) = MUTEX
-#define __set_current_state(x) do { current->state = (x); } while (0)
-#define set_current_state(x) __set_current_state(x)
 #endif
 
 /* --------------------------------------------------------------------- */
@@ -229,7 +218,7 @@ struct solo1_state {
 
 /* --------------------------------------------------------------------- */
 
-struct solo1_state *devs = NULL;
+static struct solo1_state *devs = NULL;
 
 /* --------------------------------------------------------------------- */
 
@@ -741,9 +730,9 @@ static int mixer_ioctl(struct solo1_state *s, unsigned int cmd, unsigned long ar
 	}
 	if (cmd == OSS_GETVERSION)
 		return put_user(SOUND_VERSION, (int *)arg);
-	if (_IOC_TYPE(cmd) != 'M' || _IOC_SIZE(cmd) != sizeof(int))
+	if (_IOC_TYPE(cmd) != 'M' || _SIOC_SIZE(cmd) != sizeof(int))
                 return -EINVAL;
-        if (_IOC_DIR(cmd) == _IOC_READ) {
+        if (_SIOC_DIR(cmd) == _SIOC_READ) {
                 switch (_IOC_NR(cmd)) {
                 case SOUND_MIXER_RECSRC: /* Arg contains a bit for each recording source */
 			return put_user(mixer_src[read_mixer(s, 0x1c) & 7], (int *)arg);
@@ -772,7 +761,7 @@ static int mixer_ioctl(struct solo1_state *s, unsigned int cmd, unsigned long ar
 			return put_user(s->mix.vol[vidx-1], (int *)arg);
 		}
 	}
-        if (_IOC_DIR(cmd) != (_IOC_READ|_IOC_WRITE)) 
+        if (_SIOC_DIR(cmd) != (_SIOC_READ|_SIOC_WRITE)) 
 		return -EINVAL;
 	s->mix.modcnt++;
 	switch (_IOC_NR(cmd)) {

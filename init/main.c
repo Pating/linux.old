@@ -22,9 +22,14 @@
 #include <linux/smp_lock.h>
 #include <linux/blk.h>
 #include <linux/hdreg.h>
+#include <linux/init.h>
 
 #include <asm/io.h>
 #include <asm/bugs.h>
+
+#ifdef CONFIG_ARCH_S390
+#include <asm/s390mach.h>
+#endif
 
 #ifdef CONFIG_PCI
 #include <linux/pci.h>
@@ -40,10 +45,6 @@
 
 #ifdef CONFIG_MTRR
 #  include <asm/mtrr.h>
-#endif
-
-#ifdef CONFIG_APM
-#include <linux/apm_bios.h>
 #endif
 
 #ifdef CONFIG_DASD
@@ -107,8 +108,12 @@ extern void smp_setup(char *str, int *ints);
 extern void ioapic_pirq_setup(char *str, int *ints);
 extern void ioapic_setup(char *str, int *ints);
 #endif
+#ifdef CONFIG_MICROCODE
+extern int microcode_init(void);
+#endif
 extern void no_scroll(char *str, int *ints);
 extern void kbd_reset_setup(char *str, int *ints);
+extern void aux_reconnect_setup(char *str, int *ints);
 extern void panic_setup(char *str, int *ints);
 extern void bmouse_setup(char *str, int *ints);
 extern void msmouse_setup(char *str, int *ints);
@@ -224,6 +229,7 @@ extern void aha152x_setup(char *str, int *ints);
 extern void aha1542_setup(char *str, int *ints);
 extern void gdth_setup(char *str, int *ints);
 extern void aic7xxx_setup(char *str, int *ints);
+extern void ips_setup(char *str, int *ints);
 extern void AM53C974_setup(char *str, int *ints);
 extern void BusLogic_Setup(char *str, int *ints);
 extern void ncr53c8xx_setup(char *str, int *ints);
@@ -397,6 +403,10 @@ extern void dquot_init_hash(void);
 
 #ifdef CONFIG_MD_BOOT
 extern void md_setup(char *str,int *ints) __init;
+#endif
+
+#ifdef CONFIG_AGP
+extern int agp_init (void);
 #endif
 
 /*
@@ -753,6 +763,9 @@ static struct kernel_param cooked_params[] __initdata = {
 #ifdef CONFIG_VT
 	{ "kbd-reset", kbd_reset_setup },
 #endif
+#if defined(CONFIG_PSMOUSE) && defined (CONFIG_VT)
+	{ "psaux-reconnect", aux_reconnect_setup },
+#endif
 #ifdef CONFIG_BUGi386
 	{ "no-hlt", no_halt },
 	{ "no387", no_387 },
@@ -861,6 +874,9 @@ static struct kernel_param cooked_params[] __initdata = {
 #endif
 #ifdef CONFIG_SCSI_AIC7XXX
 	{ "aic7xxx=", aic7xxx_setup},
+#endif
+#ifdef CONFIG_SCSI_IPS
+	{ "ips=", ips_setup},
 #endif
 #ifdef CONFIG_SCSI_BUSLOGIC
 	{ "BusLogic=", BusLogic_Setup},
@@ -1080,9 +1096,6 @@ static struct kernel_param raw_params[] __initdata = {
 #ifdef CONFIG_PARIDE_PG
         { "pg.", pg_setup },
 #endif
-#ifdef CONFIG_APM
-	{ "apm=", apm_setup },
-#endif
 #ifdef CONFIG_N2
 	{ "n2=", n2_setup },
 #endif
@@ -1107,6 +1120,7 @@ static struct kernel_param raw_params[] __initdata = {
 #endif
 	{ 0, 0 }
 };
+
 
 #ifdef CONFIG_BLK_DEV_RAM
 static void __init ramdisk_start_setup(char *str, int *ints)
@@ -1136,6 +1150,7 @@ static void __init ramdisk_size(char *str, int *ints)
 
 static int __init checksetup(char *line)
 {
+	struct new_kernel_param *p;
 	int i, ints[11];
 
 #ifdef CONFIG_BLK_DEV_IDE
@@ -1159,14 +1174,25 @@ static int __init checksetup(char *line)
 			return 1;
 		}
 	}
+
+	/* Now handle new-style __setup parameters */
+	p = &__setup_start;
+	while (p < &__setup_end) {
+		int n = strlen(p->str);
+		if (!strncmp(line,p->str,n)) {
+			if (p->setup_func(line+n))
+				return 1;
+		}
+		p++;
+	}
 	return 0;
 }
 
 /* this should be approx 2 Bo*oMips to start (note initial shift), and will
    still work even if initially too large, it will just take slightly longer */
-unsigned long loops_per_sec = (1<<12);
+unsigned long loops_per_jiffy = (1<<12);
 
-/* This is the number of bits of precision for the loops_per_second.  Each
+/* This is the number of bits of precision for the loops_per_jiffy.  Each
    bit takes on average 1.5/HZ seconds.  This (like the original) is a little
    better than 1% */
 #define LPS_PREC 8
@@ -1176,42 +1202,40 @@ void __init calibrate_delay(void)
 	unsigned long ticks, loopbit;
 	int lps_precision = LPS_PREC;
 
-	loops_per_sec = (1<<12);
+	loops_per_jiffy = (1<<12);
 
 	printk("Calibrating delay loop... ");
-	while (loops_per_sec <<= 1) {
+	while (loops_per_jiffy <<= 1) {
 		/* wait for "start of" clock tick */
 		ticks = jiffies;
 		while (ticks == jiffies)
 			/* nothing */;
 		/* Go .. */
 		ticks = jiffies;
-		__delay(loops_per_sec);
+		__delay(loops_per_jiffy);
 		ticks = jiffies - ticks;
 		if (ticks)
 			break;
 	}
 
-/* Do a binary approximation to get loops_per_second set to equal one clock
+/* Do a binary approximation to get loops_per_jiffy set to equal one clock
    (up to lps_precision bits) */
-	loops_per_sec >>= 1;
-	loopbit = loops_per_sec;
+	loops_per_jiffy >>= 1;
+	loopbit = loops_per_jiffy;
 	while ( lps_precision-- && (loopbit >>= 1) ) {
-		loops_per_sec |= loopbit;
+		loops_per_jiffy |= loopbit;
 		ticks = jiffies;
 		while (ticks == jiffies);
 		ticks = jiffies;
-		__delay(loops_per_sec);
+		__delay(loops_per_jiffy);
 		if (jiffies != ticks)	/* longer than 1 tick */
-			loops_per_sec &= ~loopbit;
+			loops_per_jiffy &= ~loopbit;
 	}
 
-/* finally, adjust loops per second in terms of seconds instead of clocks */	
-	loops_per_sec *= HZ;
 /* Round the value and print it */	
 	printk("%lu.%02lu BogoMIPS\n",
-		(loops_per_sec+2500)/500000,
-		((loops_per_sec+2500)/5000) % 100);
+		loops_per_jiffy/(500000/HZ),
+		(loops_per_jiffy/(5000/HZ)) % 100);
 }
 
 /*
@@ -1267,6 +1291,10 @@ static void __init parse_options(char *line)
 		}
 		if (!strcmp(line,"debug")) {
 			console_loglevel = 10;
+			continue;
+		}
+		if (!strcmp(line,"quiet")) {
+			console_loglevel = 4;
 			continue;
 		}
 		if (!strncmp(line,"init=",5)) {
@@ -1457,6 +1485,21 @@ static void __init no_initrd(char *s,int *ints)
 
 struct task_struct *child_reaper = &init_task;
 
+
+static void __init do_initcalls(void)
+{
+	initcall_t *call;
+
+	call = &__initcall_start;
+	
+	while (call < &__initcall_end)
+	{
+		(*call)();
+		call++;
+	} 
+}
+
+
 /*
  * Ok, the machine is now initialized. None of the devices
  * have been touched yet, but the CPU subsystem is up and
@@ -1497,6 +1540,10 @@ static void __init do_basic_setup(void)
 	 * Ok, at this point all CPU's should be initialized, so
 	 * we can start looking into devices..
 	 */
+#ifdef CONFIG_ARCH_S390
+	s390_init_machine_check();
+#endif
+
 #ifdef CONFIG_PCI
 	pci_init();
 #endif
@@ -1520,6 +1567,9 @@ static void __init do_basic_setup(void)
 #endif
 #ifdef CONFIG_MAC
 	nubus_init();
+#endif
+#ifdef CONFIG_AGP
+	agp_init();
 #endif
 
 	/* Networking initialization needs a process context */ 
@@ -1555,11 +1605,19 @@ static void __init do_basic_setup(void)
 	/* .. executable formats .. */
 	binfmt_setup();
 
+	/* the functions marked initcall  */
+	
+	do_initcalls();
+
 	/* .. filesystems .. */
 	filesystem_setup();
 
 #ifdef CONFIG_IRDA
 	irda_device_init(); /* Must be done after protocol initialization */
+#endif
+
+#ifdef CONFIG_MICROCODE
+	microcode_init();
 #endif
 
 	/* Mount the root filesystem.. */

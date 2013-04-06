@@ -120,14 +120,14 @@ static long long ext2_file_lseek(
 		case 1:
 			offset += file->f_pos;
 	}
-	if (((unsigned long long) offset >> 32) != 0) {
 #if BITS_PER_LONG < 64
+	if (offset >> 31)
 		return -EINVAL;
 #else
-		if (offset > ext2_max_sizes[EXT2_BLOCK_SIZE_BITS(inode->i_sb)])
-			return -EINVAL;
+	if (offset < 0 ||
+	    offset > ext2_max_sizes[EXT2_BLOCK_SIZE_BITS(inode->i_sb)])
+		return -EINVAL;
 #endif
-	} 
 	if (offset != file->f_pos) {
 		file->f_pos = offset;
 		file->f_reada = 0;
@@ -136,7 +136,7 @@ static long long ext2_file_lseek(
 	return offset;
 }
 
-static inline void remove_suid(struct inode *inode)
+inline void ext2_remove_suid(struct inode *inode)
 {
 	unsigned int mode;
 
@@ -190,7 +190,7 @@ static ssize_t ext2_file_write (struct file * filp, const char * buf,
 			      inode->i_mode);
 		return -EINVAL;
 	}
-	remove_suid(inode);
+	ext2_remove_suid(inode);
 
 	if (filp->f_flags & O_APPEND)
 		pos = inode->i_size;

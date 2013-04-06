@@ -131,6 +131,10 @@
 #include "aha1740.h"
 #endif
 
+#ifdef CONFIG_SCSI_AACRAID
+#include "aacraid/include/linit.h"
+#endif
+
 #ifdef CONFIG_SCSI_AIC7XXX
 #include "aic7xxx.h"
 #endif
@@ -361,6 +365,11 @@
 #include "imm.h"
 #endif
 
+#ifdef CONFIG_SCSI_CPQFCTS
+#include "cpqfcTS.h"
+#endif 
+
+
 /*
 static const char RCSid[] = "$Header: /vger/u4/cvs/linux/drivers/scsi/hosts.c,v 1.20 1996/12/12 19:18:32 davem Exp $";
 */
@@ -483,6 +492,9 @@ static Scsi_Host_Template builtin_scsi_hosts[] =
 #endif
 #ifdef CONFIG_SCSI_AHA1740
     AHA1740,
+#endif
+#ifdef CONFIG_SCSI_AACRAID
+    AAC_HOST_TEMPLATE_ENTRY,
 #endif
 #ifdef CONFIG_SCSI_AIC7XXX
     AIC7XXX,
@@ -634,6 +646,10 @@ static Scsi_Host_Template builtin_scsi_hosts[] =
 #endif
 #ifdef CONFIG_SCSI_DEBUG
     SCSI_DEBUG,
+#endif
+/* CPQFCTS needs to be last because it can never be the boot device. */
+#ifdef CONFIG_SCSI_CPQFCTS
+   CPQFCTS,
 #endif
 };
 

@@ -102,13 +102,6 @@
 #include "syncppp.h"
 #include "cosa.h"
 
-/* Linux version stuff */
-#if LINUX_VERSION_CODE < KERNEL_VERSION(2,3,1)
-typedef struct wait_queue *wait_queue_head_t;
-#define DECLARE_WAITQUEUE(wait, current) \
-	struct wait_queue wait = { current, NULL }
-#endif
-
 /* Maximum length of the identification string. */
 #define COSA_MAX_ID_STRING	128
 
@@ -575,6 +568,7 @@ static void sppp_channel_init(struct channel_data *chan)
 	struct device *d;
 	chan->if_ptr = &chan->pppdev;
 	chan->pppdev.dev = kmalloc(sizeof(struct device), GFP_KERNEL);
+	memset(chan->pppdev.dev, 0, sizeof(struct device));
 	sppp_attach(&chan->pppdev);
 	d=chan->pppdev.dev;
 	d->name = chan->name;
