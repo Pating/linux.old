@@ -44,7 +44,7 @@ else
 fi
 
 bool 'Symmetric multi-processing support' CONFIG_SMP
-if [ "$CONFIG_6xx" != "y" ];then
+if [ "$CONFIG_6xx" = "y" ];then
   bool 'AltiVec Support' CONFIG_ALTIVEC
 fi
 

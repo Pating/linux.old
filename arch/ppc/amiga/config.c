@@ -6,7 +6,6 @@
 void (*mach_kbd_reset_setup) (char *, int) __initdata = 0;
 
 #include <asm/io.h>
-#include <asm/system.h>
 
 /*
  *  linux/arch/m68k/amiga/config.c

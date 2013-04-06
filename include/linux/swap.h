@@ -61,7 +61,9 @@ struct swap_info_struct {
 };
 
 extern int nr_swap_pages;
-extern int nr_free_pages;
+FASTCALL(unsigned int nr_free_pages(void));
+FASTCALL(unsigned int nr_free_buffer_pages(void));
+FASTCALL(unsigned int nr_free_highpages(void));
 extern int nr_lru_pages;
 extern struct list_head lru_cache;
 extern atomic_t nr_async_pages;
@@ -112,8 +114,10 @@ extern unsigned int nr_swapfiles;
 extern struct swap_info_struct swap_info[];
 extern int is_swap_partition(kdev_t);
 extern void si_swapinfo(struct sysinfo *);
-extern swp_entry_t get_swap_page(void);
-extern void swap_free(swp_entry_t);
+extern swp_entry_t __get_swap_page(unsigned short);
+#define get_swap_page() __get_swap_page(1)
+extern void __swap_free(swp_entry_t, unsigned short);
+#define swap_free(entry) __swap_free((entry), 1)
 struct swap_list_t {
 	int head;	/* head of priority-ordered swapfile list */
 	int next;	/* swapfile to be used next */

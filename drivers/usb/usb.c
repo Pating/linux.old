@@ -720,7 +720,7 @@ static int usb_parse_configuration(struct usb_device *dev, struct usb_config_des
 	}
 
 	memset(config->interface, 0,
-	       config->bNumInterfaces*sizeof(struct usb_interface_descriptor));
+	       config->bNumInterfaces * sizeof(struct usb_interface));
 
 	buffer += config->bLength;
 	size -= config->bLength;
@@ -1140,13 +1140,16 @@ char *usb_string(struct usb_device *dev, int index)
 	}
 
 	if (usb_get_string(dev, dev->string_langid, index, u.buffer, 4) < 0 ||
-	    usb_get_string(dev, dev->string_langid, index, u.buffer,
-			      u.desc.bLength) < 0) {
+	    ((ret = usb_get_string(dev, dev->string_langid, index, u.buffer,
+			      u.desc.bLength)) < 0)) {
 		printk(KERN_ERR "usb: error retrieving string\n");
 		return NULL;
 	}
 
+	if (ret > 0) ret /= 2;		/* going from 16-bit chars to 8-bit */
 	len = u.desc.bLength / 2;	/* includes terminating null */
+					/* after removing bLength & bDescType */
+	if (ret < len) len = ret;	/* use min of (ret, len) */
 
 	ptr = kmalloc(len, GFP_KERNEL);
 	if (!ptr) {

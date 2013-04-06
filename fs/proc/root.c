@@ -22,11 +22,6 @@
 #include <linux/zorro.h>
 #endif
 
-/*
- * Offset of the first process in the /proc root directory..
- */
-#define FIRST_PROCESS_ENTRY 256
-
 static int proc_root_readdir(struct file *, void *, filldir_t);
 static struct dentry *proc_root_lookup(struct inode *,struct dentry *);
 static int proc_unlink(struct inode *, struct dentry *);
@@ -37,22 +32,12 @@ static unsigned char proc_alloc_map[PROC_NDYNAMIC / 8] = {0};
  * These are the generic /proc directory operations. They
  * use the in-memory "struct proc_dir_entry" tree to parse
  * the /proc directory.
- *
- * NOTE! The /proc/scsi directory currently does not correctly
- * build up the proc_dir_entry tree, and will show up empty.
  */
 static struct file_operations proc_dir_operations = {
 	NULL,			/* lseek - default */
 	NULL,			/* read - bad */
 	NULL,			/* write - bad */
 	proc_readdir,		/* readdir */
-	NULL,			/* poll - default */
-	NULL,			/* ioctl - default */
-	NULL,			/* mmap */
-	NULL,			/* no special open code */
-	NULL,			/* flush */
-	NULL,			/* no special release code */
-	NULL			/* can't fsync */
 };
 
 /*
@@ -62,23 +47,6 @@ struct inode_operations proc_dir_inode_operations = {
 	&proc_dir_operations,	/* default net directory file-ops */
 	NULL,			/* create */
 	proc_lookup,		/* lookup */
-	NULL,			/* link */
-	NULL,			/* unlink */
-	NULL,			/* symlink */
-	NULL,			/* mkdir */
-	NULL,			/* rmdir */
-	NULL,			/* mknod */
-	NULL,			/* rename */
-	NULL,			/* readlink */
-	NULL,			/* follow_link */
-	NULL,			/* get_block */
-	NULL,			/* readpage */
-	NULL,			/* writepage */
-	NULL,			/* flushpage */
-	NULL,			/* truncate */
-	NULL,			/* permission */
-	NULL,			/* smap */
-	NULL			/* revalidate */
 };
 
 /*
@@ -90,21 +58,6 @@ struct inode_operations proc_dyna_dir_inode_operations = {
 	proc_lookup,		/* lookup */
 	NULL,			/* link	*/
 	proc_unlink,		/* unlink(struct inode *, struct dentry *) */
-	NULL,			/* symlink	*/
-	NULL,			/* mkdir */
-	NULL,			/* rmdir */
-	NULL,			/* mknod */
-	NULL,			/* rename */
-	NULL,			/* readlink */
-	NULL,			/* follow_link */
-	NULL,			/* get_block */
-	NULL,			/* readpage */
-	NULL,			/* writepage */
-	NULL,			/* flushpage */
-	NULL,			/* truncate */
-	NULL,			/* permission */
-	NULL,			/* smap */
-	NULL			/* revalidate */
 };
 
 /*
@@ -117,13 +70,6 @@ static struct file_operations proc_root_operations = {
 	NULL,			/* read - bad */
 	NULL,			/* write - bad */
 	proc_root_readdir,	/* readdir */
-	NULL,			/* poll - default */
-	NULL,			/* ioctl - default */
-	NULL,			/* mmap */
-	NULL,			/* no special open code */
-	NULL,			/* flush */
-	NULL,			/* no special release code */
-	NULL			/* no fsync */
 };
 
 /*
@@ -133,23 +79,6 @@ static struct inode_operations proc_root_inode_operations = {
 	&proc_root_operations,	/* default base directory file-ops */
 	NULL,			/* create */
 	proc_root_lookup,	/* lookup */
-	NULL,			/* link */
-	NULL,			/* unlink */
-	NULL,			/* symlink */
-	NULL,			/* mkdir */
-	NULL,			/* rmdir */
-	NULL,			/* mknod */
-	NULL,			/* rename */
-	NULL,			/* readlink */
-	NULL,			/* follow_link */
-	NULL,			/* get_block */
-	NULL,			/* readpage */
-	NULL,			/* writepage */
-	NULL,			/* flushpage */
-	NULL,			/* truncate */
-	NULL,			/* permission */
-	NULL,			/* smap */
-	NULL			/* revalidate */
 };
 
 /*
@@ -164,8 +93,7 @@ struct proc_dir_entry proc_root = {
 	&proc_root, NULL
 };
 
-struct proc_dir_entry *proc_net, *proc_scsi, *proc_bus, *proc_sysvipc,
-		      *proc_root_fs, *proc_root_driver;
+struct proc_dir_entry *proc_net, *proc_bus, *proc_root_fs, *proc_root_driver;
 
 #ifdef CONFIG_MCA
 struct proc_dir_entry *proc_mca;
@@ -268,36 +196,12 @@ static struct file_operations proc_openprom_operations = {
 	NULL,			/* read - bad */
 	NULL,			/* write - bad */
 	OPENPROM_DEFREADDIR,	/* readdir */
-	NULL,			/* poll - default */
-	NULL,			/* ioctl - default */
-	NULL,			/* mmap */
-	NULL,			/* no special open code */
-	NULL,			/* flush */
-	NULL,			/* no special release code */
-	NULL			/* can't fsync */
 };
 
 struct inode_operations proc_openprom_inode_operations = {
 	&proc_openprom_operations,/* default net directory file-ops */
 	NULL,			/* create */
 	OPENPROM_DEFLOOKUP,	/* lookup */
-	NULL,			/* link */
-	NULL,			/* unlink */
-	NULL,			/* symlink */
-	NULL,			/* mkdir */
-	NULL,			/* rmdir */
-	NULL,			/* mknod */
-	NULL,			/* rename */
-	NULL,			/* readlink */
-	NULL,			/* follow_link */
-	NULL,			/* get_block */
-	NULL,			/* readpage */
-	NULL,			/* writepage */
-	NULL,			/* flushpage */
-	NULL,			/* truncate */
-	NULL,			/* permission */
-	NULL,			/* smap */
-	NULL			/* revalidate */
 };
 
 struct proc_dir_entry proc_openprom = {
@@ -320,6 +224,73 @@ static int make_inode_number(void)
 	set_bit(i, (void *) proc_alloc_map);
 	return PROC_DYNAMIC_FIRST + i;
 }
+
+int proc_readlink(struct dentry * dentry, char * buffer, int buflen)
+{
+	struct inode *inode = dentry->d_inode;
+	struct proc_dir_entry * de;
+	char 	*page;
+	int len = 0;
+
+	de = (struct proc_dir_entry *) inode->u.generic_ip;
+	if (!de)
+		return -ENOENT;
+	if (!(page = (char*) __get_free_page(GFP_KERNEL)))
+		return -ENOMEM;
+
+	if (de->readlink_proc)
+		len = de->readlink_proc(de, page);
+
+	if (len > buflen)
+		len = buflen;
+
+	copy_to_user(buffer, page, len);
+	free_page((unsigned long) page);
+	return len;
+}
+
+struct dentry * proc_follow_link(struct dentry * dentry, struct dentry *base, unsigned int follow)
+{
+	struct inode *inode = dentry->d_inode;
+	struct proc_dir_entry * de;
+	char 	*page;
+	struct dentry *d;
+	int len = 0;
+
+	de = (struct proc_dir_entry *) inode->u.generic_ip;
+	if (!(page = (char*) __get_free_page(GFP_KERNEL)))
+		return NULL;
+
+	if (de->readlink_proc)
+		len = de->readlink_proc(de, page);
+
+	d = lookup_dentry(page, base, follow);
+	free_page((unsigned long) page);
+	return d;
+}
+
+static struct inode_operations proc_link_inode_operations = {
+	NULL,			/* no file-ops */
+	NULL,			/* create */
+	NULL,			/* lookup */
+	NULL,			/* link */
+	NULL,			/* unlink */
+	NULL,			/* symlink */
+	NULL,			/* mkdir */
+	NULL,			/* rmdir */
+	NULL,			/* mknod */
+	NULL,			/* rename */
+	proc_readlink,		/* readlink */
+	proc_follow_link,	/* follow_link */
+	NULL,			/* get_block */
+	NULL,			/* readpage */
+	NULL,			/* writepage */
+	NULL,			/* flushpage */
+	NULL,			/* truncate */
+	NULL,			/* permission */
+	NULL,			/* smap */
+	NULL			/* revalidate */
+};
 
 int proc_register(struct proc_dir_entry * dir, struct proc_dir_entry * dp)
 {
@@ -433,50 +404,6 @@ static struct dentry * proc_self_follow_link(struct dentry *dentry,
 	return lookup_dentry(tmp, base, follow);
 }	
 
-int proc_readlink(struct dentry * dentry, char * buffer, int buflen)
-{
-	struct inode *inode = dentry->d_inode;
-	struct proc_dir_entry * de;
-	char 	*page;
-	int len = 0;
-
-	de = (struct proc_dir_entry *) inode->u.generic_ip;
-	if (!de)
-		return -ENOENT;
-	if (!(page = (char*) __get_free_page(GFP_KERNEL)))
-		return -ENOMEM;
-
-	if (de->readlink_proc)
-		len = de->readlink_proc(de, page);
-
-	if (len > buflen)
-		len = buflen;
-
-	copy_to_user(buffer, page, len);
-	free_page((unsigned long) page);
-	return len;
-}
-
-struct dentry * proc_follow_link(struct dentry * dentry, struct dentry *base, unsigned int follow)
-{
-	struct inode *inode = dentry->d_inode;
-	struct proc_dir_entry * de;
-	char 	*page;
-	struct dentry *d;
-	int len = 0;
-
-	de = (struct proc_dir_entry *) inode->u.generic_ip;
-	if (!(page = (char*) __get_free_page(GFP_KERNEL)))
-		return NULL;
-
-	if (de->readlink_proc)
-		len = de->readlink_proc(de, page);
-
-	d = lookup_dentry(page, base, follow);
-	free_page((unsigned long) page);
-	return d;
-}
-
 static struct inode_operations proc_self_inode_operations = {
 	NULL,			/* no file-ops */
 	NULL,			/* create */
@@ -500,29 +427,6 @@ static struct inode_operations proc_self_inode_operations = {
 	NULL			/* revalidate */
 };
 
-static struct inode_operations proc_link_inode_operations = {
-	NULL,			/* no file-ops */
-	NULL,			/* create */
-	NULL,			/* lookup */
-	NULL,			/* link */
-	NULL,			/* unlink */
-	NULL,			/* symlink */
-	NULL,			/* mkdir */
-	NULL,			/* rmdir */
-	NULL,			/* mknod */
-	NULL,			/* rename */
-	proc_readlink,		/* readlink */
-	proc_follow_link,	/* follow_link */
-	NULL,			/* get_block */
-	NULL,			/* readpage */
-	NULL,			/* writepage */
-	NULL,			/* flushpage */
-	NULL,			/* truncate */
-	NULL,			/* permission */
-	NULL,			/* smap */
-	NULL			/* revalidate */
-};
-
 static struct proc_dir_entry proc_root_self = {
 	0, 4, "self",
 	S_IFLNK | S_IRUGO | S_IWUGO | S_IXUGO, 1, 0, 0,
@@ -533,21 +437,16 @@ static struct proc_dir_entry proc_root_ppc_htab = {
 	0, 8, "ppc_htab",
 	S_IFREG | S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH, 1, 0, 0,
 	0, &proc_ppc_htab_inode_operations,
-	NULL, NULL,                		/* get_info, fill_inode */
-	NULL,					/* next */
-	NULL, NULL				/* parent, subdir */
 };
 #endif
 
 void __init proc_root_init(void)
 {
-	proc_base_init();
 	proc_misc_init();
 	proc_register(&proc_root, &proc_root_self);
 	proc_net = create_proc_entry("net", S_IFDIR, 0);
-	proc_scsi = create_proc_entry("scsi", S_IFDIR, 0);
 #ifdef CONFIG_SYSVIPC
-	proc_sysvipc = create_proc_entry("sysvipc", S_IFDIR, 0);
+	create_proc_entry("sysvipc", S_IFDIR, 0);
 #endif
 #ifdef CONFIG_SYSCTL
 	proc_sys_root = create_proc_entry("sys", S_IFDIR, 0);
@@ -613,7 +512,7 @@ struct dentry *proc_lookup(struct inode * dir, struct dentry *dentry)
 			if (de->namelen != dentry->d_name.len)
 				continue;
 			if (!memcmp(dentry->d_name.name, de->name, de->namelen)) {
-				int ino = de->low_ino | (dir->i_ino & ~(0xffff));
+				int ino = de->low_ino;
 				error = -EINVAL;
 				inode = proc_get_inode(dir->i_sb, ino, de);
 				break;
@@ -631,11 +530,7 @@ struct dentry *proc_lookup(struct inode * dir, struct dentry *dentry)
 
 static struct dentry *proc_root_lookup(struct inode * dir, struct dentry * dentry)
 {
-	unsigned int pid, c;
 	struct task_struct *p;
-	const char *name;
-	struct inode *inode;
-	int len;
 
 	if (dir->i_ino == PROC_ROOT_INO) { /* check for safety... */
 		extern unsigned long total_forks;
@@ -666,40 +561,7 @@ static struct dentry *proc_root_lookup(struct inode * dir, struct dentry * dentr
 	if (!proc_lookup(dir, dentry))
 		return NULL;
 	
-	pid = 0;
-	name = dentry->d_name.name;
-	len = dentry->d_name.len;
-	while (len-- > 0) {
-		c = *name - '0';
-		name++;
-		if (c > 9) {
-			pid = 0;
-			break;
-		}
-		pid *= 10;
-		pid += c;
-		if (!pid)
-			break;
-		if (pid & 0xffff0000) {
-			pid = 0;
-			break;
-		}
-	}
-	read_lock(&tasklist_lock);
-	p = find_task_by_pid(pid);
-	read_unlock(&tasklist_lock);
-	inode = NULL;
-	if (pid && p) {
-		unsigned long ino = (pid << 16) + PROC_PID_INO;
-		inode = proc_get_inode(dir->i_sb, ino, &proc_pid);
-		if (!inode)
-			return ERR_PTR(-EINVAL);
-		inode->i_flags|=S_IMMUTABLE;
-	}
-
-	dentry->d_op = &proc_dentry_operations;
-	d_add(dentry, inode);
-	return NULL;
+	return proc_pid_lookup(dir, dentry);
 }
 
 /*
@@ -738,7 +600,6 @@ int proc_readdir(struct file * filp,
 			filp->f_pos++;
 			/* fall through */
 		default:
-			ino &= ~0xffff;
 			de = de->subdir;
 			i -= 2;
 			for (;;) {
@@ -751,7 +612,7 @@ int proc_readdir(struct file * filp,
 			}
 
 			do {
-				if (filldir(dirent, de->name, de->namelen, filp->f_pos, ino | de->low_ino) < 0)
+				if (filldir(dirent, de->name, de->namelen, filp->f_pos, de->low_ino) < 0)
 					return 0;
 				filp->f_pos++;
 				de = de->next;
@@ -760,69 +621,19 @@ int proc_readdir(struct file * filp,
 	return 1;
 }
 
-#define PROC_NUMBUF 10
-#define PROC_MAXPIDS 20
-
-/*
- * Get a few pid's to return for filldir - we need to hold the
- * tasklist lock while doing this, and we must release it before
- * we actually do the filldir itself, so we use a temp buffer..
- */
-static int get_pid_list(int index, unsigned int *pids)
-{
-	struct task_struct *p;
-	int nr_pids = 0;
-
-	index -= FIRST_PROCESS_ENTRY;
-	read_lock(&tasklist_lock);
-	for_each_task(p) {
-		int pid = p->pid;
-		if (!pid)
-			continue;
-		if (--index >= 0)
-			continue;
-		pids[nr_pids] = pid;
-		nr_pids++;
-		if (nr_pids >= PROC_MAXPIDS)
-			break;
-	}
-	read_unlock(&tasklist_lock);
-	return nr_pids;
-}
-
 static int proc_root_readdir(struct file * filp,
 	void * dirent, filldir_t filldir)
 {
-	unsigned int pid_array[PROC_MAXPIDS];
-	char buf[PROC_NUMBUF];
 	unsigned int nr = filp->f_pos;
-	unsigned int nr_pids, i;
 
 	if (nr < FIRST_PROCESS_ENTRY) {
 		int error = proc_readdir(filp, dirent, filldir);
 		if (error <= 0)
 			return error;
-		filp->f_pos = nr = FIRST_PROCESS_ENTRY;
+		filp->f_pos = FIRST_PROCESS_ENTRY;
 	}
 
-	nr_pids = get_pid_list(nr, pid_array);
-
-	for (i = 0; i < nr_pids; i++) {
-		int pid = pid_array[i];
-		ino_t ino = (pid << 16) + PROC_PID_INO;
-		unsigned long j = PROC_NUMBUF;
-
-		do {
-			j--;
-			buf[j] = '0' + (pid % 10);
-			pid /= 10;
-		} while (pid);
-
-		if (filldir(dirent, buf+j, PROC_NUMBUF-j, filp->f_pos, ino) < 0)
-			break;
-		filp->f_pos++;
-	}
-	return 0;
+	return proc_pid_readdir(filp, dirent, filldir);
 }
 
 static int proc_unlink(struct inode *dir, struct dentry *dentry)

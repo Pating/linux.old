@@ -59,10 +59,6 @@
 
 #define MAXHOSTS 32
 
-struct proc_dir_entry proc_scsi_i2o_scsi = {
-	PROC_SCSI_I2O, 8, "i2o_scsi", S_IFDIR | S_IRUGO | S_IXUGO, 2
-};
-
 struct i2o_scsi_host
 {
 	struct i2o_controller *controller;
@@ -587,7 +583,7 @@ int i2o_scsi_queuecommand(Scsi_Cmnd * SCpnt, void (*done) (Scsi_Cmnd *))
 		m = I2O_POST_READ32(c);
 	}
 	while(m==0xFFFFFFFF);
-	msg = c->mem_offset + m;
+	msg = (u32 *)(c->mem_offset + m);
 	
 	/*
 	 *	Put together a scsi execscb message

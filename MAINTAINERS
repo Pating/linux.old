@@ -482,10 +482,18 @@ P:	Jaroslav Kysela
 M:	perex@suse.cz
 S:	Maintained
 
-ISDN SUBSYSTEM
+ISDN SUBSYSTEM (general)
 P:	Fritz Elfert
-M:	fritz@wuemaus.franken.de
-L:	isdn4linux@hub-wue.franken.de
+M:	fritz@isdn4linux.de
+L:	isdn4linux@listserv.isdn4linux.de
+W:	http://www.isdn4linux.de
+S:	Maintained
+
+ISDN SUBSYSTEM (card drivers)
+P:	Karsten Keil
+M:	kkeil@suse.de
+L:	isdn4linux@listserv.isdn4linux.de
+W:	http://www.isdn4linux.de
 S:	Maintained
 
 JOYSTICK DRIVER
@@ -514,10 +522,10 @@ M:	eis@baty.hanse.de
 L:	linux-x25@vger.rutgers.edu
 S:	Maintained
 
-LINUX FOR POWERPC (PREP)
+LINUX FOR POWERPC
 P:	Cort Dougan
-M:	cort@cs.nmt.edu
-W:	http://linuxppc.cs.nmt.edu/
+M:	cort@ppc.kernel.org
+W:	http://www.ppc.kernel.org/
 S:	Maintained
 
 LINUX FOR POWER MACINTOSH

@@ -17,8 +17,6 @@
 #include <linux/kernel.h>
 #include <linux/kernel_stat.h>
 #include <linux/tty.h>
-#include <linux/user.h>
-#include <linux/a.out.h>
 #include <linux/string.h>
 #include <linux/mman.h>
 #include <linux/proc_fs.h>
@@ -30,6 +28,7 @@
 #include <linux/slab.h>
 #include <linux/smp.h>
 #include <linux/signal.h>
+#include <linux/module.h>
 
 #include <asm/uaccess.h>
 #include <asm/pgtable.h>
@@ -163,6 +162,8 @@ static int meminfo_read_proc(char *page, char **start, off_t off,
                 "Cached:    %8u kB\n"
                 "HighTotal: %8lu kB\n"
                 "HighFree:  %8lu kB\n"
+                "LowTotal:  %8lu kB\n"
+                "LowFree:   %8lu kB\n"
                 "SwapTotal: %8lu kB\n"
                 "SwapFree:  %8lu kB\n",
                 K(i.totalram),
@@ -172,6 +173,8 @@ static int meminfo_read_proc(char *page, char **start, off_t off,
                 K(atomic_read(&page_cache_size)),
                 K(i.totalhigh),
                 K(i.freehigh),
+                K(i.totalram-i.totalhigh),
+                K(i.freeram-i.freehigh),
                 K(i.totalswap),
                 K(i.freeswap));
 
@@ -545,12 +548,80 @@ static int memory_read_proc(char *page, char **start, off_t off,
 	return len;
 }
 
+/*
+ * This function accesses profiling information. The returned data is
+ * binary: the sampling step and the actual contents of the profile
+ * buffer. Use of the program readprofile is recommended in order to
+ * get meaningful info out of these data.
+ */
+static ssize_t read_profile(struct file *file, char *buf,
+			    size_t count, loff_t *ppos)
+{
+	unsigned long p = *ppos;
+	ssize_t read;
+	char * pnt;
+	unsigned int sample_step = 1 << prof_shift;
+
+	if (p >= (prof_len+1)*sizeof(unsigned int))
+		return 0;
+	if (count > (prof_len+1)*sizeof(unsigned int) - p)
+		count = (prof_len+1)*sizeof(unsigned int) - p;
+	read = 0;
+
+	while (p < sizeof(unsigned int) && count > 0) {
+		put_user(*((char *)(&sample_step)+p),buf);
+		buf++; p++; count--; read++;
+	}
+	pnt = (char *)prof_buffer + p - sizeof(unsigned int);
+	copy_to_user(buf,(void *)pnt,count);
+	read += count;
+	*ppos += read;
+	return read;
+}
+
+/*
+ * Writing to /proc/profile resets the counters
+ *
+ * Writing a 'profiling multiplier' value into it also re-sets the profiling
+ * interrupt frequency, on architectures that support this.
+ */
+static ssize_t write_profile(struct file * file, const char * buf,
+			     size_t count, loff_t *ppos)
+{
+#ifdef __SMP__
+	extern int setup_profiling_timer (unsigned int multiplier);
+
+	if (count==sizeof(int)) {
+		unsigned int multiplier;
+
+		if (copy_from_user(&multiplier, buf, sizeof(int)))
+			return -EFAULT;
+
+		if (setup_profiling_timer(multiplier))
+			return -EINVAL;
+	}
+#endif
+
+	memset(prof_buffer, 0, prof_len * sizeof(*prof_buffer));
+	return count;
+}
+
+static struct file_operations proc_profile_operations = {
+	NULL,           /* lseek */
+	read_profile,
+	write_profile,
+};
+
+static struct inode_operations proc_profile_inode_operations = {
+	&proc_profile_operations,
+};
+
 static struct proc_dir_entry proc_root_kmsg = {
 	0, 4, "kmsg",
 	S_IFREG | S_IRUSR, 1, 0, 0,
 	0, &proc_kmsg_inode_operations
 };
-static struct proc_dir_entry proc_root_kcore = {
+struct proc_dir_entry proc_root_kcore = {
 	0, 5, "kcore",
 	S_IFREG | S_IRUSR, 1, 0, 0,
 	0, &proc_kcore_inode_operations
@@ -613,7 +684,7 @@ void proc_misc_init(void)
 	/* And now for trickier ones */
 	proc_register(&proc_root, &proc_root_kmsg);
 	proc_register(&proc_root, &proc_root_kcore);
-	proc_root_kcore.size = (MAP_NR(high_memory) << PAGE_SHIFT) + PAGE_SIZE;
+	proc_root_kcore.size = (size_t)high_memory - PAGE_OFFSET + PAGE_SIZE;
 	if (prof_shift) {
 		proc_register(&proc_root, &proc_root_profile);
 		proc_root_profile.size = (1+prof_len) * sizeof(unsigned int);

@@ -316,6 +316,11 @@ static inline unsigned long thread_saved_pc(struct thread_struct *t)
 #define release_segments(mm)		do { } while (0)
 #define forget_segments()		do { } while (0)
 
+unsigned long get_wchan(struct task_struct *p);
+
+#define KSTK_EIP(tsk)  ((tsk)->thread.regs->nip)
+#define KSTK_ESP(tsk)  ((tsk)->thread.regs->gpr[1])
+
 /*
  * NOTE! The task struct and the stack go together
  */

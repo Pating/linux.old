@@ -206,6 +206,14 @@ extern inline unsigned long thread_saved_pc(struct thread_struct *t)
  */
 extern void start_thread(struct pt_regs * regs, unsigned long pc, unsigned long sp);
 
+unsigned long get_wchan(struct task_struct *p);
+
+#define PT_REG(reg)		((long)&((struct pt_regs *)0)->reg \
+				 - sizeof(struct pt_regs))
+#define KSTK_TOS(tsk) ((unsigned long)(tsk) + KERNEL_STACK_SIZE - 32)
+#define KSTK_EIP(tsk)	(*(unsigned long *)(KSTK_TOS(tsk) + PT_REG(cp0_epc)))
+#define KSTK_ESP(tsk)	(*(unsigned long *)(KSTK_TOS(tsk) + PT_REG(regs[29])))
+
 /* Allocation and freeing of basic task resources. */
 /*
  * NOTE! The task struct and the stack go together
