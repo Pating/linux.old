@@ -296,7 +296,7 @@ void clean_inode(struct inode *inode)
 	memset(&inode->u, 0, sizeof(inode->u));
 	inode->i_sock = 0;
 	inode->i_op = NULL;
-	inode->i_nlink = 0;
+	inode->i_nlink = 1;
 	inode->i_writecount = 0;
 	inode->i_size = 0;
 	memset(&inode->i_dquot, 0, sizeof(inode->i_dquot));
@@ -438,6 +438,8 @@ void iput(struct inode *inode)
 			if (!inode->i_nlink) {
 				list_del(&inode->i_hash);
 				INIT_LIST_HEAD(&inode->i_hash);
+				list_del(&inode->i_list);
+				INIT_LIST_HEAD(&inode->i_list);
 				if (op && op->delete_inode) {
 					void (*delete)(struct inode *) = op->delete_inode;
 					spin_unlock(&inode_lock);
