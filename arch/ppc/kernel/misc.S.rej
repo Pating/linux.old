@@ -1,6 +1,6 @@
---- linux/arch/ppc/kernel/misc.S	Mon Nov 27 12:48:26 1995
+--- linux/arch/ppc/kernel/misc.S	Tue Jan  2 16:46:21 1996
 +++ arch/ppc/kernel/misc.S	Sat Dec 30 15:48:22 1995
-@@ -624,4 +625,4 @@
+@@ -624,4 +624,4 @@
  	.globl	floppy_track_buffer
  floppy_track_buffer:
  	.space	512*2*38		/* Space for one entire cylinder! */	
