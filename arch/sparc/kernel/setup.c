@@ -1,4 +1,4 @@
-/*  $Id: setup.c,v 1.110 1999/08/31 06:54:23 davem Exp $
+/*  $Id: setup.c,v 1.111 1999/09/10 10:40:24 davem Exp $
  *  linux/arch/sparc/kernel/setup.c
  *
  *  Copyright (C) 1995  David S. Miller (davem@caip.rutgers.edu)
@@ -26,6 +26,7 @@
 #include <linux/init.h>
 #include <linux/interrupt.h>
 #include <linux/console.h>
+#include <linux/spinlock.h>
 
 #include <asm/segment.h>
 #include <asm/system.h>
@@ -40,7 +41,6 @@
 #include <asm/kdebug.h>
 #include <asm/mbus.h>
 #include <asm/idprom.h>
-#include <asm/spinlock.h>
 #include <asm/softirq.h>
 #include <asm/hardirq.h>
 #include <asm/machines.h>

@@ -1,4 +1,4 @@
-/* $Id: pbm.h,v 1.17 1999/08/30 10:14:54 davem Exp $
+/* $Id: pbm.h,v 1.18 1999/09/10 10:44:40 davem Exp $
  * pbm.h: UltraSparc PCI controller software state.
  *
  * Copyright (C) 1997, 1998, 1999 David S. Miller (davem@redhat.com)
@@ -10,11 +10,11 @@
 #include <linux/types.h>
 #include <linux/pci.h>
 #include <linux/ioport.h>
+#include <linux/spinlock.h>
 
 #include <asm/io.h>
 #include <asm/page.h>
 #include <asm/oplib.h>
-#include <asm/spinlock.h>
 
 /* The abstraction used here is that there are PCI controllers,
  * each with one (Sabre) or two (PSYCHO/SCHIZO) PCI bus modules

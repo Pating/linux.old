@@ -1,4 +1,4 @@
-/* $Id: system.h,v 1.53 1999/08/03 05:16:14 davem Exp $ */
+/* $Id: system.h,v 1.55 1999/09/10 10:44:44 davem Exp $ */
 #ifndef __SPARC64_SYSTEM_H
 #define __SPARC64_SYSTEM_H
 
@@ -63,9 +63,13 @@ extern unsigned long empty_zero_page;
 	retval; \
 })
 
-#define __save_flags(flags)	((flags) = getipl())
-#define __save_and_cli(flags)	((flags) = read_pil_and_cli())
-#define __restore_flags(flags)	setipl((flags))
+#define __save_flags(flags)		((flags) = getipl())
+#define __save_and_cli(flags)		((flags) = read_pil_and_cli())
+#define __restore_flags(flags)		setipl((flags))
+#define local_irq_disable()		__cli()
+#define local_irq_enable()		__sti()
+#define local_irq_save(flags)		__save_and_cli(flags)
+#define local_irq_restore(flags)	__restore_flags(flags)
 
 #ifndef __SMP__
 #define cli() __cli()
@@ -97,6 +101,12 @@ extern void __global_restore_flags(unsigned long flags);
 #define membar(type)	__asm__ __volatile__ ("membar " type : : : "memory");
 #define rmb()		membar("#LoadLoad | #LoadStore")
 #define wmb()		membar("#StoreLoad | #StoreStore")
+#define set_mb(__var, __value) \
+	do { __var = __value; membar("#StoreLoad | #StoreStore"); } while(0)
+#define set_rmb(__var, __value) \
+	do { __var = __value; membar("#StoreLoad"); } while(0)
+#define set_wmb(__var, __value) \
+	do { __var = __value; membar("#StoreStore"); } while(0)
 
 #define flushi(addr)	__asm__ __volatile__ ("flush %0" : : "r" (addr) : "memory")
 

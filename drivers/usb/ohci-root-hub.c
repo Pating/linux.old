@@ -234,10 +234,6 @@ int root_hub_control_msg(struct usb_device *usb_dev, unsigned int pipe, devreque
 	OHCI_DEBUG(printk("USB HC roothubstat1: %x \n", readl( &(ohci->regs->roothub.portstatus[0]) ));)
 	OHCI_DEBUG(printk("USB HC roothubstat2: %x \n", readl( &(ohci->regs->roothub.portstatus[1]) ));)
   		
-	OHCI_DEBUG( { int i; printk("USB HC RH bh <<<: 1: ");)
-	OHCI_DEBUG( printk(" data(%d):", len);) 
-	OHCI_DEBUG( { for(i=0; i < len; i++ ) printk(" %02x", ((__u8 *) data)[i]);)
-	OHCI_DEBUG( printk(" ret_status: %x\n", req_reply); })
 	
 	return req_reply;
 }
@@ -285,10 +281,7 @@ static void rh_int_timer_do(unsigned long ptr) {
 		len = root_hub_send_irq(ohci, dev->data, 1 );
 
 		if(len > 0) { 
-			OHCI_DEBUG({ int i; printk("USB HC IRQ <<<: RH data(%d):", len);)
-			OHCI_DEBUG( for(i=0; i < len; i++ ) printk(" %02x", ((__u8 *) dev->data)[i]);)
-			OHCI_DEBUG( printk(" ret_status: %x\n", 0); })
- 
+			
 			ret = ohci->rh.handler(0, dev->data, len, ohci->rh.dev_id);
 			if(ret <= 0)ohci->rh.send = 0; /* 0 .. do not requeue  */
 		}
@@ -316,7 +309,7 @@ static int ohci_del_rh_int_timer(struct ohci * ohci) {
 	return 0;
 }
  
-void * root_hub_request_irq(struct usb_device *usb_dev, unsigned int pipe, usb_device_irq handler, int period, void *dev_id) 
+int root_hub_request_irq(struct usb_device *usb_dev, unsigned int pipe, usb_device_irq handler, int period, void *dev_id, void **handle)
 {
 	struct ohci * ohci = usb_dev->bus->hcpriv;
 	
@@ -326,7 +319,8 @@ void * root_hub_request_irq(struct usb_device *usb_dev, unsigned int pipe, usb_d
 	ohci->rh.send = 1;
 	ohci->rh.interval = period;
 	ohci_init_rh_int_timer(usb_dev, period);
-	return ohci->rh.int_addr = usb_to_ohci(usb_dev);
+	*handle = ohci->rh.int_addr = usb_to_ohci(usb_dev);
+	return 0;
 }
 
 int root_hub_release_irq(struct usb_device *usb_dev, void * ed) 

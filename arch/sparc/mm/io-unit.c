@@ -1,4 +1,4 @@
-/* $Id: io-unit.c,v 1.14 1999/08/31 06:54:33 davem Exp $
+/* $Id: io-unit.c,v 1.15 1999/09/10 10:40:38 davem Exp $
  * io-unit.c:  IO-UNIT specific routines for memory management.
  *
  * Copyright (C) 1997,1998 Jakub Jelinek    (jj@sunsite.mff.cuni.cz)
@@ -8,12 +8,12 @@
 #include <linux/kernel.h>
 #include <linux/init.h>
 #include <linux/malloc.h>
+#include <linux/spinlock.h>
 #include <asm/pgtable.h>
 #include <asm/sbus.h>
 #include <asm/io.h>
 #include <asm/io-unit.h>
 #include <asm/mxcc.h>
-#include <asm/spinlock.h>
 #include <asm/bitops.h>
 
 /* #define IOUNIT_DEBUG */

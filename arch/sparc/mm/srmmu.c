@@ -1,4 +1,4 @@
-/* $Id: srmmu.c,v 1.191 1999/08/31 06:54:38 davem Exp $
+/* $Id: srmmu.c,v 1.192 1999/09/10 10:40:40 davem Exp $
  * srmmu.c:  SRMMU specific routines for memory management.
  *
  * Copyright (C) 1995 David S. Miller  (davem@caip.rutgers.edu)
@@ -15,6 +15,7 @@
 #include <linux/pagemap.h>
 #include <linux/init.h>
 #include <linux/blk.h>
+#include <linux/spinlock.h>
 
 #include <asm/page.h>
 #include <asm/pgtable.h>
@@ -32,7 +33,6 @@
 #include <asm/a.out.h>
 #include <asm/mmu_context.h>
 #include <asm/io-unit.h>
-#include <asm/spinlock.h>
 
 /* Now the cpu specific definitions. */
 #include <asm/viking.h>

@@ -22,7 +22,7 @@
  * ohci-hcd.h
  */
  
-// #define OHCI_DBG    /* printk some debug information */
+#define OHCI_DBG    /* printk some debug information */
 
  
 #include <linux/config.h>
@@ -62,6 +62,7 @@ typedef int (*f_handler )(void * ohci, struct usb_ohci_ed *ed, void *data, int d
 #define ED_OPER		0x02
 #define ED_STOP     0x03
 #define ED_DEL		0x04
+#define ED_TD_DEL	0x05
 #define ED_RH		0x07 /* marker for RH ED */
 
 #define ED_STATE(ed) 			(((ed)->hwINFO >> 29) & 0x7)
@@ -182,6 +183,7 @@ struct usb_ohci_td {
 #define ADD_LEN         0x00004000
 #define DEL             0x00008000
 #define DEL_ED          0x00040000
+#define TD_RM			0x00080000
 
 #define OHCI_ED_SKIP	(1 << 14)
  
@@ -332,6 +334,7 @@ struct ohci_hc_area {
 };
 struct ohci_device {
 	struct usb_device	*usb;
+	atomic_t			refcnt;
 	struct ohci			*ohci;
 	struct usb_ohci_ed	ed[NUM_EDS];
 	unsigned long		data[16];
@@ -351,7 +354,7 @@ struct usb_ohci_ed * ohci_find_ep(struct usb_device * usb_dev, struct usb_hcd_ed
 
 int root_hub_control_msg(struct usb_device *usb_dev, unsigned int pipe, devrequest *cmd, void *data, int len);
 int root_hub_release_irq(struct usb_device *usb_dev, void * ed);  
-void * root_hub_request_irq(struct usb_device *usb_dev, unsigned int pipe, usb_device_irq handler, int period, void *dev_id);
+int root_hub_request_irq(struct usb_device *usb_dev, unsigned int pipe, usb_device_irq handler, int period, void *dev_id, void **handle);
 
 /* Root-Hub Register info */
 
