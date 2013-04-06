@@ -69,6 +69,10 @@ int do_truncate(struct dentry *dentry, unsigned long length)
 	int error;
 	struct iattr newattrs;
 
+	/* Not pretty: "inode->i_size" shouldn't really be "off_t". But it is. */
+	if ((off_t) length < 0)
+		return -EINVAL;
+
 	down(&inode->i_sem);
 	newattrs.ia_size = length;
 	newattrs.ia_valid = ATTR_SIZE | ATTR_CTIME;
@@ -294,11 +298,16 @@ asmlinkage int sys_access(const char * filename, int mode)
 	/* Clear the capabilities if we switch to a non-root user */
 	if (current->uid)
 		cap_clear(current->cap_effective);
-
+	else
+		current->cap_effective = current->cap_permitted;
+		
 	dentry = namei(filename);
 	res = PTR_ERR(dentry);
 	if (!IS_ERR(dentry)) {
 		res = permission(dentry->d_inode, mode);
+		/* SuS v2 requires we report a read only fs too */
+		if(!res && (mode & S_IWOTH) && IS_RDONLY(dentry->d_inode))
+			res = -EROFS;
 		dput(dentry);
 	}
 
