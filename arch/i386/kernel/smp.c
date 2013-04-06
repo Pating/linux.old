@@ -28,6 +28,7 @@
  *		Alan Cox	:	Added EBDA scanning
  */
 
+#include <linux/config.h>
 #include <linux/kernel.h>
 #include <linux/string.h>
 #include <linux/timer.h>
@@ -46,6 +47,10 @@
 #include <asm/pgtable.h>
 #include <asm/smp.h>
 #include <asm/io.h>
+
+#ifdef CONFIG_MTRR
+#  include <asm/mtrr.h>
+#endif
 
 #define __KERNEL_SYSCALLS__
 #include <linux/unistd.h>
@@ -150,6 +155,7 @@ extern struct mpc_config_intsrc mp_irqs [MAX_IRQ_SOURCES];
 extern int mpc_default_type;
 int mp_bus_id_to_pci_bus [MAX_MP_BUSSES] = { -1, };
 int mp_current_pci_id = 0;
+unsigned long mp_lapic_addr = 0;
 
 /* #define SMP_DEBUG */
 
@@ -270,9 +276,8 @@ __initfunc(static int smp_read_mpc(struct mp_config_table *mpc))
 
 	printk("APIC at: 0x%lX\n",mpc->mpc_lapic);
 
-	/* check the local APIC address */
-	if ((char *)phys_to_virt((unsigned long)mpc->mpc_lapic) != APIC_BASE)
-		panic("unexpected APIC address");
+	/* save the local APIC address, it might be non-default */
+	mp_lapic_addr = mpc->mpc_lapic;
 
 	/*
 	 *	Now process the configuration blocks.
@@ -453,7 +458,7 @@ __initfunc(int smp_scan_config(unsigned long base, unsigned long length))
 					 */
 			
 					cfg=pg0[0];
-					pg0[0] = ((unsigned long)APIC_BASE | 7);
+					pg0[0] = (mp_lapic_addr | 7);
 					local_flush_tlb();
 
 					boot_cpu_id = GET_APIC_ID(*((volatile unsigned long *) APIC_ID));
@@ -669,6 +674,10 @@ extern int cpu_idle(void * unused);
  */
 __initfunc(int start_secondary(void *unused))
 {
+#ifdef CONFIG_MTRR
+	/*  Must be done before calibration delay is computed  */
+	mtrr_init_secondary_cpu ();
+#endif
 	smp_callin();
 	while (!smp_commenced)
 		barrier();
@@ -729,7 +738,7 @@ __initfunc(static void do_boot_cpu(int i))
 	/* start_eip had better be page-aligned! */
 	start_eip = setup_trampoline();
 
-	printk("Booting processor %d eip %lx: ", i, start_eip);	/* So we see what's up   */
+	printk("Booting processor %d eip %lx\n", i, start_eip);	/* So we see what's up   */
 	stack_start.esp = (void *) (1024 + PAGE_SIZE + (char *)idle);
 
 	/*
@@ -908,6 +917,10 @@ __initfunc(void smp_boot_cpus(void))
 	int i;
 	unsigned long cfg;
 
+#ifdef CONFIG_MTRR
+	/*  Must be done before other processors booted  */
+	mtrr_init_boot_cpu ();
+#endif
 	/*
 	 *	Initialize the logical to physical cpu number mapping
 	 *	and the per-CPU profiling counter/multiplier
@@ -940,7 +953,7 @@ __initfunc(void smp_boot_cpus(void))
 	{
 		printk(KERN_NOTICE "SMP motherboard not detected. Using dummy APIC emulation.\n");
 		io_apic_irqs = 0;
-		return;
+		goto smp_done;
 	}
 
 	/*
@@ -1099,6 +1112,12 @@ __initfunc(void smp_boot_cpus(void))
 	 * go and set it up:
 	 */
 	setup_IO_APIC();
+
+smp_done:
+#ifdef CONFIG_MTRR
+	/*  Must be done after other processors booted  */
+	mtrr_init ();
+#endif
 }
 
 
@@ -1187,6 +1206,10 @@ void smp_message_pass(int target, int msg, unsigned long data, int wait)
 
 		case MSG_STOP_CPU:
 			irq = 0x40;
+			break;
+
+		case MSG_MTRR_CHANGE:
+			irq = 0x50;
 			break;
 
 		default:
@@ -1485,6 +1508,14 @@ asmlinkage void smp_stop_cpu_interrupt(void)
 	if (cpu_data[smp_processor_id()].hlt_works_ok)
 		for(;;) __asm__("hlt");
 	for  (;;) ;
+}
+
+void (*mtrr_hook) (void) = NULL;
+
+asmlinkage void smp_mtrr_interrupt(void)
+{
+	ack_APIC_irq ();
+	if (mtrr_hook) (*mtrr_hook) ();
 }
 
 /*

@@ -15,6 +15,7 @@
 #include <linux/trdevice.h>
 #include <linux/ioport.h>
 #include <net/neighbour.h>
+#include <net/snmp.h>
 
 #ifdef CONFIG_INET
 #include <linux/ip.h>
@@ -41,6 +42,8 @@ extern struct net_proto_family inet_family_ops;
 #include <net/ndisc.h>
 #include <net/dst.h>
 #include <net/transp_v6.h>
+
+extern int tcp_tw_death_row_slot;
 #endif
 
 #endif
@@ -66,14 +69,12 @@ extern void destroy_EII_client(struct datalink_proto *);
 extern void destroy_8023_client(struct datalink_proto *);
 #endif
 
-#ifdef CONFIG_IPV6_MODULE
-#ifdef CONFIG_SYSCTL
-extern int sysctl_max_syn_backlog;
-#endif
-#endif
-
 #ifdef CONFIG_ATALK_MODULE
 #include <net/sock.h>
+#endif
+
+#ifdef CONFIG_SYSCTL
+extern int sysctl_max_syn_backlog;
 #endif
 
 EXPORT_SYMBOL(dev_lockct);
@@ -293,6 +294,8 @@ EXPORT_SYMBOL(tcp_simple_retransmit);
 EXPORT_SYMBOL(tcp_transmit_skb);
 EXPORT_SYMBOL(tcp_connect);
 EXPORT_SYMBOL(tcp_make_synack);
+EXPORT_SYMBOL(tcp_tw_death_row_slot);
+EXPORT_SYMBOL(net_statistics); 
 
 EXPORT_SYMBOL(xrlim_allow);
 
@@ -320,6 +323,7 @@ EXPORT_SYMBOL(netlink_post);
 #endif
 
 #ifdef CONFIG_RTNETLINK
+EXPORT_SYMBOL(rtattr_parse);
 EXPORT_SYMBOL(rtnetlink_links);
 EXPORT_SYMBOL(__rta_fill);
 EXPORT_SYMBOL(rtnetlink_dump_ifinfo);
@@ -442,9 +446,31 @@ EXPORT_SYMBOL(qdisc_destroy);
 EXPORT_SYMBOL(qdisc_reset);
 EXPORT_SYMBOL(qdisc_restart);
 EXPORT_SYMBOL(qdisc_head);
+EXPORT_SYMBOL(qdisc_create_dflt);
+EXPORT_SYMBOL(noop_qdisc);
+#ifdef CONFIG_NET_SCHED
+EXPORT_SYMBOL(pfifo_qdisc_ops);
 EXPORT_SYMBOL(register_qdisc);
 EXPORT_SYMBOL(unregister_qdisc);
-EXPORT_SYMBOL(noop_qdisc);
+EXPORT_SYMBOL(qdisc_get_rtab);
+EXPORT_SYMBOL(qdisc_put_rtab);
+#ifdef CONFIG_NET_ESTIMATOR
+EXPORT_SYMBOL(qdisc_new_estimator);
+EXPORT_SYMBOL(qdisc_kill_estimator);
+#endif
+#ifdef CONFIG_NET_POLICE
+EXPORT_SYMBOL(tcf_police);
+EXPORT_SYMBOL(tcf_police_locate);
+EXPORT_SYMBOL(tcf_police_destroy);
+#ifdef CONFIG_RTNETLINK
+EXPORT_SYMBOL(tcf_police_dump);
+#endif
+#endif
+#endif
+#ifdef CONFIG_NET_CLS
+EXPORT_SYMBOL(register_tcf_proto_ops);
+EXPORT_SYMBOL(unregister_tcf_proto_ops);
+#endif
 
 EXPORT_SYMBOL(register_gifconf);
 

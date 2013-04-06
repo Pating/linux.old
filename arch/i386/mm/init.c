@@ -90,7 +90,6 @@ void show_mem(void)
 			shared += atomic_read(&mem_map[i].count) - 1;
 	}
 	printk("%d pages of RAM\n",total);
-	printk("%d free pages\n",free);
 	printk("%d reserved pages\n",reserved);
 	printk("%d pages shared\n",shared);
 	printk("%d pages swap cached\n",cached);
@@ -257,6 +256,7 @@ __initfunc(unsigned long paging_init(unsigned long start_mem, unsigned long end_
 	}
 #ifdef __SMP__
 {
+	extern unsigned long mp_lapic_addr;
 	pte_t pte;
 	unsigned long apic_area = (unsigned long)APIC_BASE;
 
@@ -267,10 +267,13 @@ __initfunc(unsigned long paging_init(unsigned long start_mem, unsigned long end_
 
 	if (smp_found_config) {
 		/*
-		 * Map the local APIC to FEE00000.
+		 * Map the local APIC to FEE00000. (it's only the default
+		 * value, thanks to Steve Hsieh for finding this out. We
+		 * now save the real local-APIC physical address in smp_scan(),
+		 * and use it here)
 		 */
 		pg_table = pte_offset((pmd_t *)pg_dir, apic_area);
-		pte = mk_pte(__va(apic_area), PAGE_KERNEL);
+		pte = mk_pte(__va(mp_lapic_addr), PAGE_KERNEL);
 		set_pte(pg_table, pte);
 
 		/*

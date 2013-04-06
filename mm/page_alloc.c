@@ -108,17 +108,6 @@ static spinlock_t page_alloc_lock;
  * but this had better return false if any reasonable "get_free_page()"
  * allocation could currently fail..
  *
- * Currently we approve of the following situations:
- * - the highest memory order has two entries
- * - the highest memory order has one free entry and:
- *	- the next-highest memory order has two free entries
- * - the highest memory order has one free entry and:
- *	- the next-highest memory order has one free entry
- *	- the next-next-highest memory order has two free entries
- *
- * [previously, there had to be two entries of the highest memory
- *  order, but this lead to problems on large-memory machines.]
- *
  * This will return zero if no list was found, non-zero
  * if there was memory (the bigger, the better).
  */
@@ -129,13 +118,14 @@ int free_memory_available(int nr)
 	struct free_area_struct * list;
 
 	/*
-	 * If we have more than about 6% of all memory free,
+	 * If we have more than about 3% to 5% of all memory free,
 	 * consider it to be good enough for anything.
 	 * It may not be, due to fragmentation, but we
 	 * don't want to keep on forever trying to find
 	 * free unfragmented memory.
+	 * Added low/high water marks to avoid thrashing -- Rik.
 	 */
-	if (nr_free_pages > num_physpages >> 4)
+	if (nr_free_pages > (num_physpages >> 5) + (nr ? 0 : num_physpages >> 6))
 		return nr+1;
 
 	list = free_area + NR_MEM_LISTS;
@@ -286,16 +276,17 @@ unsigned long __get_free_pages(int gfp_mask, unsigned long order)
 		}
 	}
 
-repeat:
-	spin_lock_irqsave(&page_alloc_lock, flags);
-	RMQUEUE(order, maxorder, (gfp_mask & GFP_DMA));
-	spin_unlock_irqrestore(&page_alloc_lock, flags);
-	if (gfp_mask & __GFP_WAIT) {
-		int freed = try_to_free_pages(gfp_mask,SWAP_CLUSTER_MAX);
+	for (;;) {
+		spin_lock_irqsave(&page_alloc_lock, flags);
+		RMQUEUE(order, maxorder, (gfp_mask & GFP_DMA));
+		spin_unlock_irqrestore(&page_alloc_lock, flags);
+		if (!(gfp_mask & __GFP_WAIT))
+			break;
+		shrink_dcache();
+		if (!try_to_free_pages(gfp_mask, SWAP_CLUSTER_MAX))
+			break;
 		gfp_mask &= ~__GFP_WAIT;	/* go through this only once */
 		maxorder = NR_MEM_LISTS;	/* Allow anything this time */
-		if (freed)
-			goto repeat;
 	}
 nopage:
 	return 0;
