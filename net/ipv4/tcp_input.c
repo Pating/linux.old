@@ -5,7 +5,7 @@
  *
  *		Implementation of the Transmission Control Protocol(TCP).
  *
- * Version:	$Id: tcp_input.c,v 1.164.2.6 1999/08/08 08:43:18 davem Exp $
+ * Version:	$Id: tcp_input.c,v 1.164.2.7 1999/08/13 16:14:27 davem Exp $
  *
  * Authors:	Ross Biro, <bir7@leland.Stanford.Edu>
  *		Fred N. van Kempen, <waltje@uWalt.NL.Mugnet.ORG>
@@ -1006,7 +1006,8 @@ tcp_timewait_state_process(struct tcp_tw_bucket *tw, struct sk_buff *skb,
 			tcp_tw_reschedule(tw);
 	}
 	/* Ack old packets if necessary */ 
-	if (!after(TCP_SKB_CB(skb)->end_seq, tw->rcv_nxt)) 
+	if (!after(TCP_SKB_CB(skb)->end_seq, tw->rcv_nxt) &&
+	    (th->doff * 4) > len)
 		return TCP_TW_ACK; 
 	return 0; 
 }
@@ -1067,7 +1068,8 @@ void tcp_time_wait(struct sock *sk)
 		tw->family	= sk->family;
 		tw->reuse	= sk->reuse;
 		tw->rcv_nxt	= sk->tp_pinfo.af_tcp.rcv_nxt;
-		tw->snd_nxt = sk->tp_pinfo.af_tcp.snd_nxt;
+		tw->snd_nxt     = sk->tp_pinfo.af_tcp.snd_nxt;
+		tw->window	= tcp_select_window(sk);
 		tw->af_specific	= sk->tp_pinfo.af_tcp.af_specific;
 
 #if defined(CONFIG_IPV6) || defined(CONFIG_IPV6_MODULE)

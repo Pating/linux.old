@@ -230,6 +230,7 @@ CONFIG_EEXPRESS_PRO100=y
 # CONFIG_TR is not set
 # CONFIG_HOSTESS_SV11 is not set
 # CONFIG_COSA is not set
+# CONFIG_SEALEVEL_4021 is not set
 # CONFIG_RCPCI is not set
 # CONFIG_WAN_DRIVERS is not set
 # CONFIG_LAPBETHER is not set
@@ -239,6 +240,11 @@ CONFIG_EEXPRESS_PRO100=y
 # Amateur Radio support
 #
 # CONFIG_HAMRADIO is not set
+
+#
+# IrDA subsystem support
+#
+# CONFIG_IRDA is not set
 
 #
 # ISDN subsystem

@@ -5,7 +5,7 @@
  *
  *		Implementation of the Transmission Control Protocol(TCP).
  *
- * Version:	$Id: tcp_ipv4.c,v 1.175.2.8 1999/08/08 08:43:20 davem Exp $
+ * Version:	$Id: tcp_ipv4.c,v 1.175.2.10 1999/08/13 16:14:35 davem Exp $
  *
  *		IPv4 specific functions
  *
@@ -1026,7 +1026,7 @@ static void tcp_v4_send_reset(struct sk_buff *skb)
  *
  *  Assumes that the caller did basic address and flag checks.
  */
-static void tcp_v4_send_ack(struct sk_buff *skb, __u32 seq, __u32 ack)
+static void tcp_v4_send_ack(struct sk_buff *skb, __u32 seq, __u32 ack, __u16 window)
 {
 	struct tcphdr *th = skb->h.th;
 	struct tcphdr rth;
@@ -1041,6 +1041,8 @@ static void tcp_v4_send_ack(struct sk_buff *skb, __u32 seq, __u32 ack)
 	rth.seq = seq;
 	rth.ack_seq = ack; 
 	rth.ack = 1;
+
+	rth.window = htons(window);
 
 	memset(&arg, 0, sizeof arg); 
 	arg.iov[0].iov_base = (unsigned char *)&rth; 
@@ -1774,17 +1776,18 @@ discard_it:
 do_time_wait:
 	/* Sorry for the ugly switch. 2.3 will have a better solution. */ 
 	switch (tcp_timewait_state_process((struct tcp_tw_bucket *)sk,
-							   skb, th, skb->len)) {
+					   skb, th, skb->len)) {
 	case TCP_TW_ACK:
-		tcp_v4_send_ack(skb, ((struct tcp_tw_bucket *)sk)->snd_nxt,
-						((struct tcp_tw_bucket *)sk)->rcv_nxt); 
-		break; 
+		tcp_v4_send_ack(skb,
+				((struct tcp_tw_bucket *)sk)->snd_nxt,
+				((struct tcp_tw_bucket *)sk)->rcv_nxt,
+				((struct tcp_tw_bucket *)sk)->window);
+		goto discard_it; 
 	case TCP_TW_RST:
 		goto no_tcp_socket; 
 	default:
 		goto discard_it; 
 	}
-	return 0;
 }
 
 static void __tcp_v4_rehash(struct sock *sk)

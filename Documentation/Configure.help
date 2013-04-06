@@ -688,6 +688,17 @@ CONFIG_BLK_DEV_XD
 
   It's pretty unlikely that you have one of these: say N.
 
+Mylex DAC960/DAC1100 PCI RAID Controller support
+CONFIG_BLK_DEV_DAC960
+  This driver adds support for the Mylex DAC960, AcceleRAID, and
+  eXtremeRAID PCI RAID controllers.  See README.DAC960 for further
+  information about this driver.
+
+  If you want to compile the driver as a module ( = code which can be
+  inserted in and removed from the running kernel whenever you want),
+  say M here and read Documentation/modules.txt.  The module will be
+  called DAC960.o. 
+
 Parallel port IDE device support
 CONFIG_PARIDE
   There are many external CD-ROM and disk devices that connect through
@@ -2827,8 +2838,7 @@ CONFIG_IPV6
   IPv6, see http://playground.sun.com/pub/ipng/html/ipng-main.html (to
   browse the WWW, you need to have access to a machine on the Internet
   that has a program like lynx or netscape); for specific information
-  about IPv6 under Linux read the HOWTO at http://www.terra.net/ipv6/
-  and the file net/ipv6/README in the kernel source. 
+  about IPv6 under Linux read the file net/ipv6/README in the kernel source. 
 
   If you want to use IPv6, please upgrade to the newest net-tools as
   given in Documentation/Changes. You will still be able to do regular
@@ -3248,6 +3258,13 @@ CONFIG_SCC_DELAY
 ### Don't know what's going on here.
 ###
 #
+YAM driver for AX.25
+CONFIG_YAM
+  Support for the YAM modem on serial port. If you want to compile this
+  as a module ( = code which can be inserted in and removed from the
+  running kernel whenever you want), say M here and read
+  Documentation/modules.txt.
+
 BAYCOM picpar and par96 driver for AX.25
 CONFIG_BAYCOM_PAR
   This is a driver for Baycom style simple amateur radio modems that
@@ -4595,8 +4612,8 @@ CONFIG_SCSI_AM53C974
 
 AMI MegaRAID support
 CONFIG_SCSI_MEGARAID
-  This driver supports the AMI MegaRAID 428 and 438 (and maybe 466)
-  SCSI host adapters. 
+  This driver supports the AMI MegaRAID 418, 428, 438, 466, 762, 490
+  and 467 SCSI host adapters. 
 
   If you want to compile this driver as a module ( = code which can be
   inserted in and removed from the running kernel whenever you want),
@@ -5764,6 +5781,25 @@ CONFIG_YELLOWFIN
   inserted in and removed from the running kernel whenever you want),
   say M here and read Documentation/modules.txt. This is recommended.
   The module will be called yellowfin.o.
+
+General Instruments Surfboard 1000
+CONFIG_NET_SB1000
+  This is a driver for the General Instrument SURFboard 1000 internal cable
+  modem.  This is an ISA card which is used by a number of cable TV companies
+  to provide cable modem access.  It's a one-way downstream-only cable modem,
+  meaning that your upstream net link is provided by your regular phone modem.
+
+  At present this driver only compiles as a module, so say M here if you
+  have this card.  Then read Documentation/networking/README.sb1000 for
+  information on how to use this module, as it needs special ppp scripts for
+  establishing a connection.  Further documentation and the necessary scripts
+  can be found at:
+
+  http://www.jacksonville.net/~fventuri/
+  http://home.adelphia.net/~siglercm/sb1000.html
+  http://linuxpower.cx/~cable/
+
+  If you don't have this card, of course say N.
 
 Alteon AceNIC/3Com 3C985/NetGear GA620 Gigabit support
 CONFIG_ACENIC
@@ -7254,11 +7290,12 @@ CONFIG_NTFS_RW
 
   If unsure, say N.
 
-System V and Coherent filesystem support
+System V, Version 7 and Coherent filesystem support
 CONFIG_SYSV_FS
   SCO, Xenix and Coherent are commercial Unix systems for Intel
-  machines. Saying Y here would allow you to read to and write from
-  their floppies and hard disk partitions.
+  machines, and Version 7 was used on the DEC PDP-11. Saying Y here
+  would allow you to read to and write from their floppies and hard
+  disk partitions.
 
   If you have floppies or hard disk partitions like that, it is likely
   that they contain binaries from those other Unix systems; in order
@@ -7942,6 +7979,16 @@ CONFIG_NLS_ISO8859_10
   set, which adds the last Inuit (Greenlandic) and Sami (Lappish)
   letters that were missing in Latin 4 to cover the entire Nordic
   area.
+
+nls iso8859-14
+CONFIG_NLS_ISO8859_14
+  If you want to display filenames with native language characters
+  from the Microsoft fat filesystem family or from JOLIET CDROMs
+  correctly on the screen, you need to include the appropriate
+  input/output character sets. Say Y here for the Latin 8 character
+  set, which adds the last accented vowels for Welsh (and Manx Gaelic)
+  that were missing in Latin 1. http://linux.speech.cymru.org/
+  has further information.
 
 nls iso8859-15
 CONFIG_NLS_ISO8859_15
@@ -9753,6 +9800,12 @@ CONFIG_AEDSP16_MPU_IRQ
   you compiled aedsp16.o as a module you can specify this parameter as
   'mpu_irq=NN'.
 
+SGI Visual Workstation on-board audio
+CONFIG_SOUND_VWSND
+  Say Y or M if you have an SGI Visual Workstation and you want to
+  be able to use its on-board audio.  Read Documentation/sound/visws
+  for more info on this driver's capabilities.
+
 Ensoniq ES1370 based PCI sound cards
 CONFIG_SOUND_ES1370
   Say Y or M if you have a PCI sound card utilizing the Ensoniq
@@ -9790,6 +9843,15 @@ CONFIG_SOUND_ES1371_GAMEPORT
   The joystick driver will by default use 0x201. 
   Leave the default 200 unless you have a joystick not attached
   to your sound card.
+
+ESS Solo1 based PCI sound cards (eg. SC1938)
+CONFIG_SOUND_ESSSOLO1
+  Say Y or M if you have a PCI sound card utilizing the ESS Technology
+  Solo1 chip. To find out if your sound card uses a
+  Solo1 chip without removing your computer's cover, use
+  lspci -n and look for the PCI ID 125D:1969. This driver 
+  differs slightly from OSS/Free, so PLEASE READ
+  Documentation/sound/solo1.
 
 S3 SonicVibes based PCI sound cards
 CONFIG_SOUND_SONICVIBES
@@ -10180,6 +10242,30 @@ CONFIG_ISDN_DRV_SC
   http://www.spellcast.com for more information (to browse the WWW,
   you need to have access to a machine on the Internet that has a
   program like lynx or netscape).
+
+Eicon.Diehl active card support
+CONFIG_ISDN_DRV_EICON
+  Say Y here if you have an Eicon active ISDN card. In order to use
+  this card, additional firmware is necessary, which has to be loaded
+  into the card using the eiconctrl utility which is part of the latest
+  isdn4k-utils package. Please read the file
+  Documentation/isdn/README.eicon for more information.
+  
+Eicon old-type card support
+CONFIG_ISDN_DRV_EICON_ISA
+  Say Y here if you have an old-type Eicon active ISDN card. In order to
+  use this card, additional firmware is necessary, which has to be loaded
+  into the card using the eiconctrl utility which is part of the latest
+  isdn4k-utils package. Please read the file
+  Documentation/isdn/README.eicon for more information.
+
+Support AT-Fax Class 2 commands
+CONFIG_ISDN_TTY_FAX
+  If you say Y here, the modem-emulator will support a subset of the
+  Fax Class 2 commands. Using a getty with fax-support
+  (mgetty+sendfax, hylafax), you will be able to use your Linux box 
+  as an ISDN-fax-machine. This must be supported by the lowlevel driver
+  also. See Documentation/isdn/README.fax for more information.
 
 AVM-B1 with CAPI2.0 support
 CONFIG_ISDN_DRV_AVMB1

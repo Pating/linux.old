@@ -47,6 +47,7 @@ extern void do_lost_interrupts(unsigned long);
 extern int do_signal(sigset_t *, struct pt_regs *);
 
 asmlinkage long long __ashrdi3(long long, int);
+asmlinkage long long __lshrdi3(long long, int);
 asmlinkage int abs(int);
 
 EXPORT_SYMBOL(clear_page);
@@ -187,7 +188,8 @@ EXPORT_SYMBOL(cuda_poll);
 EXPORT_SYMBOL(pmu_request);
 EXPORT_SYMBOL(pmu_poll);
 #ifdef CONFIG_PMAC_PBOOK
-EXPORT_SYMBOL(sleep_notifier_list);
+EXPORT_SYMBOL(pmu_register_sleep_notifier);
+EXPORT_SYMBOL(pmu_unregister_sleep_notifier);
 #endif CONFIG_PMAC_PBOOK
 EXPORT_SYMBOL(abort);
 EXPORT_SYMBOL(find_devices);
@@ -214,6 +216,7 @@ EXPORT_SYMBOL(abs);
 EXPORT_SYMBOL(device_is_compatible);
 
 EXPORT_SYMBOL_NOVERS(__ashrdi3);
+EXPORT_SYMBOL_NOVERS(__lshrdi3);
 EXPORT_SYMBOL_NOVERS(memcpy);
 EXPORT_SYMBOL_NOVERS(memset);
 EXPORT_SYMBOL_NOVERS(memmove);

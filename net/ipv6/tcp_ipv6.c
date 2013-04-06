@@ -5,7 +5,7 @@
  *	Authors:
  *	Pedro Roque		<roque@di.fc.ul.pt>	
  *
- *	$Id: tcp_ipv6.c,v 1.104.2.6 1999/08/08 08:43:23 davem Exp $
+ *	$Id: tcp_ipv6.c,v 1.104.2.9 1999/08/13 18:49:56 davem Exp $
  *
  *	Based on: 
  *	linux/net/ipv4/tcp.c
@@ -134,10 +134,13 @@ static int tcp_v6_get_port(struct sock *sk, unsigned short snum)
 					if (!sk_reuse	||
 					    !sk2->reuse	||
 					    sk2->state == TCP_LISTEN) {
+						/* NOTE: IPv6 tw bucket have different format */
 						if (!sk2->rcv_saddr	||
-						    !addr_type == IPV6_ADDR_ANY ||
+						    addr_type == IPV6_ADDR_ANY ||
 						    !ipv6_addr_cmp(&sk->net_pinfo.af_inet6.rcv_saddr,
-								   &sk2->net_pinfo.af_inet6.rcv_saddr))
+								   sk2->state != TCP_TIME_WAIT ?
+								   &sk2->net_pinfo.af_inet6.rcv_saddr :
+								   &((struct tcp_tw_bucket*)sk)->v6_rcv_saddr))
 							break;
 					}
 				}
@@ -1121,7 +1124,7 @@ static void tcp_v6_send_reset(struct sk_buff *skb)
 	kfree_skb(buff);
 }
 
-static void tcp_v6_send_ack(struct sk_buff *skb, __u32 seq, __u32 ack)
+static void tcp_v6_send_ack(struct sk_buff *skb, __u32 seq, __u32 ack, __u16 window)
 {
 	struct tcphdr *th = skb->h.th, *t1; 
 	struct sk_buff *buff;
@@ -1143,6 +1146,8 @@ static void tcp_v6_send_ack(struct sk_buff *skb, __u32 seq, __u32 ack)
 	t1->ack = 1;
 	t1->seq = seq;
 	t1->ack_seq = ack; 
+
+	t1->window = htons(window);
 
 	buff->csum = csum_partial((char *)t1, sizeof(*t1), 0);
 
@@ -1461,18 +1466,18 @@ discard_it:
 
 do_time_wait:
 	switch (tcp_timewait_state_process((struct tcp_tw_bucket *)sk,
-									   skb, th, skb->len)) {
+					   skb, th, skb->len)) {
 	case TCP_TW_ACK:
-		tcp_v6_send_ack(skb, ((struct tcp_tw_bucket *)sk)->snd_nxt,
-						((struct tcp_tw_bucket *)sk)->rcv_nxt); 
-		break; 
+		tcp_v6_send_ack(skb,
+				((struct tcp_tw_bucket *)sk)->snd_nxt,
+				((struct tcp_tw_bucket *)sk)->rcv_nxt,
+				((struct tcp_tw_bucket *)sk)->window);
+		goto discard_it; 
 	case TCP_TW_RST:
 		goto no_tcp_socket;
 	default:
 		goto discard_it; 
 	}
-
-	return 0;
 }
 
 static int tcp_v6_rebuild_header(struct sock *sk)
