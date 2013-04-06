@@ -1,4 +1,4 @@
-/* $Id: sun4c.c,v 1.187 2000/02/08 07:46:01 davem Exp $
+/* $Id: sun4c.c,v 1.188 2000/02/12 03:07:35 zaitcev Exp $
  * sun4c.c: Doing in software what should be done in hardware.
  *
  * Copyright (C) 1996 David S. Miller (davem@caip.rutgers.edu)
@@ -591,7 +591,7 @@ static unsigned long sun4c_translate_dvma(unsigned long busa)
 	return (pte << PAGE_SHIFT) + PAGE_OFFSET;
 }
 
-static unsigned long sun4c_unmap_dma_area(unsigned long busa, int len)
+static void sun4c_unmap_dma_area(unsigned long busa, int len)
 {
 	/* Fortunately for us, bus_addr == uncached_virt in sun4c. */
 	/* XXX Implement this */
@@ -2418,11 +2418,12 @@ static void sun4c_vac_alias_fixup(struct vm_area_struct *vma, unsigned long addr
 	if(dentry)
 		inode = dentry->d_inode;
 	if(inode) {
+		struct address_space *mapping = inode->i_mapping;
 		unsigned long offset = (address & PAGE_MASK) - vma->vm_start;
 		struct vm_area_struct *vmaring;
 		int alias_found = 0;
-		spin_lock(&inode->i_shared_lock);
-		vmaring = inode->i_mmap; 
+		spin_lock(&mapping->i_shared_lock);
+		vmaring = mapping->i_mmap; 
 		do {
 			unsigned long vaddr = vmaring->vm_start + offset;
 			unsigned long start;
@@ -2453,7 +2454,7 @@ static void sun4c_vac_alias_fixup(struct vm_area_struct *vma, unsigned long addr
 				}
 			}
 		} while ((vmaring = vmaring->vm_next_share) != NULL);
-		spin_unlock(&inode->i_shared_lock);
+		spin_unlock(&mapping->i_shared_lock);
 
 		if (alias_found && !(pte_val(pte) & _SUN4C_PAGE_NOCACHE)) {
 			pgdp = sun4c_pgd_offset(vma->vm_mm, address);
