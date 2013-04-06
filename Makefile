@@ -1,6 +1,6 @@
 VERSION = 2
 PATCHLEVEL = 1
-SUBLEVEL = 123
+SUBLEVEL = 124
 
 ARCH := $(shell uname -m | sed -e s/i.86/i386/ -e s/sun4u/sparc64/ -e s/arm.*/arm/ -e s/sa110/arm/)
 
@@ -316,10 +316,11 @@ modules_install:
 	if [ -f VIDEO_MODULES ]; then inst_mod VIDEO_MODULES video; fi; \
 	if [ -f FC4_MODULES   ]; then inst_mod FC4_MODULES   fc4;   fi; \
 	\
-	ls *.o > .allmods; \
-	echo $$MODULES | tr ' ' '\n' | sort | comm -23 .allmods - > .misc; \
-	if [ -s .misc ]; then inst_mod .misc misc; fi; \
-	rm -f .misc .allmods; \
+	rm -f /tmp/.misc.$$$$ /tmp/.allmods.$$$$; \
+	ls *.o > /tmp/.allmods.$$$$; \
+	echo $$MODULES | tr ' ' '\n' | sort | comm -23 /tmp/.allmods.$$$$ - > /tmp/.misc.$$$$; \
+	if [ -s /tmp/.misc.$$$$ ]; then inst_mod /tmp/.misc.$$$$ misc; fi; \
+	rm -f /tmp/.misc.$$$$ /tmp/.allmods.$$$$; \
 	)
 
 # modules disabled....

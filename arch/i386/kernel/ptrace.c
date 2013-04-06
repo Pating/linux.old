@@ -541,6 +541,10 @@ asmlinkage int sys_ptrace(long request, long pid, long addr, long data)
 			if ((unsigned long) data > _NSIG)
 				goto out;
 			child->flags &= ~PF_TRACESYS;
+			if ((child->flags & PF_DTRACE) == 0) {
+				/* Spurious delayed TF traps may occur */
+				child->flags |= PF_DTRACE;
+			}
 			tmp = get_stack_long(child, EFL_OFFSET) | TRAP_FLAG;
 			put_stack_long(child, EFL_OFFSET, tmp);
 			child->exit_code = data;
@@ -647,8 +651,6 @@ asmlinkage int sys_ptrace(long request, long pid, long addr, long data)
 #endif
 			  __copy_from_user(&child->tss.i387.hard, (void *)data,
 					   sizeof(struct user_i387_struct));
-			  child->flags &= ~PF_USEDFPU;
-			  stts();
 #ifdef CONFIG_MATH_EMULATION
 			} else {
 			  restore_i387_soft(&child->tss.i387.soft,

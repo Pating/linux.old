@@ -27,17 +27,16 @@ ifdef CONFIG_VT
 L_OBJS += vt.o vc_screen.o consolemap.o consolemap_deftbl.o
 LX_OBJS += console.o selection.o
 endif
-ifdef CONFIG_FB
-  LX_OBJS += fbmem.o
-endif
 
 ifeq ($(CONFIG_SERIAL),y)
-  ifndef CONFIG_SUN_SERIAL
+  ifeq ($(CONFIG_SUN_SERIAL),)
   LX_OBJS += serial.o
   endif
 else
   ifeq ($(CONFIG_SERIAL),m)
-  MX_OBJS += serial.o
+    ifeq ($(CONFIG_SUN_SERIAL),)
+    MX_OBJS += serial.o
+    endif
   endif
 endif
 

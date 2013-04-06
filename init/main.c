@@ -78,8 +78,8 @@ extern long console_init(long, long);
 extern void sock_init(void);
 extern void uidcache_init(void);
 extern void mca_init(void);
-extern long sbus_init(void);
-extern long powermac_init(unsigned long, unsigned long);
+extern void sbus_init(void);
+extern void powermac_init(void);
 extern void sysctl_init(void);
 extern void filescache_init(void);
 extern void signals_init(void);
@@ -305,6 +305,9 @@ extern void nfs_root_setup(char *str, int *ints);
 #ifdef CONFIG_FTAPE
 extern void ftape_setup(char *str, int *ints);
 #endif
+#ifdef CONFIG_MDA_CONSOLE
+extern void mdacon_setup(char *str, int *ints);
+#endif
 
 #if defined(CONFIG_SYSVIPC)
 extern void ipc_init(void);
@@ -315,10 +318,6 @@ extern void dquot_init_hash(void);
 
 #ifdef CONFIG_MD_BOOT
 extern void md_setup(char *str,int *ints) __init;
-#endif
-
-#ifdef __sparc__
-extern int serial_console;
 #endif
 
 /*
@@ -456,6 +455,7 @@ static struct dev_name_struct {
 #endif
 #ifdef CONFIG_BLK_DEV_PS2
 	{ "eda",     0x2400 },
+	{ "edb",     0x2440 },
 #endif
 #ifdef CONFIG_PARIDE_PD
 	{ "pda",	0x2d00 },
@@ -544,10 +544,13 @@ static struct kernel_param cooked_params[] __initdata = {
 #endif
 	{ "panic=", panic_setup },
 	{ "console=", console_setup },
-#ifdef CONFIG_VT
 #ifdef CONFIG_VGA_CONSOLE
 	{ "no-scroll", no_scroll },
 #endif
+#ifdef CONFIG_MDA_CONSOLE
+	{ "mdacon=", mdacon_setup },
+#endif
+#ifdef CONFIG_VT
 	{ "kbd-reset", kbd_reset_setup },
 #endif
 #ifdef CONFIG_BUGi386
@@ -664,7 +667,8 @@ static struct kernel_param cooked_params[] __initdata = {
 	{ "floppy=", floppy_setup },
 #endif
 #ifdef CONFIG_BLK_DEV_PS2
-	{ "ed=", ed_setup },
+	{ "eda=", ed_setup },
+	{ "edb=", ed_setup },
 	{ "tp720=", tp720_setup },
 #endif
 #ifdef CONFIG_CDU31A
