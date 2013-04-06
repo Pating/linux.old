@@ -49,6 +49,7 @@
 
 #include <linux/config.h>
 #include <linux/module.h>
+#include <linux/init.h>
 #include <linux/kernel.h>
 #include <linux/sched.h>
 #include <linux/types.h>
@@ -94,8 +95,8 @@
  * Local functions
  */
 
+int ppp_register_compressor (struct compressor *cp);
 #ifdef CONFIG_MODULES
-static int ppp_register_compressor (struct compressor *cp);
 static void ppp_unregister_compressor (struct compressor *cp);
 #endif
 
@@ -317,6 +318,10 @@ ppp_first_time(void)
 
 
 #ifndef MODULE
+
+extern int bsd_comp_install(void);
+extern int ppp_deflate_install(void);
+
 /*
  * Called at boot time if the PPP driver is compiled into the kernel.
  */
@@ -328,7 +333,11 @@ ppp_init(struct device *dev)
 
 	if (first_time) {
 		first_time = 0;
-		answer	   = ppp_first_time();
+		answer = ppp_first_time();
+		if (answer == 0) {
+			bsd_comp_install();
+			ppp_deflate_install();
+		}
 	}
 	if (answer == 0)
 		answer = -ENODEV;
@@ -861,9 +870,8 @@ ppp_sync_send(struct ppp *ppp, struct sk_buff *skb)
 
 	if (test_and_set_bit(XMITFULL, &ppp->state))
 		return -1;
-	ppp->tpkt = skb;
 
-	data = ppp->tpkt->data;
+	data = skb->data;
 	
 	/*
 	 * LCP packets with code values between 1 (configure-reqest)
@@ -877,14 +885,14 @@ ppp_sync_send(struct ppp *ppp, struct sk_buff *skb)
 	if (PPP_PROTOCOL(data) < 0x8000)
 		ppp->last_xmit = jiffies;
 	++ppp->stats.ppp_opackets;
-	ppp->stats.ppp_ooctects += ppp->tpkt->len;
+	ppp->stats.ppp_ooctects += skb->len;
 
 	if ( !(data[2]) && (ppp->flags & SC_COMP_PROT) ) {
 		/* compress protocol field */
 		data[2] = data[1];
 		data[1] = data[0];
-		skb_pull(ppp->tpkt,1);
-		data = ppp->tpkt->data;
+		skb_pull(skb,1);
+		data = skb->data;
 	}
 	
 	/*
@@ -894,9 +902,10 @@ ppp_sync_send(struct ppp *ppp, struct sk_buff *skb)
 	    && PPP_ADDRESS(data) == PPP_ALLSTATIONS
 	    && PPP_CONTROL(data) == PPP_UI) {
 		/* strip addr and control field */
-		skb_pull(ppp->tpkt,2);
+		skb_pull(skb,2);
 	}
 
+	ppp->tpkt = skb;
 	return ppp_tty_sync_push(ppp);
 }
 
@@ -3041,8 +3050,10 @@ static struct compressor *find_compressor (int type)
 	return (struct compressor *) 0;
 }
 
-#ifdef CONFIG_MODULES
-static int ppp_register_compressor (struct compressor *cp)
+/* 
+ * If PPP is built-in then so are compressors, so __initfunc is okay here.
+ */
+__initfunc(int ppp_register_compressor (struct compressor *cp))
 {
 	struct compressor_link *new;
 	unsigned long flags;
@@ -3070,6 +3081,7 @@ static int ppp_register_compressor (struct compressor *cp)
 	return 0;
 }
 
+#ifdef CONFIG_MODULES
 static void ppp_unregister_compressor (struct compressor *cp)
 {
 	struct compressor_link *prev = (struct compressor_link *) 0;

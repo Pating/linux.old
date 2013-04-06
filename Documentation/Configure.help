@@ -5,8 +5,8 @@
 #
 # Translations of this file available on the WWW:
 #
-#   - Japanese, by Tetsuyasu YAMADA (tetsu@cauchy.nslab.ntt.co.jp), at
-#     http://jf.gee.kyoto-u.ac.jp/JF/JF-ftp/euc/Configure.help.euc
+#   - Japanese, maintained by the JF Project (JF@linux.or.jp), at
+#     http://www.linux.or.jp/JF/JFdocs/Configure.help/
 #   - Russian, by kaf@linux.nevod.perm.su, at
 #     http://nevod.perm.su/service/linux/doc/kernel/Configure.help
 #   - French, by Pierre Tane (tanep@bigfoot.com), at
@@ -5755,6 +5755,34 @@ CONFIG_WANXL
 
   If unsure, say N here.
 
+Cyclades-PC300 support
+CONFIG_PC300
+  This is a driver for the Cyclades-PC300 synchronous communication
+  boards. These boards provide synchronous serial interfaces to your
+  Linux box. All protocols supported by the HDLC generic driver
+  (currently synchronous PPP, Cisco HDLC and Frame Relay) are available
+  by default. If you wish to support other protocols, please select one
+  of the available options below this one.
+
+  If you want to compile this as a module ( = code which can be
+  inserted in and removed from the running kernel whenever you want),
+  say M here and read Documentation/modules.txt. The module will be
+  called pc300.o.
+
+  If unsure, say N here.
+
+Cyclades-PC300 X.25 Support
+CONFIG_PC300_X25
+  Say Y to this option if you intend to use the Cyclades-PC300 to
+  provide X.25 interfaces to your Linux box.
+
+  IMPORTANT: Additional X.25 support must be enabled in the kernel
+  for this support to be functional (say Y to "CCITT X.25 Packet Layer"
+  and "LAPB Data Link Driver", in the "Networking Options"
+  configuration section).
+
+  If unsure, say N here.
+
 Ethernet (10 or 100Mbit)
 CONFIG_NET_ETHERNET
   Ethernet (also called IEEE 802.3 or ISO 8802-2) is the most common
@@ -7560,13 +7588,17 @@ CONFIG_NTFS_FS
   The module will be called ntfs.o. If you want to compile it as a
   module, say M here and read Documentation/modules.txt.
 
-NTFS read-write support (experimental)
+NTFS read-write support (DANGEROUS)
 CONFIG_NTFS_RW
-  If you say Y here, you will (hopefully) be able to write to NTFS
-  file systems as well as read from them. The read-write support
-  in NTFS is far from being complete and is not well tested. If you
+  If you say Y here, you will (maybe) be able to write to NTFS file
+  systems as well as read from them. The read-write support in
+  NTFS is far from being complete and is not well tested. If you
   enable this, back up your NTFS volume first since it may get
-  damaged.
+  damaged. Also, make sure to run chkdsk from within Microsoft
+  Windows NT after having performed any writes to a NTFS partition
+  from Linux to detect any problems as early as possible.
+  Please note that write support is limited to Windows NT4 and
+  earlier versions.
 
   If unsure, say N.
 
@@ -9751,6 +9783,12 @@ CONFIG_SOUND_DMAP
 
   Say Y unless you have 16MB or less RAM or a PCI sound card.
 
+Crystal SoundFusion (CS461x)
+CONFIG_SOUND_FUSION
+  This module drives the Crystal SoundFusion devices (CS46xx series) when
+  wired as native sound drivers with AC97 codecs. If this driver does not
+  work try the CS4232 driver.
+
 Support for Aztech Sound Galaxy (non-PnP) cards
 CONFIG_SOUND_SGALAXY
   This module initializes the older non Plug and Play sound galaxy
@@ -10233,6 +10271,11 @@ CONFIG_SOUND_VWSND
   Say Y or M if you have an SGI Visual Workstation and you want to
   be able to use its on-board audio.  Read Documentation/sound/visws
   for more info on this driver's capabilities.
+
+Creative EMU10K1 based PCI sound cards
+CONFIG_SOUND_EMU10K1
+  Say Y or M if you have a PCI sound card using the EMU10K1
+  chipset, such as the Creative SBLive! or SB PCI512.
 
 Ensoniq ES1370 based PCI sound cards
 CONFIG_SOUND_ES1370
@@ -11404,12 +11447,31 @@ CONFIG_MACE
   whenever you want). If you want to compile it as a module, say M
   here and read Documentation/modules.txt.
 
-BMAC (G3 ethernet) support
+Use AAUI port instead of TP by default
+CONFIG_MACE_AAUI_PORT
+  Some Apple machines (notably the Apple Network Server) which use the
+  MACE ethernet chip have an Apple AUI port (small 15-pin connector),
+  instead of an 8-pin RJ45 connector for twisted-pair ethernet.  Say
+  Y here if you have such a machine.  If unsure, say N.
+
+BMAC (G3/G4 ethernet) support
 CONFIG_BMAC
-  Say Y for support of BMAC Ethernet interfaces. These are used on G3
-  computers. 
+  Say Y for support of BMAC and BMAC+ Ethernet interfaces. These
+  are used on G3 and G4 computers (Apple Power Macintoshes and
+  PowerBooks).
 
   This driver is also available as a module called bmac.o ( = code
+  which can be inserted in and removed from the running kernel
+  whenever you want). If you want to compile it as a module, say M
+  here and read Documentation/modules.txt.
+
+GMAC (Core99 ethernet) support
+CONFIG_GMAC
+  Say Y for support of the GMAC Ethernet interfaces. This interface
+  is used on some Apple G4 PowerMacs (recent ones), new iMacs, iBooks
+  and PowerBook 2000 (aka "Pismo").
+
+  This driver is also available as a module called gmac.o ( = code
   which can be inserted in and removed from the running kernel
   whenever you want). If you want to compile it as a module, say M
   here and read Documentation/modules.txt.
@@ -12287,6 +12349,17 @@ CONFIG_PHONE_IXJ
 
   If you do not have any Quicknet telephony cards, you can safely
   ignore this option.
+
+Toshiba Laptop support
+CONFIG_TOSHIBA	
+  If you intend to run this the kernel on a Toshiba portable say yes
+  here. This adds a driver to safely access the System Management
+  Mode of the CPU on Toshiba portables. The System Management Mode
+  is used to set the BIOS and power saving options on Toshiba portables.
+
+  For information on utilities to make use of this driver see the
+  Toshiba Linux utilities website at:
+  http://www.buzzard.org.uk/toshiba/
  
 CPiA Video For Linux
 CONFIG_VIDEO_CPIA
@@ -12314,6 +12387,20 @@ CPiA Parallel Port DMA Support
 CONFIG_VIDEO_CPIA_PP_DMA
   This will use DMA if possible to reduce CPU usage.  If in doubt,
   say Y here.
+
+7-Segment Display support
+CONFIG_DISPLAY7SEG
+  This is the driver for the digital display and LED present on
+  Sun Microsystems CompactPCI models CP1400 and CP1500.
+
+  This driver is also available as a module ( = code which can be
+  inserted in and removed from the running kernel whenever you want).
+  The module will be called display7seg.o. If you want to compile it 
+  as a module, say M here and read Documentation/modules.txt.
+
+  If you do not have a CompactPCI model CP1400 or CP1500, or 
+  another UltraSPARC-IIi-cEngine boardset with digital display,
+  you should say N to this option.
    
 #
 # A couple of things I keep forgetting:

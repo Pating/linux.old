@@ -27,6 +27,10 @@
 /* invalidate_buffers/set_blocksize/sync_dev race conditions and
    fs corruption fixes, 1999, Andrea Arcangeli <andrea@suse.de> */
 
+/* Wait for dirty buffers to sync in sync_page_buffers.
+ * 2000, Marcelo Tosatti <marcelo@conectiva.com.br>
+ */
+
 #include <linux/malloc.h>
 #include <linux/locks.h>
 #include <linux/errno.h>
@@ -1464,6 +1468,30 @@ static int grow_buffers(int size)
 #define BUFFER_BUSY_BITS	((1<<BH_Dirty) | (1<<BH_Lock) | (1<<BH_Protected))
 #define buffer_busy(bh)		((bh)->b_count || ((bh)->b_state & BUFFER_BUSY_BITS))
 
+static int sync_page_buffers(struct buffer_head *bh, int wait)
+{
+	struct buffer_head * tmp = bh;
+
+	do {
+		struct buffer_head *p = tmp;
+		tmp = tmp->b_this_page;
+		if (buffer_locked(p)) {
+			if (wait)
+				__wait_on_buffer(p);
+		} else if (buffer_dirty(p))
+			ll_rw_block(WRITE, 1, &p);
+	} while (tmp != bh);
+
+	do {
+		struct buffer_head *p = tmp;
+		tmp = tmp->b_this_page;
+		if (buffer_busy(p))
+			return 1;
+	} while (tmp != bh);
+
+	return 0;
+}
+
 /*
  * try_to_free_buffers() checks if all the buffers on this particular page
  * are unused, and free's the page if so.
@@ -1471,22 +1499,19 @@ static int grow_buffers(int size)
  * Wake up bdflush() if this fails - if we're running low on memory due
  * to dirty buffers, we need to flush them out as quickly as possible.
  */
-int try_to_free_buffers(struct page * page_map)
+int try_to_free_buffers(struct page * page_map, int wait)
 {
 	struct buffer_head * tmp, * bh = page_map->buffers;
+	int too_many;
 
 	tmp = bh;
 	do {
-		struct buffer_head * p = tmp;
-
+		if (buffer_busy(tmp))
+			goto busy;
 		tmp = tmp->b_this_page;
-		if (!buffer_busy(p))
-			continue;
-
-		wakeup_bdflush(0);
-		return 0;
 	} while (tmp != bh);
 
+ succeed:
 	tmp = bh;
 	do {
 		struct buffer_head * p = tmp;
@@ -1504,6 +1529,28 @@ int try_to_free_buffers(struct page * page_map)
 	page_map->buffers = NULL;
 	__free_page(page_map);
 	return 1;
+
+ busy:
+	too_many = (nr_buffers * bdf_prm.b_un.nfract/100);
+
+	if (!sync_page_buffers(bh, wait)) {
+
+		/* If a high percentage of the buffers are dirty, 
+		 * wake kflushd 
+		 */
+		if (nr_buffers_type[BUF_DIRTY] > too_many)
+			wakeup_bdflush(0);
+			
+		/*
+		 * We can jump after the busy check because
+		 * we rely on the kernel lock.
+		 */
+		goto succeed;
+	}
+
+	if(nr_buffers_type[BUF_DIRTY] > too_many)
+		wakeup_bdflush(0);
+	return 0;
 }
 
 /* ================== Debugging =================== */

@@ -4,7 +4,7 @@
  * Copyright 1999, Thomas Davis, tadavis@lbl.gov.  
  * Licensed under the GPL. Based on dummy.c, and eql.c devices.
  *
- * bond.c: a bonding/etherchannel/sun trunking net driver
+ * bonding.c: a bonding/etherchannel/sun trunking net driver
  *
  * This is useful to talk to a Cisco 5500, running Etherchannel, aka:
  *	Linux Channel Bonding
@@ -28,6 +28,10 @@
  *
  * v0.1 - first working version.
  * v0.2 - changed stats to be calculated by summing slaves stats.
+ *
+ * Changes:
+ * Arnaldo Carvalho de Melo <acme@conectiva.com.br>
+ * - fix leaks on failure at bond_init
  * 
  */
 
@@ -71,8 +75,12 @@ static int bond_close(struct device *master)
 	bonding_t *private = (struct bonding *) master->priv;
 	slave_queue_t *queue = (struct slave_queue *) private->queue;
 	slave_t *slave, *next;
+	unsigned long flags;
 
-	for( slave=queue->head; slave != NULL; slave=next) {
+	save_flags(flags);
+	cli();
+
+	for( slave=queue->head; slave != NULL; ) {
 #ifdef BONDING_DEBUG
 		printk("freeing = %s\n", slave->dev->name);
 #endif
@@ -80,8 +88,12 @@ static int bond_close(struct device *master)
 		slave->dev->slave = NULL;
 		next = slave->next;
 		kfree(slave);
-		queue->num_slaves++;
+		slave=next;
+		queue->num_slaves--;
 	}
+	queue->head = NULL;
+	
+	restore_flags(flags);
 
 	MOD_DEC_USE_COUNT;
 	return 0;
@@ -97,7 +109,7 @@ static int bond_enslave(struct device *master, struct device *slave)
 	bonding_t *private = (struct bonding *) master->priv;
 	slave_queue_t *queue = (struct slave_queue *) private->queue;
 	slave_t *new_slave;
-	int flags;
+	unsigned long flags;
 	
 	if (master == NULL || slave == NULL) 
 		return -ENODEV;
@@ -121,13 +133,14 @@ static int bond_enslave(struct device *master, struct device *slave)
 		return -EBUSY;
 	}
 		   
-	slave->slave = master;     /* save the master in slave->slave */
-	slave->flags |= IFF_SLAVE;
-
 	if ((new_slave = kmalloc(sizeof(slave_t), GFP_KERNEL)) == NULL) {
+		restore_flags(flags);
 		return -ENOMEM;
 	}
 	memset(new_slave, 0, sizeof(slave_t));
+
+	slave->slave = master;     /* save the master in slave->slave */
+	slave->flags |= IFF_SLAVE;
 
 	new_slave->dev = slave;
 
@@ -202,14 +215,19 @@ __initfunc(int bond_init(struct device *dev))
 	bond = (struct bonding *) dev->priv;
 
 	bond->queue = kmalloc(sizeof(struct slave_queue), GFP_KERNEL);
-	if (bond->queue == NULL)
+	if (bond->queue == NULL) {
+		kfree(dev->priv);
 		return -ENOMEM;
+	}
 
 	memset(bond->queue, 0, sizeof(struct slave_queue));
 
 	bond->stats = kmalloc(sizeof(struct enet_statistics), GFP_KERNEL);
-	if (bond->stats == NULL)
+	if (bond->stats == NULL) {
+		kfree(dev->priv);
+		kfree(bond->queue);
 		return -ENOMEM;
+	}
 
 	memset(bond->stats, 0, sizeof(struct enet_statistics));
 
@@ -240,6 +258,11 @@ static int bond_xmit(struct sk_buff *skb, struct device *dev)
 	struct slave_queue *queue = bond->queue;
 	int good = 0;
 	
+	if(!queue->num_slaves) {
+		dev_kfree_skb(skb);
+		return 0;
+	}
+
 	while (good == 0) {
 		slave = queue->current_slave->dev;
 		if (slave->flags & (IFF_UP|IFF_RUNNING)) {

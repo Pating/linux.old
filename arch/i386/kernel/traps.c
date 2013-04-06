@@ -109,6 +109,7 @@ asmlinkage void coprocessor_error(void);
 asmlinkage void reserved(void);
 asmlinkage void alignment_check(void);
 asmlinkage void spurious_interrupt_bug(void);
+asmlinkage void machine_check(void);
 
 int kstack_depth_to_print = 24;
 
@@ -163,7 +164,7 @@ static void show_registers(struct pt_regs *regs)
 		}
 		printk("\nCall Trace: ");
 		if (!esp || (esp & 3))
-			printk("Bad EIP value.");
+			printk("Bad ESP value.");
 		else {
 			stack = (unsigned long *) esp;
 			i = 1;
@@ -366,6 +367,9 @@ asmlinkage void do_debug(struct pt_regs * regs, long error_code)
 		goto debug_vm86;
 
 	__asm__ __volatile__("movl %%db6,%0" : "=r" (condition));
+
+	/* Ensure the debug status register is visible to ptrace (or the process itself) */
+	tsk->tss.debugreg[6] = condition;
 
 	/* Mask out spurious TF errors due to lazy TF clearing */
 	if (condition & DR_STEP) {
@@ -699,6 +703,7 @@ void __init trap_init(void)
 	set_trap_gate(15,&spurious_interrupt_bug);
 	set_trap_gate(16,&coprocessor_error);
 	set_trap_gate(17,&alignment_check);
+	set_trap_gate(18,&machine_check);
 	set_system_gate(SYSCALL_VECTOR,&system_call);
 
 	/* set up GDT task & ldt entries */

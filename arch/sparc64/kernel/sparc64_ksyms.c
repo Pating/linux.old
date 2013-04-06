@@ -1,4 +1,4 @@
-/* $Id: sparc64_ksyms.c,v 1.58.2.7 2000/05/27 04:46:26 davem Exp $
+/* $Id: sparc64_ksyms.c,v 1.58.2.8 2000/06/14 07:41:19 davem Exp $
  * arch/sparc64/kernel/sparc64_ksyms.c: Sparc64 specific ksyms support.
  *
  * Copyright (C) 1996 David S. Miller (davem@caip.rutgers.edu)
@@ -43,6 +43,7 @@
 #endif
 #ifdef CONFIG_PCI
 #include <asm/ebus.h>
+#include <asm/pbm.h>
 #endif
 #include <asm/a.out.h>
 #include <asm/svr4.h>
@@ -193,6 +194,7 @@ EXPORT_SYMBOL(outsl);
 EXPORT_SYMBOL(insb);
 EXPORT_SYMBOL(insw);
 EXPORT_SYMBOL(insl);
+EXPORT_SYMBOL(pci_dma_wsync);
 #endif
 
 /* Solaris/SunOS binary compatibility */

@@ -48,6 +48,7 @@ static int ac97_mixer_ioctl(struct ac97_codec *codec, unsigned int cmd, unsigned
 static int ac97_init_mixer(struct ac97_codec *codec);
 
 static int sigmatel_init(struct ac97_codec *codec);
+static int enable_eapd(struct ac97_codec *codec);
 
 #define arraysize(x)   (sizeof(x)/sizeof((x)[0]))
 
@@ -58,10 +59,12 @@ static struct {
 } ac97_codec_ids[] = {
 	{0x414B4D00, "Asahi Kasei AK4540"     , NULL},
 	{0x41445340, "Analog Devices AD1881"  , NULL},
+	{0x41445360, "Analog Devices AD1885"  , enable_eapd},
 	{0x43525900, "Cirrus Logic CS4297"    , NULL},
 	{0x43525903, "Cirrus Logic CS4297"  ,	NULL},
 	{0x43525913, "Cirrus Logic CS4297A"   , NULL},
 	{0x43525923, "Cirrus Logic CS4298"    , NULL},
+	{0x4352592B, "Cirrus Logic CS4294"    , NULL},
 	{0x43525931, "Cirrus Logic CS4299"    , NULL},
 	{0x4e534331, "National Semiconductor LM4549" ,	NULL},
 	{0x53494c22, "Silicon Laboratory Si3036"     ,	NULL},
@@ -530,6 +533,12 @@ int ac97_probe_codec(struct ac97_codec *codec)
 	/* probing AC97 codec, AC97 2.0 says that bit 15 of register 0x00 (reset) should 
 	   be read zero. Probing of AC97 in this way is not reliable, it is not even SAFE !! */
 	codec->codec_write(codec, AC97_RESET, 0L);
+	
+	/* We need a codec->codec_reset() function here but the delay is a
+	   reasonable hack for the moment */
+	   
+	current->state = TASK_UNINTERRUPTIBLE;
+	schedule_timeout((5*HZ)/100);
 	if ((audio = codec->codec_read(codec, AC97_RESET)) & 0x8000) {
 		printk(KERN_ERR "ac97_codec: %s ac97 codec not present\n",
 		       codec->id ? "Secondary" : "Primary");
@@ -629,6 +638,17 @@ static int sigmatel_init(struct ac97_codec * codec)
 
 	return 1;
 }
+
+/*
+ *	Bring up an AD1885
+ */
+ 
+static int enable_eapd(struct ac97_codec * codec)
+{
+	codec->codec_write(codec, AC97_POWER_CONTROL,
+		codec->codec_read(codec, AC97_POWER_CONTROL)|0x8000);
+}
+	
 
 EXPORT_SYMBOL(ac97_read_proc);
 EXPORT_SYMBOL(ac97_probe_codec);

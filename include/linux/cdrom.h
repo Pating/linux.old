@@ -438,9 +438,12 @@ struct cdrom_generic_command
 #define GPCMD_MECHANISM_STATUS		    0xbd
 #define GPCMD_MODE_SELECT_10		    0x55
 #define GPCMD_MODE_SENSE_10		    0x5a
+#define GPCMD_MODE_SELECT_6		    0x15
+#define GPCMD_MODE_SENSE_6		    0x1a
 #define GPCMD_PAUSE_RESUME		    0x4b
 #define GPCMD_PLAY_AUDIO_10		    0x45
 #define GPCMD_PLAY_AUDIO_MSF		    0x47
+#define GPCMD_PLAY_AUDIO_TI		    0x48
 #define GPCMD_PLAY_CD			    0xbc
 #define GPCMD_PREVENT_ALLOW_MEDIUM_REMOVAL  0x1e
 #define GPCMD_READ_10			    0x28
@@ -734,8 +737,8 @@ struct cdrom_device_info {
     	char name[20];                  /* name of the device type */
 /* per-device flags */
         __u8 sanyo_slot		: 2;	/* Sanyo 3 CD changer support */
-        __u8 reserved		: 6;	/* not used yet */
-	struct cdrom_write_settings write;
+        __u8 scsi_2		: 1;	/* strict SCSI-II device */
+        __u8 reserved		: 5;	/* not used yet */
 };
 
 struct cdrom_device_ops {

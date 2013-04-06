@@ -193,7 +193,7 @@
 
   3.07 Feb 2, 2000 - Jens Axboe <axboe@suse.de>
   -- Do same "read header length" trick in cdrom_get_disc_info() as
-  we do in cdrom_get_track_info() -- some drive don't obbey specs and
+  we do in cdrom_get_track_info() -- some drive don't obey specs and
   fail if they can't supply the full Mt Fuji size table.
   -- Deleted stuff related to setting up write modes. It has a different
   home now.
@@ -213,11 +213,20 @@
   -- Fix Video-CD on SCSI drives that don't support READ_CD command. In
   that case switch block size and issue plain READ_10 again, then switch
   back.
+
+  3.10 Jun 10, 2000 - Jens Axboe <axboe@suse.de>
+  -- Fix volume control on CD's - old SCSI-II drives now use their own
+  code, as doing MODE6 stuff in here is really not my intention.
+  -- Use READ_DISC_INFO for more reliable end-of-disc.
+
+  3.11 Jun 12, 2000 - Jens Axboe <axboe@suse.de>
+  -- Fix bug in getting rpc phase 2 region info.
+  -- Reinstate "correct" CDROMPLAYTRKIND
  
 -------------------------------------------------------------------------*/
 
-#define REVISION "Revision: 3.09"
-#define VERSION "Id: cdrom.c 3.09 2000/05/12"
+#define REVISION "Revision: 3.11"
+#define VERSION "Id: cdrom.c 3.11 2000/06/12"
 
 /* I use an error-log mask to give fine grain control over the type of
    messages dumped to the system logs.  The available masks include: */
@@ -287,7 +296,7 @@ MODULE_PARM(check_media_type, "i");
 
 /* The (cdo->capability & ~cdi->mask & CDC_XXX) construct was used in
    a lot of places. This macro makes the code more clear. */
-#define CDROM_CAN(type) (cdi->ops->capability & ~cdi->mask & type)
+#define CDROM_CAN(type) (cdi->ops->capability & ~cdi->mask & (type))
 
 /* used in the audio ioctls */
 #define CHECKAUDIO if ((ret=check_for_audio_disc(cdi, cdo))) return ret
@@ -1096,8 +1105,8 @@ static int dvd_do_auth(struct cdrom_device_info *cdi, dvd_authinfo *ai)
 	case DVD_LU_SEND_RPC_STATE:
 		cdinfo(CD_DVD, "entering DVD_LU_SEND_RPC_STATE\n");
 		setup_report_key(&cgc, 0, 8);
+		memset(&rpc_state, 0, sizeof(rpc_state_t));
 
-		init_cdrom_command(&cgc, &rpc_state, 0);
 		if ((ret = cdo->generic_packet(cdi, &cgc)))
 			return ret;
 
@@ -1108,7 +1117,7 @@ static int dvd_do_auth(struct cdrom_device_info *cdi, dvd_authinfo *ai)
 		ai->lrpcs.rpc_scheme = rpc_state.rpc_scheme;
 		break;
 
-		/* Set region settings */
+	/* Set region settings */
 	case DVD_HOST_SEND_RPC_STATE:
 		cdinfo(CD_DVD, "entering DVD_HOST_SEND_RPC_STATE\n");
 		setup_send_key(&cgc, 0, 6);
@@ -1331,6 +1340,18 @@ int cdrom_mode_select(struct cdrom_device_info *cdi,
 	cgc->cmd[1] = 0x10;		/* PF */
 	cgc->cmd[7] = cgc->buflen >> 8;
 	cgc->cmd[8] = cgc->buflen & 0xff;
+	return cdo->generic_packet(cdi, cgc);
+}
+
+static int cdrom_mode_select_6(struct cdrom_device_info *cdi,
+			       struct cdrom_generic_command *cgc)
+{
+	struct cdrom_device_ops *cdo = cdi->ops;
+
+	memset(cgc->cmd, 0, sizeof(cgc->cmd));
+	cgc->cmd[0] = GPCMD_MODE_SELECT_6;
+	cgc->cmd[1] = 0x10;
+	cgc->cmd[4] = cgc->buflen & 0xff;
 	return cdo->generic_packet(cdi, cgc);
 }
 
@@ -1812,26 +1833,17 @@ int msf_to_lba(char m, char s, char f)
  */
 static int cdrom_switch_blocksize(struct cdrom_device_info *cdi, int size)
 {
-	struct cdrom_device_ops *cdo = cdi->ops;
 	struct cdrom_generic_command cgc;
 	struct modesel_head mh;
 
 	memset(&mh, 0, sizeof(mh));
+	memset(&cgc, 0, sizeof(cgc));
 	mh.block_desc_length = 0x08;
 	mh.block_length_med = (size >> 8) & 0xff;
 	mh.block_length_lo = size & 0xff;
-
-	memset(&cgc, 0, sizeof(cgc));
-	cgc.cmd[0] = 0x15;
-	cgc.cmd[1] = 1 << 4;
-	cgc.cmd[4] = 12;
 	cgc.buflen = sizeof(mh);
 	cgc.buffer = (char *) &mh;
-	mh.block_desc_length = 0x08;
-	mh.block_length_med = (size >> 8) & 0xff;
-	mh.block_length_lo = size & 0xff;
-
-	return cdo->generic_packet(cdi, &cgc);
+	return cdrom_mode_select_6(cdi, &cgc);
 }
 
 static int mmc_ioctl(struct cdrom_device_info *cdi, unsigned int cmd,
@@ -1956,36 +1968,15 @@ static int mmc_ioctl(struct cdrom_device_info *cdi, unsigned int cmd,
 		}
 	case CDROMPLAYTRKIND: {
 		struct cdrom_ti ti;
-		struct cdrom_tocentry entry;
-		struct cdrom_tochdr tochdr;
 
 		cdinfo(CD_DO_IOCTL, "entering CDROMPLAYTRKIND\n");
 		IOCTL_IN(arg, struct cdrom_ti, ti);
-		entry.cdte_format = CDROM_MSF;
 
-		/* get toc entry for start and end track */
-		if (cdo->audio_ioctl(cdi, CDROMREADTOCHDR, &tochdr))
-			return -EINVAL;
-		if ((entry.cdte_track = ti.cdti_trk0) > tochdr.cdth_trk1)
-			return -EINVAL;
-		if (cdo->audio_ioctl(cdi, CDROMREADTOCENTRY, &entry))
-			return -EINVAL;
-
-		cgc.cmd[3] = entry.cdte_addr.msf.minute;
-		cgc.cmd[4] = entry.cdte_addr.msf.second;
-		cgc.cmd[5] = entry.cdte_addr.msf.frame;
-
-		entry.cdte_track = ti.cdti_trk1 + 1;
-		if (entry.cdte_track > tochdr.cdth_trk1)
-			entry.cdte_track = CDROM_LEADOUT;
-
-		if (cdo->audio_ioctl(cdi, CDROMREADTOCENTRY, &entry))
-			return -EINVAL;
-
-		cgc.cmd[6] = entry.cdte_addr.msf.minute;
-		cgc.cmd[7] = entry.cdte_addr.msf.second;
-		cgc.cmd[8] = entry.cdte_addr.msf.frame;
-		cgc.cmd[0] = GPCMD_PLAY_AUDIO_MSF;
+		cgc.cmd[0] = GPCMD_PLAY_AUDIO_TI;
+		cgc.cmd[4] = ti.cdti_trk0;
+		cgc.cmd[5] = ti.cdti_ind0;
+		cgc.cmd[7] = ti.cdti_trk1;
+		cgc.cmd[8] = ti.cdti_ind1;
 		return cdo->generic_packet(cdi, &cgc);
 		}
 	case CDROMPLAYMSF: {
@@ -2018,28 +2009,32 @@ static int mmc_ioctl(struct cdrom_device_info *cdi, unsigned int cmd,
 	case CDROMVOLREAD: {
 		struct cdrom_volctrl volctrl;
 		char mask[32];
-		unsigned short offset;
+		unsigned short offset = sizeof(struct mode_page_header);
+		struct mode_page_header *header = (struct mode_page_header *) buffer;
+		/*
+		 * pass to sr vol control
+		 */
+		if (cdi->scsi_2)
+			return -ENOTTY;
+
 		cdinfo(CD_DO_IOCTL, "entering CDROMVOLUME\n");
 
 		IOCTL_IN(arg, struct cdrom_volctrl, volctrl);
 
 		cgc.buffer = buffer;
 		cgc.buflen = 24;
-		if ((ret = cdrom_mode_sense(cdi, &cgc, GPMODE_AUDIO_CTL_PAGE, 0)))
-		    return ret;
-		
-		/* some drives have longer pages, adjust and reread. */
-		if (buffer[1] > cgc.buflen) {
-			cgc.buflen = buffer[1] + 2;
-			if ((ret = cdrom_mode_sense(cdi, &cgc, 
-					GPMODE_AUDIO_CTL_PAGE, 0))) 
-			    return ret;
+		if ((ret = cdrom_mode_sense(cdi, &cgc, GPMODE_AUDIO_CTL_PAGE, 0))) {
+			cdi->scsi_2 = 1;
+			return ret;
 		}
 		
-		/* get the offset from the length of the page. length
-		   is measure from byte 2 an on, thus the 14. */
-		offset = buffer[1] - 14;
-
+		/* some drives have longer pages, adjust and reread. */
+		if (be16_to_cpu(header->mode_data_length) != cgc.buflen + 2) {
+			cgc.buflen = be16_to_cpu(header->mode_data_length) + 2;
+			if ((ret = cdrom_mode_sense(cdi, &cgc, GPMODE_AUDIO_CTL_PAGE, 0))) 
+				return ret;
+		}
+		
 		/* now we have the current volume settings. if it was only
 		   a CDROMVOLREAD, return these values */
 		if (cmd == CDROMVOLREAD) {
@@ -2053,9 +2048,8 @@ static int mmc_ioctl(struct cdrom_device_info *cdi, unsigned int cmd,
 		
 		/* get the volume mask */
 		cgc.buffer = mask;
-		if ((ret = cdrom_mode_sense(cdi, &cgc, 
-				GPMODE_AUDIO_CTL_PAGE, 1)))
-		    return ret;
+		if ((ret = cdrom_mode_sense(cdi, &cgc, GPMODE_AUDIO_CTL_PAGE, 1)))
+			return ret;
 
 		buffer[offset+9] = volctrl.channel0 & mask[offset+9];
 		buffer[offset+11] = volctrl.channel1 & mask[offset+11];
@@ -2252,6 +2246,9 @@ int cdrom_get_last_written(kdev_t dev, long *last_written)
 	int ret = -1;
 
 	if (!CDROM_CAN(CDC_GENERIC_PACKET))
+		goto use_toc;
+
+	if (!CDROM_CAN(CDC_CD_R | CDC_CD_RW))
 		goto use_toc;
 
 	if ((ret = cdrom_get_disc_info(dev, &di)))

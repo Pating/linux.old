@@ -109,8 +109,16 @@ static inline void do_identify (ide_drive_t *drive, byte cmd)
 				}
 				type = ide_cdrom;	/* Early cdrom models used zero */
 			case ide_cdrom:
-				printk ("CDROM");
 				drive->removable = 1;
+#ifdef CONFIG_PPC
+				/* kludge for Apple PowerBook internal zip */
+				if (!strstr(id->model, "CD-ROM") && strstr(id->model, "ZIP")) {
+					printk ("FLOPPY");
+					type = ide_floppy;
+					break;
+				}
+#endif
+				printk ("CDROM");
 				break;
 			case ide_tape:
 				printk ("TAPE");
@@ -819,7 +827,12 @@ int init_module (void)
 	
 	for (index = 0; index < MAX_HWIFS; ++index)
 		ide_unregister(index);
-	return ideprobe_init();
+	ideprobe_init();
+#ifdef CONFIG_PROC_FS
+	proc_ide_destroy();	/* Avoid multiple entry in /proc */
+	proc_ide_create();
+#endif
+	return 0;
 }
 
 void cleanup_module (void)

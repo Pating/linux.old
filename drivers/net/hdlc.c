@@ -41,7 +41,7 @@
 #ifndef MODULE
 static int version_printed=0;
 #endif
-static const char* version = "HDLC support routines revision: 1.0-pre9";
+static const char* version = "HDLC support routines revision: 1.0";
 
 
 #define CISCO_MULTICAST         0x8f    /* Cisco multicast address */
@@ -69,7 +69,10 @@ static int cisco_hard_header(struct sk_buff *skb, struct device *dev, u16 type,
 	
 	skb_push(skb, sizeof(hdlc_header));
 	data=(hdlc_header*)skb->data;
-	data->address = CISCO_MULTICAST;
+	if (type == CISCO_KEEPALIVE)
+		data->address = CISCO_MULTICAST;
+	else
+		data->address = CISCO_UNICAST;
 	data->control = 0;
 	data->protocol = htons(type);
 	
@@ -139,9 +142,11 @@ static void cisco_netif(hdlc_device *hdlc, struct sk_buff *skb)
 #endif
 
 	case CISCO_KEEPALIVE:
-		if (skb->len != sizeof(cisco_packet)) {
+		if (skb->len != CISCO_PACKET_LEN && 
+		    skb->len != CISCO_BIG_PACKET_LEN) {
 			printk(KERN_INFO "%s: Invalid length of Cisco "
-			       "control packet\n", hdlc->name);
+			       "control packet (%d bytes)\n", hdlc->name, 
+			       skb->len);
 			goto rx_error;
 		}
 
@@ -180,11 +185,17 @@ static void cisco_netif(hdlc_device *hdlc, struct sk_buff *skb)
 	  
 		case CISCO_KEEPALIVE_REQ:
 			hdlc->lmi.rxseq = ntohl(cisco_data->par1);
-			if (hdlc->lmi.rxseq == hdlc->lmi.txseq) {
+			if (ntohl(cisco_data->par2) == hdlc->lmi.txseq) {
 				hdlc->lmi.last_poll = jiffies;
-				if (!(hdlc->lmi.state & LINK_STATE_RELIABLE))
-					printk(KERN_INFO "%s: Link up\n",
-					       hdlc->name);
+				if (!(hdlc->lmi.state & LINK_STATE_RELIABLE)) {
+					u32 sec, min, hrs, days;
+					sec = ntohl(cisco_data->time)/1000;
+					min = sec / 60; sec -= min * 60;
+					hrs = min / 60; min -= hrs * 60;
+					days = hrs / 24; hrs -= days * 24;
+					printk(KERN_INFO "%s: Link up (peer uptime %ud%uh%um%us)\n",
+					       hdlc->name, days, hrs, min, sec);
+				}
 				hdlc->lmi.state |= LINK_STATE_RELIABLE;
 			}
 
@@ -867,10 +878,6 @@ static int hdlc_open(struct device *dev)
 	if (hdlc->mode==MODE_NONE)
 		return -ENOSYS;
 
-	result=hdlc->open(hdlc);
-	if (result)
-		return result;
-  
 	memset(&(hdlc->stats), 0, sizeof(struct net_device_stats));
 
 	if (mode_is(hdlc, MODE_FR | MODE_SOFT) ||
@@ -884,10 +891,31 @@ static int hdlc_open(struct device *dev)
 		dev->do_ioctl = hdlc_ioctl;
 		hdlc->pppdev.sppp.pp_flags&=~PP_CISCO;
 		dev->type=ARPHRD_PPP;
-		sppp_open(dev);
+		result = sppp_open(dev);
+		if (result) {
+			sppp_detach(dev);
+			return result;
+		}
 	}
 
-	return 0;
+	result=hdlc->open(hdlc);
+	if (result) {
+		if (mode_is(hdlc, MODE_FR | MODE_SOFT) ||
+		    mode_is(hdlc, MODE_CISCO | MODE_SOFT))
+			fr_cisco_close(hdlc);
+
+		else if (mode_is(hdlc, MODE_PPP | MODE_SOFT)) {
+			sppp_close(dev);
+			sppp_detach(dev);
+			dev->rebuild_header=NULL;
+			dev->change_mtu=hdlc_change_mtu;
+			dev->mtu=HDLC_MAX_MTU;
+			dev->hard_header_len=16;
+		}
+
+	}
+
+	return result;
 }
 
 
@@ -895,6 +923,8 @@ static int hdlc_open(struct device *dev)
 static int hdlc_close(struct device *dev)
 {
 	hdlc_device *hdlc=dev_to_hdlc(dev);
+
+	hdlc->close(hdlc);
 
 	if (mode_is(hdlc, MODE_FR | MODE_SOFT) ||
 	    mode_is(hdlc, MODE_CISCO | MODE_SOFT))
@@ -909,7 +939,6 @@ static int hdlc_close(struct device *dev)
 		dev->hard_header_len=16;
 	}
 
-	hdlc->close(hdlc);
 	return 0;
 }
 
@@ -1012,15 +1041,9 @@ static int hdlc_set_mode(hdlc_device *hdlc, int mode)
 
 		switch(mode & ~MODE_SOFT) {
 		case MODE_CISCO:
-			result = hdlc->set_mode ?
-				hdlc->set_mode(hdlc, MODE_HDLC) : 0;
+		case MODE_PPP:
 			break;
 
-		case MODE_PPP:
-			result = hdlc->set_mode ?
-				hdlc->set_mode(hdlc, MODE_HDLC) : 0;
-			break;
-	
 		case MODE_FR_ANSI:
 		case MODE_FR_CCITT:
 		case MODE_FR_ANSI  | MODE_DCE:
@@ -1028,13 +1051,14 @@ static int hdlc_set_mode(hdlc_device *hdlc, int mode)
 			hdlc_to_dev(hdlc)->addr_len=2;
 			*(u16*)hdlc_to_dev(hdlc)->dev_addr=htons(LMI_DLCI);
 			dlci_to_q922(hdlc_to_dev(hdlc)->broadcast, LMI_DLCI);
-			result = hdlc->set_mode ?
-				hdlc->set_mode(hdlc, MODE_HDLC) : 0;
 			break;
 
 		default:
 			return -EINVAL;
 		}
+
+		result = hdlc->set_mode ?
+			hdlc->set_mode(hdlc, MODE_HDLC) : 0;
 	}
 
 	if (result)
@@ -1043,6 +1067,8 @@ static int hdlc_set_mode(hdlc_device *hdlc, int mode)
 	hdlc->mode=mode;
 	if (mode_is(hdlc, MODE_PPP))
 		hdlc_to_dev(hdlc)->type=ARPHRD_PPP;
+	if (mode_is(hdlc, MODE_X25))
+		hdlc_to_dev(hdlc)->type=ARPHRD_X25;
 	else if (mode_is(hdlc, MODE_FR))
 		hdlc_to_dev(hdlc)->type=ARPHRD_FRAD;
 	else			/* Conflict - raw HDLC and Cisco */

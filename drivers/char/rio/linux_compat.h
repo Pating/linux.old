@@ -47,9 +47,6 @@ struct ttystatics {
 
 #define SEM_SIGIGNORE 0x1234
 
-typedef struct semaphore semtype;
-
-
 #ifdef DEBUG_SEM
 #define swait(a,b)      printk ("waiting:    " __FILE__ " line %d\n", __LINE__)
 #define ssignal(sem)    printk ("signalling: " __FILE__ " line %d\n", __LINE__)
@@ -75,8 +72,6 @@ typedef struct semaphore semtype;
 
 extern int rio_debug;
 
-#define rio_dprint(f, p) do {if (rio_debug & f) printk p;} while (0)
-
 #define RIO_DEBUG_INIT         0x000001
 #define RIO_DEBUG_BOOT         0x000002
 #define RIO_DEBUG_CMD          0x000004
@@ -95,7 +90,7 @@ extern int rio_debug;
 #define RIO_DEBUG_REC          0x008000
 #define RIO_DEBUG_SPINLOCK     0x010000
 #define RIO_DEBUG_DELAY        0x020000
-
+#define RIO_DEBUG_MOD_COUNT    0x040000
 
 /* Copied over from riowinif.h . This is ugly. The winif file declares
 also much other stuff which is incompatible with the headers from

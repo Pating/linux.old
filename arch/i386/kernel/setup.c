@@ -27,6 +27,8 @@
  *	Added proper Cascades CPU and L2 cache detection for Cascades
  *	and 8-way type cache happy bunch from Intel:^)
  *	Dragan Stancevic <visitor@valinux.com>, May 2000
+ *
+ *	Transmeta CPU detection.  H. Peter Anvin <hpa@zytor.com>, May 2000
  */
 
 /*
@@ -436,8 +438,10 @@ __initfunc(static int get_model_name(struct cpuinfo_x86 *c))
 {
 	unsigned int n, dummy, *v, ecx, edx;
 
-	/* Actually we must have cpuid or we could never have
-	 * figured out that this was AMD from the vendor info :-).
+	/* 
+	 * Actually we must have cpuid or we could never have
+	 * figured out that this was AMD/Cyrix/Transmeta
+	 * from the vendor info :-).
 	 */
 
 	cpuid(0x80000000, &n, &dummy, &dummy, &dummy);
@@ -450,8 +454,9 @@ __initfunc(static int get_model_name(struct cpuinfo_x86 *c))
 	cpuid(0x80000004, &v[8], &v[9], &v[10], &v[11]);
 	c->x86_model_id[48] = 0;
 	
-	if(c->x86_vendor == X86_VENDOR_AMD)
+	switch(c->x86_vendor)
 	{
+	case X86_VENDOR_AMD:
 		/*  Set MTRR capability flag if appropriate  */
 		if(boot_cpu_data.x86 == 5) {
 			if((boot_cpu_data.x86_model == 9) ||
@@ -460,17 +465,34 @@ __initfunc(static int get_model_name(struct cpuinfo_x86 *c))
 				c->x86_capability |= X86_FEATURE_MTRR;
 		}
 
+		/* Fall through */
+
+	case X86_VENDOR_TRANSMETA:
+		/* Cache information */
 		if (n >= 0x80000005){
 			cpuid(0x80000005, &dummy, &dummy, &ecx, &edx);
 			printk("CPU: L1 I Cache: %dK  L1 D Cache: %dK\n",
 				ecx>>24, edx>>24);
 			c->x86_cache_size=(ecx>>24)+(edx>>24);
 		}
-		if (n >= 0x80000006){
+		if(boot_cpu_data.x86_vendor == X86_VENDOR_AMD &&
+			boot_cpu_data.x86 == 6 && 
+			boot_cpu_data.x86_model== 3 &&
+			boot_cpu_data.x86_mask == 0)
+		{
+			/* AMD errata T13 (order #21922) */
+			printk("CPU: L2 Cache: 64K\n");
+			c->x86_cache_size = 64;
+		}
+		else if (n >= 0x80000006){
 			cpuid(0x80000006, &dummy, &dummy, &ecx, &edx);
 			printk("CPU: L2 Cache: %dK\n", ecx>>16);
 			c->x86_cache_size = ecx>>16;
 		}
+		break;
+
+	default:		/* Cyrix */
+		break;
 	}
 	return 1;
 }
@@ -735,6 +757,70 @@ __initfunc(static void cyrix_model(struct cpuinfo_x86 *c))
 	return;
 }
 
+__initfunc(static void transmeta_model(struct cpuinfo_x86 *c))
+{
+	unsigned int cap_mask, uk, max, dummy, n, ecx, edx;
+	unsigned int cms_rev1, cms_rev2;
+	unsigned int cpu_rev, cpu_freq, cpu_flags;
+	char cpu_info[65];
+
+	get_model_name(c);	/* Same as AMD/Cyrix */
+
+	/* Print CMS and CPU revision */
+	cpuid(0x80860000, &max, &dummy, &dummy, &dummy);
+	if ( max >= 0x80860001 ) {
+		cpuid(0x80860001, &dummy, &cpu_rev, &cpu_freq, &cpu_flags); 
+		printk("CPU: Processor revision %u.%u.%u.%u, %u MHz%s%s\n",
+		       (cpu_rev >> 24) & 0xff,
+		       (cpu_rev >> 16) & 0xff,
+		       (cpu_rev >> 8) & 0xff,
+		       cpu_rev & 0xff,
+		       cpu_freq,
+		       (cpu_flags & 1) ? " [recovery]" : "",
+		       (cpu_flags & 2) ? " [longrun]" : "");
+	}
+	if ( max >= 0x80860002 ) {
+		cpuid(0x80860002, &dummy, &cms_rev1, &cms_rev2, &dummy);
+		printk("CPU: Code Morphing Software revision %u.%u.%u-%u-%u\n",
+		       (cms_rev1 >> 24) & 0xff,
+		       (cms_rev1 >> 16) & 0xff,
+		       (cms_rev1 >> 8) & 0xff,
+		       cms_rev1 & 0xff,
+		       cms_rev2);
+	}
+	if ( max >= 0x80860006 ) {
+		cpuid(0x80860003,
+		      (void *)&cpu_info[0],
+		      (void *)&cpu_info[4],
+		      (void *)&cpu_info[8],
+		      (void *)&cpu_info[12]);
+		cpuid(0x80860004,
+		      (void *)&cpu_info[16],
+		      (void *)&cpu_info[20],
+		      (void *)&cpu_info[24],
+		      (void *)&cpu_info[28]);
+		cpuid(0x80860005,
+		      (void *)&cpu_info[32],
+		      (void *)&cpu_info[36],
+		      (void *)&cpu_info[40],
+		      (void *)&cpu_info[44]);
+		cpuid(0x80860006,
+		      (void *)&cpu_info[48],
+		      (void *)&cpu_info[52],
+		      (void *)&cpu_info[56],
+		      (void *)&cpu_info[60]);
+		cpu_info[64] = '\0';
+		printk("CPU: %s\n", cpu_info);
+	}
+
+	/* Unhide possibly hidden flags */
+	rdmsr(0x80860004, cap_mask, uk);
+	wrmsr(0x80860004, ~0, uk);
+	cpuid(0x00000001, &dummy, &dummy, &dummy, &c->x86_capability);
+	wrmsr(0x80860004, cap_mask, uk);
+}
+
+
 __initfunc(void get_cpu_vendor(struct cpuinfo_x86 *c))
 {
 	char *v = c->x86_vendor_id;
@@ -751,6 +837,10 @@ __initfunc(void get_cpu_vendor(struct cpuinfo_x86 *c))
 		c->x86_vendor = X86_VENDOR_CENTAUR;
 	else if (!strcmp(v, "NexGenDriven"))
 		c->x86_vendor = X86_VENDOR_NEXGEN;
+	else if (!strcmp(v, "RiseRiseRise"))
+		c->x86_vendor = X86_VENDOR_RISE;
+	else if (!strcmp(v, "GenuineTMx86"))
+		c->x86_vendor = X86_VENDOR_TRANSMETA;
 	else
 		c->x86_vendor = X86_VENDOR_UNKNOWN;
 }
@@ -815,6 +905,20 @@ __initfunc(void identify_cpu(struct cpuinfo_x86 *c))
 	    c->cpuid_level < 0)
 		return;
 
+	/* It should be possible for the user to override this. */
+	if(c->cpuid_level > 0 && 
+	   (c->x86_vendor == X86_VENDOR_INTEL || c->x86_vendor == X86_VENDOR_TRANSMETA) &&
+	   c->x86_capability&(1<<18)) {
+		/* Disable processor serial number */
+		unsigned long lo,hi;
+		rdmsr(0x119,lo,hi);
+		lo |= 0x200000;
+		wrmsr(0x119,lo,hi);
+		printk(KERN_INFO "CPU serial number disabled.\n");
+	}
+
+	mcheck_init(c);
+	
 	if (c->x86_vendor == X86_VENDOR_CYRIX) {
 		cyrix_model(c);
 		return;
@@ -823,18 +927,9 @@ __initfunc(void identify_cpu(struct cpuinfo_x86 *c))
 	if (c->x86_vendor == X86_VENDOR_AMD && amd_model(c))
 		return;
 		
-	if (c->cpuid_level > 0 && c->x86_vendor == X86_VENDOR_INTEL)
-	{
-		if(c->x86_capability&(1<<18))
-		{
-			/* Disable processor serial number on Intel Pentium III 
-			   from code by Phil Karn */
-			unsigned long lo,hi;
-			rdmsr(0x119,lo,hi);
-			lo |= 0x200000;
-			wrmsr(0x119,lo,hi);
-			printk(KERN_INFO "Pentium-III serial number disabled.\n");
-		}
+	if (c->x86_vendor == X86_VENDOR_TRANSMETA) {
+		transmeta_model(c);
+		return;
 	}
 
 	if (c->cpuid_level > 1) {
@@ -928,7 +1023,7 @@ __initfunc(void dodgy_tsc(void))
 	
 
 static char *cpu_vendor_names[] __initdata = {
-	"Intel", "Cyrix", "AMD", "UMC", "NexGen", "Centaur" };
+	"Intel", "Cyrix", "AMD", "UMC", "NexGen", "Centaur", "Rise", "Transmeta" };
 
 
 __initfunc(void print_cpu_info(struct cpuinfo_x86 *c))
@@ -940,7 +1035,7 @@ __initfunc(void print_cpu_info(struct cpuinfo_x86 *c))
 	else if (c->cpuid_level >= 0)
 		vendor = c->x86_vendor_id;
 
-	if (vendor)
+	if (vendor && strncmp(c->x86_model_id, vendor, strlen(vendor)))
 		printk("%s ", vendor);
 
 	if (!c->x86_model_id[0])
@@ -963,6 +1058,12 @@ __initfunc(void print_cpu_info(struct cpuinfo_x86 *c))
 		wrmsr(0x107, lv, hv);
 		/* Emulate MTRRs using Centaur's MCR. */
 		c->x86_capability |= X86_FEATURE_MTRR;
+
+		/* Disable TSC on C6 as per errata. */
+		if (c->x86_model ==4) {
+			printk ("Disabling bugged TSC.\n");
+			c->x86_capability &= ~X86_FEATURE_TSC;
+		}
 
 		/* Set 3DNow! on Winchip 2 and above. */
 		if (c->x86_model >=8)
@@ -1029,17 +1130,22 @@ int get_cpuinfo(char * buffer)
 		    case X86_VENDOR_AMD:
 			if (c->x86 == 5 && c->x86_model == 6)
 				x86_cap_flags[10] = "sep";
-			x86_cap_flags[16] = "fcmov";
+			if (c->x86 < 6)
+				x86_cap_flags[16] = "fcmov";
+			x86_cap_flags[16] = "pat";
+			x86_cap_flags[22] = "mmxext";
+			x86_cap_flags[24] = "fxsr";
+			x86_cap_flags[30] = "3dnowext";
 			x86_cap_flags[31] = "3dnow";
 			break;
-
+																																										
 		    case X86_VENDOR_INTEL:
 			x86_cap_flags[6] = "pae";
 			x86_cap_flags[9] = "apic";
 			x86_cap_flags[14] = "mca";
 			x86_cap_flags[16] = "pat";
 			x86_cap_flags[17] = "pse36";
-			x86_cap_flags[18] = "pn";
+			x86_cap_flags[18] = "psn";
 			x86_cap_flags[24] = "fxsr";
 			x86_cap_flags[25] = "xmm";
 			break;
@@ -1050,8 +1156,8 @@ int get_cpuinfo(char * buffer)
 			break;
 
 		    default:
-			/* Unknown CPU manufacturer. Transmeta ? :-) */
-			break;
+		        /* Unknown CPU manufacturer or no specal action needed */
+		        break;
 		}
 
 		sep_bug = c->x86_vendor == X86_VENDOR_INTEL &&

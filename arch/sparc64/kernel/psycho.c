@@ -1,4 +1,4 @@
-/* $Id: psycho.c,v 1.85.2.9 2000/05/01 06:33:49 davem Exp $
+/* $Id: psycho.c,v 1.85.2.10 2000/06/14 07:41:19 davem Exp $
  * psycho.c: Ultra/AX U2P PCI controller support.
  *
  * Copyright (C) 1997 David S. Miller (davem@caipfs.rutgers.edu)
@@ -36,6 +36,12 @@ unsigned long pci_dvma_mask = 0xffffffffUL;
 #define PCI_DVMA_HASH_NONE	0xffffffffffffffffUL
 unsigned long pci_dvma_v2p_hash[PCI_DVMA_HASHSZ];
 unsigned long pci_dvma_p2v_hash[PCI_DVMA_HASHSZ];
+
+/* If this is non-NULL it points to Sabre's DMA write-sync register
+ * which is used by drivers of devices behind bridges other than APB
+ * to synchronize DMA write streams with interrupt delivery.
+ */
+volatile u64 *pci_dma_wsync = NULL;
 
 #ifndef CONFIG_PCI
 
@@ -299,6 +305,8 @@ void __init sabre_init(int pnode)
 		prom_printf("SABRE: Error, cannot map SABRE main registers.\n");
 		prom_halt();
 	}
+
+	pci_dma_wsync = &sabre->psycho_regs->pci_dma_wsync;
 
 	printk("PCI: Found SABRE, main regs at %p CTRL[%016lx]\n",
 	       sabre->psycho_regs, sabre->psycho_regs->control);

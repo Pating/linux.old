@@ -425,7 +425,7 @@ function menu_name () {
 			--menu '$menu_instructions' \
 			$ROWS $COLS $((ROWS-10)) \
 			'$default' " >MCmenu
-	>MCradiolists
+	echo "#!/bin/sh" >MCradiolists
 }
 
 #
@@ -713,11 +713,11 @@ function parser(ifile,menu) {
 			++menu_no
 
 			printf("submenu %s MCmenu%s\n", $0, menu_no) >>menu
-
-			printf( "function MCmenu%s () {\n"\
+			printf( "#!/bin/sh\n"\
+				"function MCmenu%s () {\n"\
 				"default=$1\n"\
 				"menu_name %s\n",\
-				 menu_no, $0) >"MCmenu"menu_no
+				 menu_no, $0) >>"MCmenu"menu_no
 
 			parser(ifile, "MCmenu"menu_no)
 		}
@@ -772,7 +772,8 @@ function parser(ifile,menu) {
 function parse_config_files () {
 	rm -f MCmenu*
 
-	echo "function MCmenu0 () {" >MCmenu0
+	echo "#!/bin/sh" > MCmenu0
+	echo "function MCmenu0 () {" >>MCmenu0
 	echo 'default=$1' >>MCmenu0
 	echo "menu_name 'Main Menu'" >>MCmenu0
 
@@ -833,7 +834,7 @@ EOM
 			cat <<EOM
 
 Please report this to the maintainer <mec@shout.net>.  You may also
-send a problem report to <linux-kernel@vger.rutgers.edu>.
+send a problem report to <linux-kernel@vger.kernel.org>.
 
 Please indicate the kernel version you are trying to configure and
 which menu you were trying to enter when this error occurred.
@@ -896,7 +897,7 @@ the /usr/src/linux/scripts/lxdialog directory and issuing the
 
 If you have verified that your ncurses install is correct, you may email
 the maintainer <mec@shout.net> or post a message to
-<linux-kernel@vger.rutgers.edu> for additional assistance. 
+<linux-kernel@vger.kernel.org> for additional assistance. 
 
 EOM
 			cleanup

@@ -697,32 +697,39 @@ static inline int tcp_memory_free(struct sock *sk)
 }
 
 /*
- *	Wait for more memory for a socket
+ *	Wait for more memory for a socket.
+ *	Special case is err == -ENOMEM, in this case just sleep a bit waiting
+ *	for the system to free up some memory. 
  */
-static void wait_for_tcp_memory(struct sock * sk)
+static void wait_for_tcp_memory(struct sock * sk, int err)
 {
-	release_sock(sk);
-	if (!tcp_memory_free(sk)) {
+	if (1) { 
 		struct wait_queue wait = { current, NULL };
-
+	
 		sk->socket->flags &= ~SO_NOSPACE;
 		add_wait_queue(sk->sleep, &wait);
+		release_sock(sk);
 		for (;;) {
 			if (signal_pending(current))
 				break;
 			current->state = TASK_INTERRUPTIBLE;
-			if (tcp_memory_free(sk))
+			if (tcp_memory_free(sk) && !err)
 				break;
 			if (sk->shutdown & SEND_SHUTDOWN)
 				break;
 			if (sk->err)
 				break;
-			schedule();
+			if (!err) 
+				schedule();
+			else {
+				schedule_timeout(net_random()%(HZ/5) + 1); 
+				break;
+			} 	
 		}
+		lock_sock(sk);
 		current->state = TASK_RUNNING;
 		remove_wait_queue(sk->sleep, &wait);
 	}
-	lock_sock(sk);
 }
 
 /*
@@ -915,12 +922,12 @@ int tcp_do_sendmsg(struct sock *sk, struct msghdr *msg)
 				tmp += copy;
 				queue_it = 0;
 			}
-			skb = sock_wmalloc(sk, tmp, 0, GFP_KERNEL);
+			skb = sock_wmalloc_err(sk, tmp, 0, GFP_KERNEL, &err);
 
 			/* If we didn't get any memory, we need to sleep. */
 			if (skb == NULL) {
 				sk->socket->flags |= SO_NOSPACE;
-				if (flags&MSG_DONTWAIT) {
+				if ((flags&MSG_DONTWAIT) && !err) {
 					err = -EAGAIN;
 					goto do_interrupted;
 				}
@@ -928,8 +935,11 @@ int tcp_do_sendmsg(struct sock *sk, struct msghdr *msg)
 					err = -ERESTARTSYS;
 					goto do_interrupted;
 				}
-				tcp_push_pending_frames(sk, tp);
-				wait_for_tcp_memory(sk);
+
+				/* In OOM that would fail anyways so do not bother. */ 
+				if (!err) 
+					tcp_push_pending_frames(sk, tp);
+				wait_for_tcp_memory(sk, err);
 
 				/* If SACK's were formed or PMTU events happened,
 				 * we must find out about it.

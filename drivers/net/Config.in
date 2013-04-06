@@ -46,7 +46,11 @@ if [ "$CONFIG_NET_ETHERNET" = "y" ]; then
   fi
   if [ "$CONFIG_PPC" = "y" ]; then
     tristate 'MACE (Power Mac ethernet) support' CONFIG_MACE
+    if [ "$CONFIG_MACE" != "n" ]; then
+      bool 'Use AAUI port instead of TP by default' CONFIG_MACE_AAUI_PORT
+    fi
     tristate 'BMAC (G3 ethernet) support' CONFIG_BMAC
+    tristate 'GMAC (G4/iBook ethernet) support' CONFIG_GMAC
     tristate 'Symbios 53c885 (Synergy ethernet) support' CONFIG_NCR885E
   fi
   if [ "$CONFIG_ZORRO" = "y" ]; then
@@ -221,8 +225,8 @@ if [ ! "$CONFIG_PARPORT" = "n" ]; then
 fi
 
 tristate 'PPP (point-to-point) support' CONFIG_PPP
-if [ ! "$CONFIG_PPP" = "n" ]; then
-  comment 'CCP compressors for PPP are only built as modules.'
+if [ "$CONFIG_PPP" = "y" ]; then
+  comment 'CCP compressors for PPP will also be built in.'
 fi
 
 tristate 'SLIP (serial line) support' CONFIG_SLIP
@@ -319,6 +323,10 @@ if [ "$CONFIG_EXPERIMENTAL" = "y" ]; then
 
     if [ "$CONFIG_PCI" != "n" ]; then
       dep_tristate '  SBE wanXL support' CONFIG_WANXL $CONFIG_HDLC
+      dep_tristate '  Cyclades-PC300 support' CONFIG_PC300 $CONFIG_HDLC
+      if [ "$CONFIG_PC300" != "n" ]; then
+        bool '    Cyclades-PC300 X.25 support (please read help)' CONFIG_PC300_X25
+      fi
     fi
   fi
 fi

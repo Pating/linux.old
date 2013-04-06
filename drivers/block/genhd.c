@@ -1089,6 +1089,14 @@ struct mac_driver_desc {
     /* ... more stuff */
 };
 
+static inline void mac_fix_string(char *stg, int len)
+{
+	int i;
+
+	for (i = len - 1; i >= 0 && stg[i] == ' '; i--)
+		stg[i] = 0;
+}
+
 static int mac_partition(struct gendisk *hd, kdev_t dev, unsigned long fsec)
 {
 	struct buffer_head *bh;
@@ -1157,18 +1165,31 @@ static int mac_partition(struct gendisk *hd, kdev_t dev, unsigned long fsec)
 		 */
 		if (_machine == _MACH_Pmac) {
 			int goodness = 0;
+
+			mac_fix_string(part->processor, 16);
+			mac_fix_string(part->name, 32);
+			mac_fix_string(part->type, 32);					
 		    
 			if ((be32_to_cpu(part->status) & MAC_STATUS_BOOTABLE)
 			    && strcasecmp(part->processor, "powerpc") == 0)
 				goodness++;
 
-			if (strcasecmp(part->type, "Apple_UNIX_SVR2") == 0) {
+			if (strcasecmp(part->type, "Apple_UNIX_SVR2") == 0
+			    || strcasecmp(part->type, "Linux_PPC") == 0) {
+				int i, l;
+
 				goodness++;
-				if ((strcmp(part->name, "/") == 0) ||
-				    (strstr(part->name, "root") != 0)) {
+				l = strlen(part->name);
+				if (strcmp(part->name, "/") == 0)
 					goodness++;
+				for (i = 0; i <= l - 4; ++i) {
+					if (strnicmp(part->name + i, "root",
+						     4) == 0) {
+						goodness += 2;
+						break;
+					}
 				}
-				if (strncmp(part->name, "swap", 4) == 0)
+				if (strnicmp(part->name, "swap", 4) == 0)
 					goodness--;
 			}
 
@@ -1193,7 +1214,7 @@ static int mac_partition(struct gendisk *hd, kdev_t dev, unsigned long fsec)
 #endif /* CONFIG_MAC_PARTITION */
 
 #ifdef CONFIG_ATARI_PARTITION
-#include <asm/atari_rootsec.h>
+#include <linux/atari_rootsec.h>
 
 /* ++guenther: this should be settable by the user ("make config")?.
  */
@@ -1237,7 +1258,7 @@ static int atari_partition (struct gendisk *hd, kdev_t dev,
 	      part_fmt = 1;
 #endif
 	      printk(" XGM<");
-	      partsect = extensect = pi->st;
+	      partsect = extensect = be32_to_cpu(pi->st);
 	      while (1)
 		{
 		  xbh = bread (dev, partsect / 2, get_ptable_blocksize(dev));
@@ -1258,8 +1279,8 @@ static int atari_partition (struct gendisk *hd, kdev_t dev,
 		    break;
 		  }
 
-		  add_partition(hd, minor, partsect + xrs->part[0].st,
-				xrs->part[0].siz, 0);
+		  add_partition(hd, minor, partsect + be32_to_cpu(xrs->part[0].st),
+				be32_to_cpu(xrs->part[0].siz), 0);
 
 		  if (!(xrs->part[1].flg & 1)) {
 		    /* end of linked partition list */
@@ -1272,7 +1293,7 @@ static int atari_partition (struct gendisk *hd, kdev_t dev,
 		    break;
 		  }
 
-		  partsect = xrs->part[1].st + extensect;
+		  partsect = be32_to_cpu(xrs->part[1].st) + extensect;
 		  brelse (xbh);
 		  minor++;
 		  if (minor >= m_lim) {
@@ -1285,7 +1306,8 @@ static int atari_partition (struct gendisk *hd, kdev_t dev,
 	  else
 	    {
 	      /* we don't care about other id's */
-	      add_partition (hd, minor, pi->st, pi->siz, 0);
+	      printk(" %c%c%c(%d)", pi->id[0], pi->id[1], pi->id[2], be32_to_cpu(pi->siz)/2048);
+	      add_partition (hd, minor, be32_to_cpu(pi->st), be32_to_cpu(pi->siz), 0);
 	    }
 	}
     }
@@ -1520,10 +1542,6 @@ static void check_partition(struct gendisk *hd, kdev_t dev)
 	if(amiga_partition(hd, dev, first_sector))
 		return;
 #endif
-#ifdef CONFIG_ATARI_PARTITION
-	if(atari_partition(hd, dev, first_sector))
-		return;
-#endif
 #ifdef CONFIG_MAC_PARTITION
 	if (mac_partition(hd, dev, first_sector))
 		return;
@@ -1534,6 +1552,10 @@ static void check_partition(struct gendisk *hd, kdev_t dev)
 #endif
 #ifdef CONFIG_ULTRIX_PARTITION
 	if(ultrix_partition(hd, dev, first_sector))
+		return;
+#endif
+#ifdef CONFIG_ATARI_PARTITION
+	if(atari_partition(hd, dev, first_sector))
 		return;
 #endif
 #ifdef CONFIG_ARCH_S390

@@ -38,6 +38,8 @@
 #define LINE_X21	3
 #define LINE_LOOPBACK	4	/* On-card loopback */
 #define LINE_NOLOOPBACK	5
+#define LINE_T1		6
+#define LINE_E1		7
 #define LINE_MIN_CLOCK 75	/* This & higher values are real clock rates */
 
 
@@ -126,6 +128,8 @@ typedef struct {
 	u16 rel;		/* reliability */
 	u32 time;
 }__attribute__ ((packed)) cisco_packet;
+#define	CISCO_PACKET_LEN	18
+#define	CISCO_BIG_PACKET_LEN	20
 
 
 
@@ -153,8 +157,8 @@ typedef struct {
 	u8 N391cnt;
 
 	u8 state;		/* ! */
-	u8 txseq;		/* ! TX sequence number */
-	u8 rxseq;		/* ! RX sequence number */
+	u32 txseq;		/* ! TX sequence number - Cisco uses 4 bytes */
+	u32 rxseq;		/* ! RX sequence number */
 }fr_lmi;			/* ! means used in Cisco HDLC as well */
 
 

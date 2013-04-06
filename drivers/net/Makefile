@@ -22,6 +22,8 @@ CONFIG_8390_BUILTIN :=
 CONFIG_8390_MODULE  :=
 CONFIG_SLHC_BUILTIN :=
 CONFIG_SLHC_MODULE  :=
+CONFIG_BSDCOMP_BUILTIN :=
+CONFIG_BSDCOMP_MODULE  :=
 CONFIG_PPPDEF_BUILTIN :=
 CONFIG_PPPDEF_MODULE  :=
 CONFIG_7990_BUILTIN :=
@@ -35,12 +37,14 @@ CONFIG_SYNCPPP_MODULE  :=
 
 ifeq ($(CONFIG_ISDN),y)
   ifeq ($(CONFIG_ISDN_PPP),y)
+    CONFIG_BSDCOMP_BUILTIN = y
     CONFIG_SLHC_BUILTIN = y
     CONFIG_PPPDEF_BUILTIN = y
   endif
 else
   ifeq ($(CONFIG_ISDN),m)
     ifeq ($(CONFIG_ISDN_PPP),y)
+      CONFIG_BSDCOMP_MODULE = y
       CONFIG_SLHC_MODULE = y
       CONFIG_PPPDEF_MODULE = y
     endif
@@ -311,19 +315,17 @@ else
   endif
 endif
 
-# bsd_comp.o is *always* a module, for some documented reason
-# (licensing).
 ifeq ($(CONFIG_PPP),y)
 LX_OBJS += ppp.o
-M_OBJS += bsd_comp.o
+CONFIG_BSDCOMP_BUILTIN = y
 CONFIG_SLHC_BUILTIN = y
 CONFIG_PPPDEF_BUILTIN = y
 else
   ifeq ($(CONFIG_PPP),m)
+  CONFIG_BSDCOMP_MODULE = y
   CONFIG_SLHC_MODULE = y
   CONFIG_PPPDEF_MODULE = y
   MX_OBJS += ppp.o
-  M_OBJS += bsd_comp.o
   endif
 endif
 
@@ -1003,6 +1005,14 @@ else
   endif
 endif
 
+ifeq ($(CONFIG_PC300),y)
+L_OBJS += pc300.o
+else
+  ifeq ($(CONFIG_PC300),m)
+  M_OBJS += pc300.o
+  endif
+endif
+
 # If anything built-in uses syncppp, then build it into the kernel also.
 # If not, but a module uses it, build as a module.
 
@@ -1011,6 +1021,16 @@ LX_OBJS += syncppp.o
 else
   ifdef CONFIG_SYNCPPP_MODULE
   MX_OBJS += syncppp.o
+  endif
+endif
+
+# If anything built-in uses bsd_comp, then build it into the kernel also.
+# If not, but a module uses it, build as a module.
+ifdef CONFIG_BSDCOMP_BUILTIN
+LX_OBJS += bsd_comp.o
+else
+  ifdef CONFIG_BSDCOMP_MODULE
+  MX_OBJS += bsd_comp.o
   endif
 endif
 
@@ -1026,10 +1046,8 @@ endif
 
 # if anything built-in uses ppp_deflate, then build it into the kernel also.
 # If not, but a module uses it, build as a module.
-# ... NO!!!  ppp_deflate.o does not work as resident;
-# it works only as a module!
 ifdef CONFIG_PPPDEF_BUILTIN
-MX_OBJS += ppp_deflate.o
+LX_OBJS += ppp_deflate.o
 else
   ifdef CONFIG_PPPDEF_MODULE
   MX_OBJS += ppp_deflate.o
@@ -1242,6 +1260,14 @@ L_OBJS += bmac.o
 else
   ifeq ($(CONFIG_BMAC),m)
   M_OBJS += bmac.o
+  endif
+endif
+
+ifeq ($(CONFIG_GMAC),y)
+L_OBJS += gmac.o
+else
+  ifeq ($(CONFIG_GMAC),m)
+  M_OBJS += gmac.o
   endif
 endif
 

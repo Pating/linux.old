@@ -141,10 +141,12 @@ int shrink_mmap(int priority, int gfp_mask)
 	unsigned long limit = num_physpages;
 	struct page * page;
 	int count;
-
+	int nr_dirty = 0;
+	
 	/* Make sure we scan all pages twice at priority 0. */
 	count = (limit << 1) >> priority;
 
+ refresh_clock:
 	page = mem_map + clock;
 	do {
 		int referenced;
@@ -177,8 +179,6 @@ int shrink_mmap(int priority, int gfp_mask)
 		if ((gfp_mask & __GFP_DMA) && !PageDMA(page))
 			continue;
 
-		count--;
-
 		/*
 		 * Is it a page swap page? If so, we want to
 		 * drop it if it is no longer used, even if it
@@ -196,10 +196,23 @@ int shrink_mmap(int priority, int gfp_mask)
 
 		/* Is it a buffer page? */
 		if (page->buffers) {
+			/*
+			 * Wait for async IO to complete
+			 * at each 64 buffers
+			 */ 
+
+			int wait = ((gfp_mask & __GFP_IO) 
+				&& (!(nr_dirty++ % 64)));
+
 			if (buffer_under_min())
 				continue;
-			if (!try_to_free_buffers(page))
-				continue;
+			/*
+			 * We can sleep if we need to do some write
+			 * throttling.
+			 */
+
+			if (!try_to_free_buffers(page, wait))
+				goto refresh_clock;
 			return 1;
 		}
 
@@ -211,7 +224,7 @@ int shrink_mmap(int priority, int gfp_mask)
 			return 1;
 		}
 
-	} while (count > 0);
+	} while (--count > 0);
 	return 0;
 }
 

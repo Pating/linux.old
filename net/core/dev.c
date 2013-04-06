@@ -98,6 +98,7 @@ extern int plip_init(void);
 extern void n2_init(void);
 extern void c101_init(void);
 extern int wanxl_init(void);
+extern int cpc_init(void);
 extern void sync_ppp_init(void);
 
 NET_PROFILE_DEFINE(dev_queue_xmit)
@@ -459,6 +460,10 @@ int dev_close(struct device *dev)
 	if (!(dev->flags&IFF_UP))
 		return 0;
 
+	/* If the device is a slave we should not touch it*/
+	if(dev->flags&IFF_SLAVE)
+		return -EBUSY;
+                                
 	dev_deactivate(dev);
 
 	dev_lock_wait();
@@ -773,6 +778,10 @@ void netif_rx(struct sk_buff *skb)
 	if (backlog.qlen <= netdev_max_backlog) {
 		if (backlog.qlen) {
 			if (netdev_dropping == 0) {
+				if (skb->dev->flags & IFF_SLAVE  && 
+				    skb->dev->slave) {
+					skb->dev = skb->dev->slave;
+				}
 				skb_queue_tail(&backlog,skb);
 				mark_bh(NET_BH);
 				return;
@@ -2039,6 +2048,9 @@ __initfunc(int net_dev_init(void))
 #endif
 #ifdef CONFIG_WANXL
 	wanxl_init();
+#endif
+#ifdef CONFIG_PC300
+	cpc_init();
 #endif
 #ifdef CONFIG_HDLC
 	sync_ppp_init();

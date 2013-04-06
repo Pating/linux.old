@@ -12,7 +12,7 @@
 N: Matti Aarnio
 E: mea@nic.funet.fi
 D: Alpha systems hacking, IPv6 and other network related stuff
-D: One of assisting postmasters for vger.rutgers.edu's lists
+D: One of assisting postmasters for vger.kernel.org's lists
 S: (ask for current address)
 S: Finland
 
@@ -371,7 +371,7 @@ S: Stanford, California 94305
 S: USA
 
 N: Juan Jose Ciarlante
-W: http://juanjox.linuxhq.com/
+W: http://juanjox.kernelnotes.org/
 E: jjciarla@raiz.uncu.edu.ar
 E: jjo@mendoza.gov.ar
 D: Network driver alias support
@@ -645,6 +645,10 @@ S: 1150 Ringwood Court
 S: San Jose, California 95131
 S: USA
 
+N: Kumar Gala
+E: kumar.gala@motorola.com
+D: AltiVec PowerPC support
+
 N: Nigel Gamble
 E: nigel@nrg.org
 E: nigel@sgi.com
@@ -812,6 +816,7 @@ E: bh40@calva.net
 E: benh@mipsys.com
 D: PowerMac booter (BootX)
 D: Additional PowerBook support
+D: Apple "Core99" machines support (ibook,g4,...)
 S: 22, rue des Marguettes
 S: 75012 Paris
 S: France
@@ -978,9 +983,10 @@ S: Chapel Hill, North Carolina 27514-4818
 S: USA
 
 N: Dave Jones
+E: davej@suse.de
 E: dave@powertweak.com
 E: djones2@glam.ac.uk
-W: http://linux.powertweak.com
+W: http://powertweak.sourceforge.net
 D: Userspace PCI bridge tuning (Powertweak).
 D: Centaur/IDT Winchip/Winchip 2 tweaks.
 D: Misc clean ups and other random hacking.
@@ -1339,6 +1345,15 @@ D: XF86_Mach8
 D: XF86_8514
 D: cfdisk (curses based disk partitioning program)
 
+N: Torben Mathiasen
+E: tmm@image.dk
+E: torben.mathiasen@compaq.com
+D: Maintainer of ThunderLAN driver.
+D: Fixes for TLAN running Full Duplex, and other kernel hacks.
+S: Bremensgade 29, st.th
+S: 2300 Copenhagen S
+S: Denmark
+
 N: Mike McLagan
 E: mike.mclagan@linux.org
 W: http://www.invlogic.com/~mmclagan
@@ -1631,6 +1646,13 @@ S: Germany
 N: Ken Pizzini
 E: ken@halcyon.com
 D: CDROM driver "sonycd535" (Sony CDU-535/531)
+
+N: Matt Porter
+E: mporter@phx.mcd.mot.com
+D: Motorola PowerPC PReP support
+S: 2900 S. Diable Way
+S: Tempe, Arizona 85282
+S: USA
 
 N: Frederic Potter 
 E: Frederic.Potter@masi.ibp.fr 
@@ -1983,6 +2005,16 @@ S: 1050 Woodduck Avenue
 S: Santa Clara, California 95051
 S: USA
 
+N: Marcelo W. Tosatti
+E: marcelo@conectiva.com.br
+W: http://bazar.conectiva.com.br/~marcelo/
+D: Miscellaneous kernel hacker
+D: Linux high availability hacker
+S: Conectiva S.A.
+S: R. Tocantins, 89 - Cristo Rei
+S: 80050-430 - Curitiba - Paraná
+S: Brazil
+
 N: Stefan Traby
 E: stefan@quant-x.com
 D: Minor Alpha kernel hacks
@@ -2103,7 +2135,7 @@ S: Germany
 
 N: Geert Uytterhoeven
 E: geert@linux-m68k.org
-W: http://www.cs.kuleuven.ac.be/~geert/
+W: http://home.tvd.be/cr26864/
 P: 1024/EC4A1EE1 8B 88 38 35 88 1E 95 A1  CD 9E AE DC 4B 4A 2F 41
 D: m68k/Amiga and PPC/CHRP Longtrail coordinator
 D: Frame buffer device and XF68_FBDev maintainer
@@ -2157,10 +2189,10 @@ S: The Netherlands
 N: Tim Waugh
 E: tim@cyberelk.demon.co.uk
 D: Co-architect of the parallel-port sharing system
-S: 34 Bladon Close
+S: 17 Curling Vale
 S: GUILDFORD
 S: Surrey
-S: GU1 1TY
+S: GU2 7PJ
 S: United Kingdom
 
 N: Juergen Weigert

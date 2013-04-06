@@ -57,6 +57,7 @@ extern int eepro_probe(struct device *);
 extern int eepro100_probe(struct device *);
 extern int el3_probe(struct device *);
 extern int at1500_probe(struct device *);
+extern int bond_init(struct device *);
 extern int pcnet32_probe(struct device *);
 extern int at1700_probe(struct device *);
 extern int fmv18x_probe(struct device *);
@@ -103,6 +104,7 @@ extern int pamsnet_probe(struct device *);
 extern int tlan_probe(struct device *);
 extern int mace_probe(struct device *);
 extern int bmac_probe(struct device *);
+extern int gmac_probe(struct device *);
 extern int ncr885e_probe(struct device *);
 extern int cs89x0_probe(struct device *dev);
 extern int ethertap_probe(struct device *dev);
@@ -121,6 +123,7 @@ extern int tc515_probe(struct device *dev);
 extern int lance_probe(struct device *dev);
 extern int rcpci_probe(struct device *);
 extern int dmfe_probe(struct device *);
+extern int sktr_probe(struct device *dev);
 
 /* Gigabit Ethernet adapters */
 extern int yellowfin_probe(struct device *dev);
@@ -470,6 +473,9 @@ struct devprobe ppc_probes[] __initdata = {
 #ifdef CONFIG_BMAC
 	{bmac_probe, 0},
 #endif
+#ifdef CONFIG_GMAC
+	{gmac_probe, 0},
+#endif
 #ifdef CONFIG_NCR885E
 	{ncr885e_probe, 0},
 #endif
@@ -631,6 +637,12 @@ static int fcif_probe(struct device *dev)
     static struct device tap0_dev = { "tap0", 0, 0, 0, 0, NETLINK_TAPBASE, 0, 0, 0, 0, NEXT_DEV, ethertap_probe, };
 #   undef NEXT_DEV
 #   define NEXT_DEV	(&tap0_dev)
+#endif
+
+#ifdef CONFIG_BONDING
+static struct device bonding_dev = { "bond0", 0, 0, 0, 0, 0, 0, 0, 0, 0, NEXT_DEV, bond_init, };
+#    undef NEXT_DEV
+#    define NEXT_DEV    (&bonding_dev)
 #endif
 
 #ifdef CONFIG_LANMEDIA
