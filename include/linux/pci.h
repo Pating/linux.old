@@ -299,6 +299,7 @@ struct pci_dev {
 	int ro;				/* Read/Only */
 
 	struct pci_bus	*bus;		/* bus this device is on */
+	struct pci_bus	*subordinate;	/* bus this device bridges to */
 	struct pci_dev	*sibling;	/* next device on this bus */
 	struct pci_dev	*next;		/* chain of all devices */
 
@@ -359,6 +360,7 @@ struct pci_bus {
 
 	struct pci_dev	*self;		/* bridge device as seen by parent */
 	struct pci_dev	*devices;	/* devices behind this bridge */
+	struct pci_dev	**last_dev_p;	/* where should next device be linked to */
 	struct resource	*resource[4];	/* address space routed to this bus */
 
 	void		*sysdata;	/* hook for sys-specific extension */
@@ -413,14 +415,15 @@ struct pbus_set_ranges_data
 
 void pcibios_init(void);
 void pcibios_fixup_bus(struct pci_bus *);
-void pcibios_fixup_pbus_ranges(struct pci_bus *, struct pbus_set_ranges_data *);
 int pcibios_enable_device(struct pci_dev *);
 char *pcibios_setup (char *str);
 
+/* Used only when drivers/pci/setup.c is used */
 void pcibios_align_resource(void *, struct resource *, unsigned long);
 void pcibios_update_resource(struct pci_dev *, struct resource *,
 			     struct resource *, int);
 void pcibios_update_irq(struct pci_dev *, int irq);
+void pcibios_fixup_pbus_ranges(struct pci_bus *, struct pbus_set_ranges_data *);
 
 /* Backward compatibility, don't use in new code! */
 
@@ -443,16 +446,20 @@ int pcibios_find_device (unsigned short vendor, unsigned short dev_id,
 			 unsigned short index, unsigned char *bus,
 			 unsigned char *dev_fn);
 
-/* Generic PCI interface functions */
+/* Generic PCI functions used internally */
 
 void pci_init(void);
 struct pci_bus *pci_scan_bus(int bus, struct pci_ops *ops, void *sysdata);
+struct pci_bus *pci_alloc_primary_bus(int bus);
+struct pci_dev *pci_scan_slot(struct pci_dev *temp);
 int pci_proc_attach_device(struct pci_dev *dev);
 int pci_proc_detach_device(struct pci_dev *dev);
 void pci_name_device(struct pci_dev *dev);
 char *pci_class_name(u32 class);
 void pci_read_bridge_bases(struct pci_bus *child);
 struct resource *pci_find_parent_resource(struct pci_dev *dev, struct resource *res);
+
+/* Generic PCI functions exported to card drivers */
 
 struct pci_dev *pci_find_device (unsigned int vendor, unsigned int device, struct pci_dev *from);
 struct pci_dev *pci_find_subsys (unsigned int vendor, unsigned int device,
@@ -470,9 +477,11 @@ int pci_read_config_dword(struct pci_dev *dev, int where, u32 *val);
 int pci_write_config_byte(struct pci_dev *dev, int where, u8 val);
 int pci_write_config_word(struct pci_dev *dev, int where, u16 val);
 int pci_write_config_dword(struct pci_dev *dev, int where, u32 val);
+
 int pci_enable_device(struct pci_dev *dev);
 void pci_set_master(struct pci_dev *dev);
 int pci_set_power_state(struct pci_dev *dev, int state);
+int pci_assign_resource(struct pci_dev *dev, int i);
 
 /* Helper functions for low-level code (drivers/pci/setup.c) */
 

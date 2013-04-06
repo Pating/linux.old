@@ -203,7 +203,7 @@ int cb_setup_cis_mem(socket_info_t *s, int space)
     pci_writeb(s->cap.cardbus, 0, PCI_COMMAND, PCI_COMMAND_MEMORY);
     m->map = 0; m->flags = MAP_ACTIVE;
     m->start = base; m->stop = base+sz-1;
-    s->ss_entry(s->sock, SS_SetBridge, m);
+    s->ss_entry->set_bridge(s->sock, m);
     if ((space == 7) && (check_rom(s->cb_cis_virt, sz) == 0)) {
 	printk(KERN_NOTICE "cs: no valid ROM images found!\n");
 	return CS_READ_FAILURE;
@@ -227,7 +227,7 @@ void cb_release_cis_mem(socket_info_t *s)
 	br = (s->cb_cis_space == 7) ?
 	    CB_ROM_BASE : CB_BAR(s->cb_cis_space-1);
 	m->map = 0; m->flags = 0;
-	s->ss_entry(s->sock, SS_SetBridge, m);
+	s->ss_entry->set_bridge(s->sock, m);
 	pci_writeb(s->cap.cardbus, 0, PCI_COMMAND, 0);
 	pci_writel(s->cap.cardbus, 0, br, 0);
 	release_mem_region(m->start, m->stop - m->start + 1);
@@ -283,20 +283,21 @@ int cb_alloc(socket_info_t *s)
     u_char i, hdr, fn, bus = s->cap.cardbus;
     cb_config_t *c;
 
+    memset(&tmp, 0, sizeof(tmp));
     tmp.bus = s->cap.cb_bus; tmp.devfn = 0;
-    tmp.next = pci_devices; pci_devices = &tmp;
 
-    pci_readw(bus, 0, PCI_VENDOR_ID, &vend);
-    pci_readw(bus, 0, PCI_DEVICE_ID, &dev);
+
+    pci_read_config_word(&tmp, PCI_VENDOR_ID, &vend);
+    pci_read_config_word(&tmp, PCI_DEVICE_ID, &dev);
     printk(KERN_INFO "cs: cb_alloc(bus %d): vendor 0x%04x, "
 	   "device 0x%04x\n", bus, vend, dev);
 
-    pci_readb(bus, 0, PCI_HEADER_TYPE, &hdr);
+    pci_read_config_byte(&tmp, PCI_HEADER_TYPE, &hdr);
     if (hdr & 0x80) {
 	/* Count functions */
 	for (fn = 0; fn < 8; fn++) {
 	    tmp.devfn = fn;
-	    pci_readw(bus, fn, PCI_VENDOR_ID, &v);
+	    pci_read_config_word(&tmp, PCI_VENDOR_ID, &v);
 	    if (v != vend) break;
 	}
     } else fn = 1;
@@ -307,7 +308,6 @@ int cb_alloc(socket_info_t *s)
     memset(c, 0, fn * sizeof(struct cb_config_t));
     s->cb_config = c;
 
-    pci_devices = tmp.next;
     for (i = 0; i < fn; i++) {
 	c[i].dev.bus = s->cap.cb_bus;
 	c[i].dev.devfn = i;
@@ -317,7 +317,7 @@ int cb_alloc(socket_info_t *s)
     }
     s->cap.cb_bus->devices = &c[0].dev;
     /* Link into PCI device chain */
-    c[s->functions-1].dev.next = pci_devices;
+    c[fn-1].dev.next = pci_devices;
     pci_devices = &c[0].dev;
     for (i = 0; i < fn; i++) {
 	c[i].dev.vendor = vend;
@@ -338,17 +338,20 @@ void cb_free(socket_info_t *s)
     cb_config_t *c = s->cb_config;
 
     if (c) {
-	struct pci_dev **p, *q;
+	struct pci_dev **p;
 	/* Unlink from PCI device chain */
-	for (p = &pci_devices; *p; p = &((*p)->next))
-	    if (*p == &c[0].dev) break;
-	for (q = *p; q; q = q->next) {
-	    if (q->bus != (*p)->bus) break;
+	p = &pci_devices;
+	while (*p) {
+	    struct pci_dev * dev = *p;
+	    if (dev->bus != s->cap.cb_bus) {
+	    	p = &dev->next;
+		continue;
+	    }
+	    *p = dev->next;
 #ifdef CONFIG_PROC_FS
-	    pci_proc_detach_device(q);
+	    pci_proc_detach_device(dev);
 #endif
 	}
-	if (*p) *p = q;
 	s->cap.cb_bus->devices = NULL;
 	kfree(s->cb_config);
 	s->cb_config = NULL;
@@ -584,7 +587,7 @@ void cb_enable(socket_info_t *s)
 	DEBUG(0, "  bridge %s map %d (flags 0x%x): 0x%x-0x%x\n",
 	      (m.flags & MAP_IOSPACE) ? "io" : "mem",
 	      m.map, m.flags, m.start, m.stop);
-	s->ss_entry(s->sock, SS_SetBridge, &m);
+	s->ss_entry->set_bridge(s->sock, &m);
     }
 
     /* Set up base address registers */
@@ -609,7 +612,7 @@ void cb_enable(socket_info_t *s)
 	    pci_writeb(bus, i, PCI_INTERRUPT_LINE,
 		       s->irq.AssignedIRQ);
 	s->socket.io_irq = s->irq.AssignedIRQ;
-	s->ss_entry(s->sock, SS_SetSocket, &s->socket);
+	s->ss_entry->set_socket(s->sock, &s->socket);
     }
 }
 
@@ -638,6 +641,6 @@ void cb_disable(socket_info_t *s)
 	case B_M1: m.map = m.flags = 0; break;
 	case B_M2: m.map = 1; m.flags = 0; break;
 	}
-	s->ss_entry(s->sock, SS_SetBridge, &m);
+	s->ss_entry->set_bridge(s->sock, &m);
     }
 }

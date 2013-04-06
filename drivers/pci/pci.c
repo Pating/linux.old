@@ -30,7 +30,6 @@
 struct pci_bus *pci_root;
 struct pci_dev *pci_devices = NULL;
 static struct pci_dev **pci_last_dev_p = &pci_devices;
-static int pci_reverse __initdata = 0;
 
 struct pci_dev *
 pci_find_slot(unsigned int bus, unsigned int devfn)
@@ -270,7 +269,7 @@ static inline unsigned int pci_resource_flags(unsigned int flags)
 	return IORESOURCE_MEM;
 }
 
-void __init pci_read_bases(struct pci_dev *dev, unsigned int howmany, int rom)
+static void __init pci_read_bases(struct pci_dev *dev, unsigned int howmany, int rom)
 {
 	unsigned int pos, reg, next;
 	u32 l, sz, tmp;
@@ -413,91 +412,264 @@ void __init pci_read_bridge_bases(struct pci_bus *child)
 	}
 }
 
-static unsigned int __init pci_do_scan_bus(struct pci_bus *bus)
+static struct pci_bus * __init pci_add_new_bus(struct pci_bus *parent, struct pci_dev *dev, int busnr)
 {
-	unsigned int devfn, l, max, class;
-	unsigned char irq, hdr_type, is_multi = 0;
-	struct pci_dev *dev, **bus_last;
 	struct pci_bus *child;
-	struct pci_dev *dev_cache = NULL;
 
-	DBG("pci_do_scan_bus for bus %d\n", bus->number);
-	bus_last = &bus->devices;
-	max = bus->secondary;
-	for (devfn = 0; devfn < 0xff; ++devfn) {
-		if (PCI_FUNC(devfn) && !is_multi) {
-			/* not a multi-function device */
-			continue;
-		}
-		if (!dev_cache) {
-			dev_cache = kmalloc(sizeof(*dev), GFP_KERNEL);
-			if (!dev_cache)
-				continue;
-		}
-		dev = dev_cache;
-		memset(dev, 0, sizeof(*dev));
-		dev->bus = bus;
-		dev->sysdata = bus->sysdata;
-		dev->devfn  = devfn;
+	/*
+	 * Allocate a new bus, and inherit stuff from the parent..
+	 */
+	child = kmalloc(sizeof(*child), GFP_KERNEL);
+	memset(child, 0, sizeof(*child));
 
-		if (pci_read_config_byte(dev, PCI_HEADER_TYPE, &hdr_type))
+	child->next = parent->children;
+	parent->children = child;
+	child->self = dev;
+	dev->subordinate = child;
+	child->parent = parent;
+	child->ops = parent->ops;
+	child->sysdata = parent->sysdata;
+
+	/*
+	 * Set up the primary, secondary and subordinate
+	 * bus numbers.
+	 */
+	child->number = child->secondary = busnr;
+	child->primary = parent->secondary;
+	child->subordinate = 0xff;
+
+	return child;
+}
+
+/*
+ * A CardBus bridge is basically the same as a regular PCI bridge,
+ * except we don't scan behind it because it will be changing.
+ */
+static int __init pci_scan_cardbus(struct pci_bus *bus, struct pci_dev *dev, int busnr)
+{
+	unsigned short cr;
+	unsigned int buses;
+	struct pci_bus *child;
+
+	/*
+	 * Insert it into the tree of buses.
+	 */
+	child = pci_add_new_bus(bus, dev, ++busnr);
+	child->subordinate = busnr;
+	sprintf(child->name, "PCI CardBus #%02x", child->number);
+
+	/*
+	 * Clear all status bits and turn off memory,
+	 * I/O and master enables.
+	 */
+	pci_read_config_word(dev, PCI_COMMAND, &cr);
+	pci_write_config_word(dev, PCI_COMMAND, 0x0000);
+	pci_write_config_word(dev, PCI_STATUS, 0xffff);
+
+	/*
+	 * Read the existing primary/secondary/subordinate bus
+	 * number configuration to determine if the bridge
+	 * has already been configured by the system.  If so,
+	 * do not modify the configuration, merely note it.
+	 */
+	pci_read_config_dword(dev, PCI_PRIMARY_BUS, &buses);
+	if ((buses & 0xFFFFFF) != 0 && ! pcibios_assign_all_busses()) {
+		child->primary = buses & 0xFF;
+		child->secondary = (buses >> 8) & 0xFF;
+		child->subordinate = (buses >> 16) & 0xFF;
+		child->number = child->secondary;
+		if (child->subordinate > busnr)
+			busnr = child->subordinate;
+	} else {
+		/*
+		 * Configure the bus numbers for this bridge:
+		 */
+		buses &= 0xff000000;
+		buses |=
+		      (((unsigned int)(child->primary)     <<  0) |
+		       ((unsigned int)(child->secondary)   <<  8) |
+		       ((unsigned int)(child->subordinate) << 16));
+		pci_write_config_dword(dev, PCI_PRIMARY_BUS, buses);
+	}
+	pci_write_config_word(dev, PCI_COMMAND, cr);
+	return busnr;
+}
+
+static unsigned int __init pci_do_scan_bus(struct pci_bus *bus);
+
+/*
+ * If it's a bridge, scan the bus behind it.
+ */
+static int __init pci_scan_bridge(struct pci_bus *bus, struct pci_dev * dev, int max)
+{
+	unsigned int buses;
+	unsigned short cr;
+	struct pci_bus *child;
+
+	/*
+	 * Insert it into the tree of buses.
+	 */
+	child = pci_add_new_bus(bus, dev, ++max);
+	sprintf(child->name, "PCI Bus #%02x", child->number);
+
+	/*
+	 * Clear all status bits and turn off memory,
+	 * I/O and master enables.
+	 */
+	pci_read_config_word(dev, PCI_COMMAND, &cr);
+	pci_write_config_word(dev, PCI_COMMAND, 0x0000);
+	pci_write_config_word(dev, PCI_STATUS, 0xffff);
+
+	/*
+	 * Read the existing primary/secondary/subordinate bus
+	 * number configuration to determine if the PCI bridge
+	 * has already been configured by the system.  If so,
+	 * do not modify the configuration, merely note it.
+	 */
+	pci_read_config_dword(dev, PCI_PRIMARY_BUS, &buses);
+	if ((buses & 0xFFFFFF) != 0 && ! pcibios_assign_all_busses()) {
+		unsigned int cmax;
+		child->primary = buses & 0xFF;
+		child->secondary = (buses >> 8) & 0xFF;
+		child->subordinate = (buses >> 16) & 0xFF;
+		child->number = child->secondary;
+		cmax = pci_do_scan_bus(child);
+		if (cmax > max) max = cmax;
+	} else {
+		/*
+		 * Configure the bus numbers for this bridge:
+		 */
+		buses &= 0xff000000;
+		buses |=
+		      (((unsigned int)(child->primary)     <<  0) |
+		       ((unsigned int)(child->secondary)   <<  8) |
+		       ((unsigned int)(child->subordinate) << 16));
+		pci_write_config_dword(dev, PCI_PRIMARY_BUS, buses);
+		/*
+		 * Now we can scan all subordinate buses:
+		 */
+		max = pci_do_scan_bus(child);
+		/*
+		 * Set the subordinate bus number to its real
+		 * value:
+		 */
+		child->subordinate = max;
+		buses = (buses & 0xff00ffff)
+			| ((unsigned int)(child->subordinate) << 16);
+		pci_write_config_dword(dev, PCI_PRIMARY_BUS, buses);
+	}
+	pci_write_config_word(dev, PCI_COMMAND, cr);
+	return max;
+}
+
+/*
+ * Read interrupt line and base address registers.
+ * The architecture-dependent code can tweak these, of course.
+ */
+static void __init pci_read_irq(struct pci_dev *dev)
+{
+	unsigned char irq;
+
+	pci_read_config_byte(dev, PCI_INTERRUPT_PIN, &irq);
+	if (irq)
+		pci_read_config_byte(dev, PCI_INTERRUPT_LINE, &irq);
+	dev->irq = irq;
+}
+
+/*
+ * Read the config data for a PCI device, sanity-check it
+ * and fill in the dev structure...
+ */
+static struct pci_dev * __init pci_scan_device(struct pci_dev *temp)
+{
+	struct pci_dev *dev;
+	u32 l, class;
+
+	if (pci_read_config_dword(temp, PCI_VENDOR_ID, &l))
+		return NULL;
+
+	/* some broken boards return 0 or ~0 if a slot is empty: */
+	if (l == 0xffffffff || l == 0x00000000 || l == 0x0000ffff || l == 0xffff0000)
+		return NULL;
+
+	dev = kmalloc(sizeof(*dev), GFP_KERNEL);
+	if (!dev)
+		return NULL;
+
+	memcpy(dev, temp, sizeof(*dev));
+	dev->vendor = l & 0xffff;
+	dev->device = (l >> 16) & 0xffff;
+	sprintf(dev->slot_name, "%02x:%02x.%d", dev->bus->number, PCI_SLOT(dev->devfn), PCI_FUNC(dev->devfn));
+	pci_name_device(dev);
+
+	pci_read_config_dword(dev, PCI_CLASS_REVISION, &class);
+	class >>= 8;				    /* upper 3 bytes */
+	dev->class = class;
+	class >>= 8;
+
+	switch (dev->hdr_type) {		    /* header type */
+	case PCI_HEADER_TYPE_NORMAL:		    /* standard header */
+		if (class == PCI_CLASS_BRIDGE_PCI)
+			goto bad;
+		pci_read_irq(dev);
+		pci_read_bases(dev, 6, PCI_ROM_ADDRESS);
+		pci_read_config_word(dev, PCI_SUBSYSTEM_VENDOR_ID, &dev->subsystem_vendor);
+		pci_read_config_word(dev, PCI_SUBSYSTEM_ID, &dev->subsystem_device);
+		break;
+
+	case PCI_HEADER_TYPE_BRIDGE:		    /* bridge header */
+		if (class != PCI_CLASS_BRIDGE_PCI)
+			goto bad;
+		pci_read_bases(dev, 2, PCI_ROM_ADDRESS1);
+		break;
+
+	case PCI_HEADER_TYPE_CARDBUS:		    /* CardBus bridge header */
+		if (class != PCI_CLASS_BRIDGE_CARDBUS)
+			goto bad;
+		pci_read_irq(dev);
+		pci_read_bases(dev, 1, 0);
+		pci_read_config_word(dev, PCI_CB_SUBSYSTEM_VENDOR_ID, &dev->subsystem_vendor);
+		pci_read_config_word(dev, PCI_CB_SUBSYSTEM_ID, &dev->subsystem_device);
+		break;
+
+	default:				    /* unknown header */
+		printk(KERN_ERR "PCI: device %s has unknown header type %02x, ignoring.\n",
+			dev->slot_name, dev->hdr_type);
+		kfree(dev);
+		return NULL;
+
+	bad:
+		printk(KERN_ERR "PCI: %s: class %x doesn't match header type %02x. Ignoring class.\n",
+		       dev->slot_name, class, dev->hdr_type);
+		dev->class = PCI_CLASS_NOT_DEFINED;
+	}
+
+	/* We found a fine healthy device, go go go... */
+	return dev;
+}
+
+struct pci_dev * __init pci_scan_slot(struct pci_dev *temp)
+{
+	struct pci_bus *bus = temp->bus;
+	struct pci_dev *dev;
+	struct pci_dev *first_dev = NULL;
+	int func = 0;
+	int is_multi = 0;
+	u8 hdr_type;
+
+	for (func = 0; func < 8; func++, temp->devfn++) {
+		if (func && !is_multi)		/* not a multi-function device */
 			continue;
-		if (!PCI_FUNC(devfn))
+		if (pci_read_config_byte(temp, PCI_HEADER_TYPE, &hdr_type))
+			continue;
+		temp->hdr_type = hdr_type & 0x7f;
+
+		dev = pci_scan_device(temp);
+		if (!dev)
+			continue;
+		if (!func) {
 			is_multi = hdr_type & 0x80;
-
-		if (pci_read_config_dword(dev, PCI_VENDOR_ID, &l) ||
-		    /* some broken boards return 0 if a slot is empty: */
-		    l == 0xffffffff || l == 0x00000000 || l == 0x0000ffff || l == 0xffff0000)
-			continue;
-
-		dev_cache = NULL;
-		dev->vendor = l & 0xffff;
-		dev->device = (l >> 16) & 0xffff;
-		sprintf(dev->slot_name, "%02x:%02x.%d", bus->number, PCI_SLOT(devfn), PCI_FUNC(devfn));
-		pci_name_device(dev);
-
-		pci_read_config_dword(dev, PCI_CLASS_REVISION, &class);
-		class >>= 8;				    /* upper 3 bytes */
-		dev->class = class;
-		class >>= 8;
-		dev->hdr_type = hdr_type & 0x7f;
-
-		switch (dev->hdr_type) {		    /* header type */
-		case PCI_HEADER_TYPE_NORMAL:		    /* standard header */
-			if (class == PCI_CLASS_BRIDGE_PCI)
-				goto bad;
-			/*
-			 * Read interrupt line and base address registers.
-			 * The architecture-dependent code can tweak these, of course.
-			 */
-			pci_read_config_byte(dev, PCI_INTERRUPT_PIN, &irq);
-			if (irq)
-				pci_read_config_byte(dev, PCI_INTERRUPT_LINE, &irq);
-			dev->irq = irq;
-			pci_read_bases(dev, 6, PCI_ROM_ADDRESS);
-			pci_read_config_word(dev, PCI_SUBSYSTEM_VENDOR_ID, &dev->subsystem_vendor);
-			pci_read_config_word(dev, PCI_SUBSYSTEM_ID, &dev->subsystem_device);
-			break;
-		case PCI_HEADER_TYPE_BRIDGE:		    /* bridge header */
-			if (class != PCI_CLASS_BRIDGE_PCI)
-				goto bad;
-			pci_read_bases(dev, 2, PCI_ROM_ADDRESS1);
-			break;
-		case PCI_HEADER_TYPE_CARDBUS:		    /* CardBus bridge header */
-			if (class != PCI_CLASS_BRIDGE_CARDBUS)
-				goto bad;
-			pci_read_bases(dev, 1, 0);
-			pci_read_config_word(dev, PCI_CB_SUBSYSTEM_VENDOR_ID, &dev->subsystem_vendor);
-			pci_read_config_word(dev, PCI_CB_SUBSYSTEM_ID, &dev->subsystem_device);
-			break;
-		default:				    /* unknown header */
-			printk(KERN_ERR "PCI: device %s has unknown header type %02x, ignoring.\n",
-				dev->slot_name, hdr_type);
-			continue;
-		bad:
-			printk(KERN_ERR "PCI: %s: class %x doesn't match header type %02x. Ignoring class.\n",
-			       dev->slot_name, class, hdr_type);
-			dev->class = PCI_CLASS_NOT_DEFINED;
+			first_dev = dev;
 		}
 
 		DBG("PCI: %02x:%02x [%04x/%04x] %06x %02x\n", bus->number, dev->devfn, dev->vendor, dev->device, class, hdr_type);
@@ -506,122 +678,57 @@ static unsigned int __init pci_do_scan_bus(struct pci_bus *bus)
 		 * Put it into the global PCI device chain. It's used to
 		 * find devices once everything is set up.
 		 */
-		if (!pci_reverse) {
-			*pci_last_dev_p = dev;
-			pci_last_dev_p = &dev->next;
-		} else {
-			dev->next = pci_devices;
-			pci_devices = dev;
-		}
+		*pci_last_dev_p = dev;
+		pci_last_dev_p = &dev->next;
 
 		/*
 		 * Now insert it into the list of devices held
 		 * by the parent bus.
 		 */
-		*bus_last = dev;
-		bus_last = &dev->sibling;
+		*bus->last_dev_p = dev;
+		bus->last_dev_p = &dev->sibling;
 
 		/* Fix up broken headers */
 		pci_fixup_device(PCI_FIXUP_HEADER, dev);
-
-#if 0
-		/*
-		 * Setting of latency timer in case it was less than 32 was
-		 * a great idea, but it confused several broken devices. Grrr.
-		 */
-		pci_read_config_byte(dev, PCI_LATENCY_TIMER, &tmp);
-		if (tmp < 32)
-			pci_write_config_byte(dev, PCI_LATENCY_TIMER, 32);
-#endif
 	}
-	if (dev_cache)
-		kfree(dev_cache);
+	return first_dev;
+}
+
+static unsigned int __init pci_do_scan_bus(struct pci_bus *bus)
+{
+	unsigned int devfn, max;
+	struct pci_dev *dev, dev0;
+
+	DBG("pci_do_scan_bus for bus %d\n", bus->number);
+	bus->last_dev_p = &bus->devices;
+	max = bus->secondary;
+
+	/* Create a device template */
+	memset(&dev0, 0, sizeof(dev0));
+	dev0.bus = bus;
+	dev0.sysdata = bus->sysdata;
+
+	/* Go find them, Rover! */
+	for (devfn = 0; devfn < 0x100; devfn += 8) {
+		dev0.devfn = devfn;
+		pci_scan_slot(&dev0);
+	}
 
 	/*
 	 * After performing arch-dependent fixup of the bus, look behind
 	 * all PCI-to-PCI bridges on this bus.
 	 */
 	pcibios_fixup_bus(bus);
-	for(dev=bus->devices; dev; dev=dev->sibling)
-		/*
-		 * If it's a bridge, scan the bus behind it.
-		 */
-		if ((dev->class >> 8) == PCI_CLASS_BRIDGE_PCI) {
-			unsigned int buses;
-			unsigned short cr;
-
-			/*
-			 * Insert it into the tree of buses.
-			 */
-			child = kmalloc(sizeof(*child), GFP_KERNEL);
-			memset(child, 0, sizeof(*child));
-			child->next = bus->children;
-			bus->children = child;
-			child->self = dev;
-			child->parent = bus;
-			child->ops = bus->ops;
-			child->sysdata = bus->sysdata;
-
-			/*
-			 * Set up the primary, secondary and subordinate
-			 * bus numbers.  Read resource ranges behind the bridge.
-			 */
-			child->number = child->secondary = ++max;
-			child->primary = bus->secondary;
-			child->subordinate = 0xff;
-			sprintf(child->name, "PCI Bus #%02x", child->number);
-			/*
-			 * Clear all status bits and turn off memory,
-			 * I/O and master enables.
-			 */
-			pci_read_config_word(dev, PCI_COMMAND, &cr);
-			pci_write_config_word(dev, PCI_COMMAND, 0x0000);
-			pci_write_config_word(dev, PCI_STATUS, 0xffff);
-			/*
-			 * Read the existing primary/secondary/subordinate bus
-			 * number configuration to determine if the PCI bridge
-			 * has already been configured by the system.  If so,
-			 * do not modify the configuration, merely note it.
-			 */
-			pci_read_config_dword(dev, PCI_PRIMARY_BUS, &buses);
-			if ((buses & 0xFFFFFF) != 0
-			    && ! pcibios_assign_all_busses())
-			  {
-			    unsigned int cmax;
-
-			    child->primary = buses & 0xFF;
-			    child->secondary = (buses >> 8) & 0xFF;
-			    child->subordinate = (buses >> 16) & 0xFF;
-			    child->number = child->secondary;
-			    cmax = pci_do_scan_bus(child);
-			    if (cmax > max) max = cmax;
-			  }
-			else
-			  {
-			    /*
-			     * Configure the bus numbers for this bridge:
-			     */
-			    buses &= 0xff000000;
-			    buses |=
-			      (((unsigned int)(child->primary)     <<  0) |
-			       ((unsigned int)(child->secondary)   <<  8) |
-			       ((unsigned int)(child->subordinate) << 16));
-			    pci_write_config_dword(dev, PCI_PRIMARY_BUS, buses);
-			    /*
-			     * Now we can scan all subordinate buses:
-			     */
-			    max = pci_do_scan_bus(child);
-			    /*
-			     * Set the subordinate bus number to its real
-			     * value:
-			     */
-			    child->subordinate = max;
-			    buses = (buses & 0xff00ffff)
-			      | ((unsigned int)(child->subordinate) << 16);
-			    pci_write_config_dword(dev, PCI_PRIMARY_BUS, buses);
-			  }
-			pci_write_config_word(dev, PCI_COMMAND, cr);
+	for (dev = bus->devices; dev; dev = dev->sibling) {
+		switch (dev->class >> 8) {
+		case PCI_CLASS_BRIDGE_PCI:
+			max = pci_scan_bridge(bus, dev, max);
+			break;
+		case PCI_CLASS_BRIDGE_CARDBUS:
+			max = pci_scan_cardbus(bus, dev, max);
+			break;
 		}
+	}
 
 	/*
 	 * We've scanned the bus and so we know all about what's on
@@ -646,7 +753,7 @@ static int __init pci_bus_exists(struct pci_bus *b, int nr)
 	return 0;
 }
 
-struct pci_bus * __init pci_scan_bus(int bus, struct pci_ops *ops, void *sysdata)
+struct pci_bus * __init pci_alloc_primary_bus(int bus)
 {
 	struct pci_bus *b, **r;
 
@@ -666,11 +773,19 @@ struct pci_bus * __init pci_scan_bus(int bus, struct pci_ops *ops, void *sysdata
 	*r = b;
 
 	b->number = b->secondary = bus;
-	b->sysdata = sysdata;
-	b->ops = ops;
 	b->resource[0] = &ioport_resource;
 	b->resource[1] = &iomem_resource;
-	b->subordinate = pci_do_scan_bus(b);
+	return b;
+}
+
+struct pci_bus * __init pci_scan_bus(int bus, struct pci_ops *ops, void *sysdata)
+{
+	struct pci_bus *b = pci_alloc_primary_bus(bus);
+	if (b) {
+		b->sysdata = sysdata;
+		b->ops = ops;
+		b->subordinate = pci_do_scan_bus(b);
+	}
 	return b;
 }
 
@@ -691,9 +806,8 @@ static int __init pci_setup(char *str)
 		if (k)
 			*k++ = 0;
 		if (*str && (str = pcibios_setup(str)) && *str) {
-			if (!strcmp(str, "reverse"))
-				pci_reverse = 1;
-			else printk(KERN_ERR "PCI: Unknown option `%s'\n", str);
+			/* PCI layer options should be handled here */
+			printk(KERN_ERR "PCI: Unknown option `%s'\n", str);
 		}
 		str = k;
 	}
