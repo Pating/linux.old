@@ -1067,7 +1067,16 @@ __initfunc(static void do_mount_root(void))
 
 __initfunc(void mount_root(void))
 {
+	struct super_block * sb = super_blocks;
+	int i;
+
 	memset(super_blocks, 0, sizeof(super_blocks));
+	/*
+	 * Initialize the dirty inode list headers for the super blocks
+	 */
+	for (i = NR_SUPER ; i-- ; sb++)
+		INIT_LIST_HEAD(&sb->s_dirty);
+
 	do_mount_root();
 }
 
@@ -1109,7 +1118,6 @@ __initfunc(static int do_change_root(kdev_t new_root_dev,const char *put_old))
 		dput(dir_d);
 		error = -ENOTDIR;
 	}
-	dput(old_root);
 	dput(old_pwd);
 	if (error) {
 		int umount_error;

@@ -81,11 +81,11 @@ static inline void d_drop(struct dentry * dentry)
 extern void d_instantiate(struct dentry *, struct inode *);
 extern void d_delete(struct dentry *);
 
-
 /* allocate/de-allocate */
 extern void d_free(struct dentry *);
 extern struct dentry * d_alloc(struct dentry * parent, const struct qstr *name);
 extern void shrink_dcache(void);
+extern int d_invalidate(struct dentry *);
 
 /* only used at mount-time */
 extern struct dentry * d_alloc_root(struct inode * root_inode, struct dentry * old_root);
@@ -97,7 +97,7 @@ extern struct dentry * d_alloc_root(struct inode * root_inode, struct dentry * o
 extern void d_add(struct dentry * entry, struct inode * inode);
 
 /* used for rename() and baskets */
-extern void d_move(struct dentry * entry, struct dentry * newparent, struct qstr * newname);
+extern void d_move(struct dentry * entry, struct dentry * newdentry);
 
 /* appendix may either be NULL or be used for transname suffixes */
 extern struct dentry * d_lookup(struct dentry * dir, struct qstr * name);
