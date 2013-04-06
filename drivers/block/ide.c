@@ -1104,8 +1104,7 @@ static void ide_do_request (ide_hwgroup_t *hwgroup, unsigned long *hwgroup_flags
 			if (sleep) {
 				if (0 < (signed long)(jiffies + WAIT_MIN_SLEEP - sleep)) 
 					sleep = jiffies + WAIT_MIN_SLEEP;
-				hwgroup->timer.expires = sleep;
-				add_timer(&hwgroup->timer);
+				mod_timer(&hwgroup->timer, sleep);
 			} else {
 				/* Ugly, but how can we sleep for the lock otherwise? perhaps from tq_scheduler? */
 				ide_release_lock(&ide_lock);	/* for atari only */
@@ -2638,6 +2637,12 @@ __initfunc(static void probe_for_hwifs (void))
 		(void) init_pdc4030();
 	}
 #endif /* CONFIG_BLK_DEV_PDC4030 */
+#ifdef CONFIG_BLK_DEV_IDE_PMAC
+	{
+		extern void pmac_ide_probe(void);
+		pmac_ide_probe();
+	}
+#endif /* CONFIG_BLK_DEV_IDE_PMAC */
 }
 
 __initfunc(void ide_init_builtin_drivers (void))

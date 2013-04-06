@@ -1,6 +1,6 @@
 VERSION = 2
 PATCHLEVEL = 1
-SUBLEVEL = 118
+SUBLEVEL = 119
 
 ARCH := $(shell uname -m | sed -e s/i.86/i386/ -e s/sun4u/sparc64/ -e s/arm.*/arm/ -e s/sa110/arm/)
 
@@ -71,6 +71,12 @@ ROOT_DEV = CURRENT
 # images.  Uncomment if you want to place them anywhere other than root.
 
 #INSTALL_PATH=/boot
+
+#
+# INSTALL_MOD_PATH specifies a prefix to MODLIB for module directory 
+# relocations required by build roots.  This is not defined in the
+# makefile but the arguement can be passed to make if needed.
+#
 
 #
 # If you want to preset the SVGA mode, uncomment the next line and
@@ -289,7 +295,7 @@ $(patsubst %, _mod_%, $(SUBDIRS)) : include/linux/version.h
 
 modules_install:
 	@( \
-	MODLIB=/lib/modules/$(VERSION).$(PATCHLEVEL).$(SUBLEVEL); \
+	MODLIB=$(INSTALL_MOD_PATH)/lib/modules/$(VERSION).$(PATCHLEVEL).$(SUBLEVEL); \
 	cd modules; \
 	MODULES=""; \
 	inst_mod() { These="`cat $$1`"; MODULES="$$MODULES $$These"; \
