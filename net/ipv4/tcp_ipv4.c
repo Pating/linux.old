@@ -5,7 +5,7 @@
  *
  *		Implementation of the Transmission Control Protocol(TCP).
  *
- * Version:	$Id: tcp_ipv4.c,v 1.171 1999/03/28 10:18:26 davem Exp $
+ * Version:	$Id: tcp_ipv4.c,v 1.174 1999/04/28 16:08:19 davem Exp $
  *
  *		IPv4 specific functions
  *
@@ -629,6 +629,7 @@ int tcp_v4_connect(struct sock *sk, struct sockaddr *uaddr, int addr_len)
 
 	if (!tcp_v4_unique_address(sk)) {
 		kfree_skb(buff);
+		sk->daddr = 0;
 		return -EADDRNOTAVAIL;
 	}
 
@@ -722,7 +723,7 @@ static struct open_request *tcp_v4_search_req(struct tcp_opt *tp,
 /* 
  * This routine does path mtu discovery as defined in RFC1191.
  */
-static inline void do_pmtu_discovery(struct sock *sk, struct iphdr *ip)
+static inline void do_pmtu_discovery(struct sock *sk, struct iphdr *ip, unsigned mtu)
 {
 	struct tcp_opt *tp = &sk->tp_pinfo.af_tcp;
 
@@ -742,8 +743,10 @@ static inline void do_pmtu_discovery(struct sock *sk, struct iphdr *ip)
      	 * There is a small race when the user changes this flag in the
 	 * route, but I think that's acceptable.
 	 */
-	if (sk->dst_cache &&
-	    sk->ip_pmtudisc != IP_PMTUDISC_DONT &&
+	if (sk->dst_cache == NULL)
+		return;
+	ip_rt_update_pmtu(sk->dst_cache, mtu);
+	if (sk->ip_pmtudisc != IP_PMTUDISC_DONT &&
 	    tp->pmtu_cookie > sk->dst_cache->pmtu) {
 		tcp_sync_mss(sk, sk->dst_cache->pmtu);
 
@@ -830,7 +833,7 @@ void tcp_v4_err(struct sk_buff *skb, unsigned char *dp, int len)
 			return;
 
 		if (code == ICMP_FRAG_NEEDED) { /* PMTU discovery (RFC1191) */
-			do_pmtu_discovery(sk, iph); 
+			do_pmtu_discovery(sk, iph, ntohs(skb->h.icmph->un.frag.mtu));
 			return;
 		}
 
@@ -1355,7 +1358,14 @@ struct sock *tcp_create_openreq_child(struct sock *sk, struct open_request *req,
 		newtp->last_ack_sent = req->rcv_isn + 1;
 		newtp->backoff = 0;
 		newtp->mdev = TCP_TIMEOUT_INIT;
-		newtp->snd_cwnd = 1;
+
+		/* So many TCP implementations out there (incorrectly) count the
+		 * initial SYN frame in their delayed-ACK and congestion control
+		 * algorithms that we must have the following bandaid to talk
+		 * efficiently to them.  -DaveM
+		 */
+		newtp->snd_cwnd = 2;
+
 		newtp->rto = TCP_TIMEOUT_INIT;
 		newtp->packets_out = 0;
 		newtp->fackets_out = 0;
@@ -1420,7 +1430,7 @@ struct sock *tcp_create_openreq_child(struct sock *sk, struct open_request *req,
 		}
 		if (newtp->tstamp_ok) {
 			newtp->ts_recent = req->ts_recent;
-			newtp->ts_recent_stamp = jiffies;
+			newtp->ts_recent_stamp = tcp_time_stamp;
 			newtp->tcp_header_len = sizeof(struct tcphdr) + TCPOLEN_TSTAMP_ALIGNED;
 		} else {
 			newtp->tcp_header_len = sizeof(struct tcphdr);
@@ -1595,6 +1605,7 @@ int tcp_v4_do_rcv(struct sock *sk, struct sk_buff *skb)
 		 * the new socket..
 		 */
 		if (atomic_read(&nsk->sock_readers)) {
+			skb_orphan(skb);
 			__skb_queue_tail(&nsk->back_log, skb);
 			return 0;
 		}
@@ -1835,10 +1846,16 @@ static int tcp_v4_init_sock(struct sock *sk)
 	tp->mdev = TCP_TIMEOUT_INIT;
 	tp->mss_clamp = ~0;
       
+	/* So many TCP implementations out there (incorrectly) count the
+	 * initial SYN frame in their delayed-ACK and congestion control
+	 * algorithms that we must have the following bandaid to talk
+	 * efficiently to them.  -DaveM
+	 */
+	tp->snd_cwnd = 2;
+
 	/* See draft-stevens-tcpca-spec-01 for discussion of the
 	 * initialization of these values.
 	 */
-	tp->snd_cwnd = 1;
 	tp->snd_cwnd_cnt = 0;
 	tp->snd_ssthresh = 0x7fffffff;	/* Infinity */
 

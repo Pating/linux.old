@@ -382,7 +382,7 @@ extern int proc_match(int, const char *,struct proc_dir_entry *);
  * of the /proc/<pid> subdirectories.
  */
 extern int proc_readdir(struct file *, void *, filldir_t);
-extern int proc_lookup(struct inode *, struct dentry *);
+extern struct dentry *proc_lookup(struct inode *, struct dentry *);
 
 struct openpromfs_dev {
  	struct openpromfs_dev *next;
@@ -394,7 +394,7 @@ struct openpromfs_dev {
 };
 extern struct inode_operations *
 proc_openprom_register(int (*readdir)(struct file *, void *, filldir_t),
-		       int (*lookup)(struct inode *, struct dentry *),
+		       struct dentry * (*lookup)(struct inode *, struct dentry *),
 		       void (*use)(struct inode *, int),
 		       struct openpromfs_dev ***);
 extern void proc_openprom_deregister(void);

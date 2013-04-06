@@ -716,6 +716,14 @@ extern __inline__ int tcp_raise_window(struct sock *sk)
 	return (new_win && (new_win > (cur_win << 1)));
 }
 
+/* TCP timestamps are only 32-bits, this causes a slight
+ * complication on 64-bit systems since we store a snapshot
+ * of jiffies in the buffer control blocks below.  We decidely
+ * only use of the low 32-bits of jiffies and hide the ugly
+ * casts with the following macro.
+ */
+#define tcp_time_stamp		((__u32)(jiffies))
+
 /* This is what the send packet queueing engine uses to pass
  * TCP per-packet control information to the transmission
  * code.  We also store the host-order sequence numbers in
@@ -732,7 +740,7 @@ struct tcp_skb_cb {
 	} header;	/* For incoming frames		*/
 	__u32		seq;		/* Starting sequence number	*/
 	__u32		end_seq;	/* SEQ + FIN + SYN + datalen	*/
-	unsigned long	when;		/* used to compute rtt's	*/
+	__u32		when;		/* used to compute rtt's	*/
 	__u8		flags;		/* TCP header flags.		*/
 
 	/* NOTE: These must match up to the flags byte in a
@@ -793,17 +801,22 @@ static __inline__ int tcp_snd_test(struct sock *sk, struct sk_buff *skb)
 	 *	c) We are retransmiting [Nagle]
 	 *	d) We have too many packets 'in flight'
 	 *
-	 * 	Don't use the nagle rule for urgent data.
+	 * 	Don't use the nagle rule for urgent data (or
+	 *	for the final FIN -DaveM).
 	 */
 	if ((sk->nonagle == 2 && (skb->len < tp->mss_cache)) ||
 	    (!sk->nonagle &&
 	     skb->len < (tp->mss_cache >> 1) &&
 	     tp->packets_out &&
-	     !(TCP_SKB_CB(skb)->flags & TCPCB_FLAG_URG)))
+	     !(TCP_SKB_CB(skb)->flags & (TCPCB_FLAG_URG|TCPCB_FLAG_FIN))))
 		nagle_check = 0;
 
+	/* Don't be strict about the congestion window for the
+	 * final FIN frame.  -DaveM
+	 */
 	return (nagle_check &&
-		(tcp_packets_in_flight(tp) < tp->snd_cwnd) &&
+		((tcp_packets_in_flight(tp) < tp->snd_cwnd) ||
+		 (TCP_SKB_CB(skb)->flags & TCPCB_FLAG_FIN)) &&
 		!after(TCP_SKB_CB(skb)->end_seq, tp->snd_una + tp->snd_wnd) &&
 		tp->retransmits == 0);
 }

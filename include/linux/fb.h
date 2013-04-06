@@ -31,6 +31,7 @@
 #define FB_TYPE_PLANES			1	/* Non interleaved planes */
 #define FB_TYPE_INTERLEAVED_PLANES	2	/* Interleaved planes	*/
 #define FB_TYPE_TEXT			3	/* Text/attributes	*/
+#define FB_TYPE_VGA_PLANES		4	/* EGA/VGA planes	*/
 
 #define FB_AUX_TEXT_MDA		0	/* Monochrome text */
 #define FB_AUX_TEXT_CGA		1	/* CGA/EGA/VGA Color text */
@@ -236,6 +237,8 @@ struct fb_ops {
 		    unsigned long arg, int con, struct fb_info *info);
     /* perform fb specific mmap */
     int (*fb_mmap)(struct fb_info *info, struct file *file, struct vm_area_struct *vma);
+    /* switch to/from raster image mode */
+    int (*fb_rasterimg)(struct fb_info *info, int start);
 };
 
 
@@ -295,7 +298,7 @@ struct display {
 
 struct fb_info {
    char modename[40];			/* default video mode */
-   int node;
+   kdev_t node;
    int flags;
 #define FBINFO_FLAG_MODULE	1	/* Low-level driver is a module */
    struct fb_ops *fbops;

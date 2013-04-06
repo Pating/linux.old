@@ -184,6 +184,7 @@ extern void eata2x_setup(char *str, int *ints);
 extern void u14_34f_setup(char *str, int *ints);
 extern void fdomain_setup(char *str, int *ints);
 extern void ibmmca_scsi_setup(char *str, int *ints);
+extern void fd_mcs_setup(char *str, int *ints);
 extern void in2000_setup(char *str, int *ints);
 extern void NCR53c406a_setup(char *str, int *ints);
 extern void sym53c416_setup(char *str, int *ints);
@@ -709,6 +710,9 @@ static struct kernel_param cooked_params[] __initdata = {
 #ifdef CONFIG_SCSI_IBMMCA
         { "ibmmcascsi=", ibmmca_scsi_setup },
 #endif
+#ifdef CONFIG_SCSI_FD_MCS
+	{ "fd_mcs=", fd_mcs_setup },
+#endif
 #if defined(CONFIG_SCSI_DC390T) && ! defined(CONFIG_SCSI_DC390T_NOGENSUPP)
         { "tmscsim=", dc390_setup },
 #endif
@@ -1166,7 +1170,7 @@ asmlinkage void __init start_kernel(void)
 	filescache_init();
 	dcache_init();
 	vma_init();
-	buffer_init();
+	buffer_init(memory_end-memory_start);
 	signals_init();
 	inode_init();
 	file_table_init();

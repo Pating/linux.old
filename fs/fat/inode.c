@@ -332,7 +332,6 @@ fat_read_super(struct super_block *sb, void *data, int silent)
 		fat_brelse (sb, bh);
 		goto out_no_bread;
 	}
-	set_blocksize(sb->s_dev, blksize);
 
 /*
  * The DOS3 partition size limit is *not* 32M as many people think.  
@@ -423,6 +422,7 @@ fat_read_super(struct super_block *sb, void *data, int silent)
 		    || !b->secs_track || !b->heads;
 	}
 	fat_brelse(sb, bh);
+	set_blocksize(sb->s_dev, blksize);
 	/*
 		This must be done after the brelse because the bh is a dummy
 		allocated by fat_bread (see buffer.c)
@@ -703,8 +703,8 @@ void fat_read_inode(struct inode *inode, struct inode_operations *fs_dir_inode_o
 	if(raw_entry->attr & ATTR_SYS)
 		if (MSDOS_SB(sb)->options.sys_immutable)
 			inode->i_flags |= S_IMMUTABLE;
-	MSDOS_I(inode)->i_binary = is_binary(MSDOS_SB(sb)->options.conversion,
-	    raw_entry->ext);
+	MSDOS_I(inode)->i_binary =
+	    fat_is_binary(MSDOS_SB(sb)->options.conversion, raw_entry->ext);
 	MSDOS_I(inode)->i_attrs = raw_entry->attr & ATTR_UNUSED;
 	/* this is as close to the truth as we can get ... */
 	inode->i_blksize = MSDOS_SB(sb)->cluster_size*SECTOR_SIZE;

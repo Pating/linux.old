@@ -1,6 +1,6 @@
 VERSION = 2
 PATCHLEVEL = 2
-SUBLEVEL = 6
+SUBLEVEL = 7
 EXTRAVERSION =
 
 ARCH := $(shell uname -m | sed -e s/i.86/i386/ -e s/sun4u/sparc64/ -e s/arm.*/arm/ -e s/sa110/arm/)
@@ -175,7 +175,7 @@ DRIVERS := $(DRIVERS) drivers/net/hamradio/hamradio.a
 endif
 
 ifeq ($(CONFIG_USB),y)
-DRIVERS := $(DRIVERS) drivers/uusbd/usb.a
+DRIVERS := $(DRIVERS) drivers/usb/usb.a
 endif
 
 ifeq ($(CONFIG_I2O),y)

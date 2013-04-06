@@ -1,4 +1,4 @@
-/* $Id: srmmu.c,v 1.185 1999/03/24 11:42:35 davem Exp $
+/* $Id: srmmu.c,v 1.187 1999/04/28 17:00:45 davem Exp $
  * srmmu.c:  SRMMU specific routines for memory management.
  *
  * Copyright (C) 1995 David S. Miller  (davem@caip.rutgers.edu)
@@ -14,6 +14,7 @@
 #include <linux/vmalloc.h>
 #include <linux/pagemap.h>
 #include <linux/init.h>
+#include <linux/blk.h>
 
 #include <asm/page.h>
 #include <asm/pgtable.h>
@@ -1948,12 +1949,13 @@ __initfunc(unsigned long srmmu_paging_init(unsigned long start_mem, unsigned lon
 		/* Find the number of contexts on the srmmu. */
 		cpunode = prom_getchild(prom_root_node);
 		num_contexts = 0;
-		while((cpunode = prom_getsibling(cpunode)) != 0) {
+		while(cpunode != 0) {
 			prom_getstring(cpunode, "device_type", node_str, sizeof(node_str));
 			if(!strcmp(node_str, "cpu")) {
 				num_contexts = prom_getintdefault(cpunode, "mmu-nctx", 0x8);
 				break;
 			}
+			cpunode = prom_getsibling(cpunode);
 		}
 	}
 
@@ -2000,6 +2002,18 @@ __initfunc(unsigned long srmmu_paging_init(unsigned long start_mem, unsigned lon
 
 	start_mem = sparc_context_init(start_mem, num_contexts);
 	start_mem = free_area_init(start_mem, end_mem);
+	
+#ifdef CONFIG_BLK_DEV_INITRD
+	/* If initial ramdisk was specified with physical address,
+	   translate it here, as the p2v translation in srmmu
+	   is not straightforward. */
+	if (initrd_start && initrd_start < KERNBASE) {
+		initrd_start = srmmu_p2v(initrd_start);
+		initrd_end = srmmu_p2v(initrd_end);
+		if (initrd_end <= initrd_start)
+			initrd_start = 0;
+	}
+#endif
 
 	return PAGE_ALIGN(start_mem);
 }

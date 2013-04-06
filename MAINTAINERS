@@ -650,6 +650,11 @@ L:	linux-scsi@vger.rutgers.edu
 W:	http://www.torque.net/sg
 S:	Maintained
 
+SCSI GENERIC
+L:	linux-scsi@vger.rutgers.edu
+M:	douglas.gilbert@rbcds.com
+S:	Maintained
+
 SCSI SUBSYSTEM
 L:	linux-scsi@vger.rutgers.edu
 S:	Unmaintained
@@ -698,7 +703,7 @@ M:	ecd@skynet.be
 P:	Jakub Jelinek
 M:	jj@sunsite.ms.mff.cuni.cz
 P:	Anton Blanchard
-M:	anton@jubilex.progsoc.uts.edu.au
+M:	anton@progsoc.uts.edu.au
 L:	sparclinux@vger.rutgers.edu
 L:	ultralinux@vger.rutgers.edu
 W:	http://ultra.linux.cz
@@ -771,6 +776,20 @@ M:	axboe@image.dk
 L:	linux-kernel@vger.rutgers.edu
 S:	Maintained
 
+USB HUB AND UHCI DRIVERS
+P:	Johannes Erdfelt
+M:	jerdfelt@sventech.com
+L:	linux-usb@peloncho.fis.ucm.es
+S:	Maintained
+
+USB OHCI DRIVER
+P:	Gregory P. Smith
+M:	greg@electricrain.com
+M:	greg@suitenine.com
+L:	linux-usb@peloncho.fis.ucm.es
+S:	Maintained (not yet usable)
+W:	http://suitenine.com/usb/
+
 VFAT FILESYSTEM:
 P:	Gordon Chaffee
 M:	chaffee@cs.berkeley.edu
@@ -784,9 +803,9 @@ M:	Alan.Cox@linux.org
 W:	http://roadrunner.swansea.linux.org.uk/v4l.shtml
 S:	Maintained
 
-WAN ROUTER AND SANGOMA WANPIPE DRIVERS (X.25, FRAME RELAY, PPP)
-P:     Gene Kozin
-M:     genek@compuserve.com
+WAN ROUTER & SANGOMA WANPIPE DRIVERS & API (X.25, FRAME RELAY, PPP, CISCO HDLC)
+P:     Jaspreet Singh
+M:     jaspreet@sangoma.com
 M:     dm@sangoma.com
 W:     http://www.sangoma.com
 S:     Supported

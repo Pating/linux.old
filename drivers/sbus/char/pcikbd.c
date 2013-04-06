@@ -1,4 +1,4 @@
-/* $Id: pcikbd.c,v 1.25 1999/02/08 07:01:48 ecd Exp $
+/* $Id: pcikbd.c,v 1.26 1999/04/28 11:55:42 davem Exp $
  * pcikbd.c: Ultra/AX PC keyboard support.
  *
  * Copyright (C) 1997  Eddie C. Dost  (ecd@skynet.be)
@@ -228,8 +228,6 @@ unsigned char pcikbd_sysrq_xlate[128] =
 	"\r\000/";					/* 0x60 - 0x6f */
 #endif
 
-static unsigned int prev_scancode = 0;
-
 int pcikbd_setkeycode(unsigned int scancode, unsigned int keycode)
 {
 	if(scancode < SC_LIM || scancode > 255 || keycode > 127)
@@ -262,29 +260,22 @@ int do_acknowledge(unsigned char scancode)
 			return 0;
 		}
 	}
-	if(scancode == 0) {
-		prev_scancode = 0;
-		return 0;
-	}
-	return 1;
-}
-
-int pcikbd_pretranslate(unsigned char scancode, char raw_mode)
-{
-	if(scancode == 0xff) {
-		prev_scancode = 0;
-		return 0;
-	}
-	if(scancode == 0xe0 || scancode == 0xe1) {
-		prev_scancode = scancode;
-		return 0;
-	}
 	return 1;
 }
 
 int pcikbd_translate(unsigned char scancode, unsigned char *keycode,
 		     char raw_mode)
 {
+	static int prev_scancode = 0;
+
+	if (scancode == 0xe0 || scancode == 0xe1) {
+		prev_scancode = scancode;
+		return 0;
+	}
+	if (scancode == 0x00 || scancode == 0xff) {
+		prev_scancode = 0;
+		return 0;
+	}
 	if(prev_scancode) {
 		if(prev_scancode != 0xe0) {
 			if(prev_scancode == 0xe1 && scancode == 0x1d) {
@@ -338,7 +329,7 @@ pcikbd_interrupt(int irq, void *dev_id, struct pt_regs *regs)
 			break;
 		scancode = pcikbd_inb(pcikbd_iobase + KBD_DATA_REG);
 		if((status & KBD_STAT_OBF) && do_acknowledge(scancode))
-			handle_scancode(scancode);
+			handle_scancode(scancode, !(scancode & 0x80));
 		status = pcikbd_inb(pcikbd_iobase + KBD_STATUS_REG);
 	} while(status & KBD_STAT_OBF);
 	mark_bh(KEYBOARD_BH);
