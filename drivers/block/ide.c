@@ -39,7 +39,7 @@
  *  October, 1994 -- Complete line-by-line overhaul for linux 1.1.x, by:
  *
  *	Mark Lord	(mlord@pobox.com)		(IDE Perf.Pkg)
- *	Delman Lee	(delman@mipg.upenn.edu)		("Mr. atdisk2")
+ *	Delman Lee	(delman@ieee.org)		("Mr. atdisk2")
  *	Scott Snyder	(snyder@fnald0.fnal.gov)	(ATAPI IDE cd-rom)
  *
  *  This was a rewrite of just about everything from hd.c, though some original
@@ -434,8 +434,8 @@ void ide_output_data (ide_drive_t *drive, void *buffer, unsigned int wcount)
 void atapi_input_bytes (ide_drive_t *drive, void *buffer, unsigned int bytecount)
 {
 	++bytecount;
-#ifdef CONFIG_ATARI
-	if (MACH_IS_ATARI) {
+#if defined(CONFIG_ATARI) || defined(CONFIG_Q40)
+	if (MACH_IS_ATARI || MACH_IS_Q40) {
 		/* Atari has a byte-swapped IDE interface */
 		insw_swapw(IDE_DATA_REG, buffer, bytecount / 2);
 		return;
@@ -449,8 +449,8 @@ void atapi_input_bytes (ide_drive_t *drive, void *buffer, unsigned int bytecount
 void atapi_output_bytes (ide_drive_t *drive, void *buffer, unsigned int bytecount)
 {
 	++bytecount;
-#ifdef CONFIG_ATARI
-	if (MACH_IS_ATARI) {
+#if defined(CONFIG_ATARI) || defined(CONFIG_Q40)
+	if (MACH_IS_ATARI || MACH_IS_Q40) {
 		/* Atari has a byte-swapped IDE interface */
 		outsw_swapw(IDE_DATA_REG, buffer, bytecount / 2);
 		return;

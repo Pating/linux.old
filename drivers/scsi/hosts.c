@@ -47,7 +47,7 @@
     defined(CONFIG_WARPENGINE_SCSI) || \
     defined(CONFIG_A4091_SCSI) || \
     defined (CONFIG_GVP_TURBO_SCSI) || \
-    defined (CONFIG_BLZ603E)
+    defined (CONFIG_BLZ603EPLUS_SCSI)
 #define AMIGA7XXCONFIG
 #endif
 
@@ -93,6 +93,10 @@
 
 #ifdef CONFIG_FASTLANE_SCSI
 #include "fastlane.h"
+#endif
+
+#ifdef CONFIG_OKTAGON_SCSI
+#include "oktagon_esp.h"
 #endif
 
 #ifdef CONFIG_ATARI_SCSI
@@ -327,6 +331,10 @@
 #include "jazz_esp.h"
 #endif
 
+#ifdef CONFIG_SUN3X_ESP
+#include "sun3x_esp.h"
+#endif
+
 /*
  * Moved ppa driver to the end of the probe list
  * since it is a removable host adapter.
@@ -401,6 +409,9 @@ static Scsi_Host_Template builtin_scsi_hosts[] =
 #endif
 #ifdef CONFIG_FASTLANE_SCSI
 	SCSI_FASTLANE,
+#endif
+#ifdef CONFIG_OKTAGON_SCSI
+	SCSI_OKTAGON_ESP,
 #endif
 #endif
 
@@ -596,6 +607,9 @@ static Scsi_Host_Template builtin_scsi_hosts[] =
 #ifdef CONFIG_SCSI_IMM
     IMM,
 #endif
+#ifdef CONFIG_SUN3X_ESP  
+    SCSI_SUN3X_ESP,
+#endif  
 #ifdef CONFIG_SCSI_DEBUG
     SCSI_DEBUG,
 #endif

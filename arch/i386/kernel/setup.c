@@ -14,6 +14,9 @@
  *      Bart Hartgers <bart@etpmod.phys.tue.nl>, May 1999.
  *
  *  Intel Mobile Pentium II detection fix. Sean Gilley, June 1999.
+ *
+ *  IDT Winchip tweaks, misc clean ups.
+ *	Dave Jones <dave@powertweak.com>, August 1999
  */
 
 /*
@@ -90,7 +93,7 @@ extern int rd_image_start;	/* starting block # of image */
 #endif
 
 extern int root_mountflags;
-extern int _etext, _edata, _end;
+extern int _text, _etext, _edata, _end;
 extern unsigned long cpu_hz;
 
 /*
@@ -248,7 +251,7 @@ visws_get_board_type_and_rev(void)
 static char command_line[COMMAND_LINE_SIZE] = { 0, };
        char saved_command_line[COMMAND_LINE_SIZE];
 
-struct resource standard_resources[] = {
+struct resource standard_io_resources[] = {
 	{ "dma1", 0x00, 0x1f },
 	{ "pic1", 0x20, 0x3f },
 	{ "timer", 0x40, 0x5f },
@@ -259,14 +262,90 @@ struct resource standard_resources[] = {
 	{ "fpu", 0xf0, 0xff }
 };
 
-/* For demonstration purposes only.. */
-#define keyboard_resources (standard_resources+3)
-struct resource kbd_status_resource = { "status", 0x60, 0x60 };
+#define STANDARD_IO_RESOURCES (sizeof(standard_io_resources)/sizeof(struct resource))
 
-#define STANDARD_RESOURCES (sizeof(standard_resources)/sizeof(struct resource))
+/* System RAM - interrupted by the 640kB-1M hole */
+#define code_resource (ram_resources[3])
+#define data_resource (ram_resources[4])
+static struct resource ram_resources[] = {
+	{ "System RAM", 0x000000, 0x09ffff, IORESOURCE_BUSY },
+	{ "System RAM", 0x100000, 0x100000, IORESOURCE_BUSY },
+	{ "Video RAM area", 0x0a0000, 0x0bffff },
+	{ "Kernel code", 0x100000, 0 },
+	{ "Kernel data", 0, 0 }
+};
 
-__initfunc(void setup_arch(char **cmdline_p,
-	unsigned long * memory_start_p, unsigned long * memory_end_p))
+/* System ROM resources */
+#define MAXROMS 6
+static struct resource rom_resources[MAXROMS] = {
+	{ "System ROM", 0xF0000, 0xFFFFF, IORESOURCE_BUSY },
+	{ "Video ROM", 0xc0000, 0xc7fff }
+};
+
+#define romsignature(x) (*(unsigned short *)(x) == 0xaa55)
+
+static void __init probe_roms(void)
+{
+	int roms = 1;
+	unsigned long base;
+	unsigned char *romstart;
+
+	request_resource(&iomem_resource, rom_resources+0);
+
+	/* Video ROM is standard at C000:0000 - C7FF:0000, check signature */
+	for (base = 0xC0000; base < 0xE0000; base += 2048) {
+		romstart = bus_to_virt(base);
+		if (!romsignature(romstart))
+			continue;
+		request_resource(&iomem_resource, rom_resources + roms);
+		roms++;
+		break;
+	}
+
+	/* Extension roms at C800:0000 - DFFF:0000 */
+	for (base = 0xC8000; base < 0xE0000; base += 2048) {
+		unsigned long length;
+
+		romstart = bus_to_virt(base);
+		if (!romsignature(romstart))
+			continue;
+		length = romstart[2] * 512;
+		if (length) {
+			unsigned int i;
+			unsigned char chksum;
+
+			chksum = 0;
+			for (i = 0; i < length; i++)
+				chksum += romstart[i];
+
+			/* Good checksum? */
+			if (!chksum) {
+				rom_resources[roms].start = base;
+				rom_resources[roms].end = base + length - 1;
+				rom_resources[roms].name = "Extension ROM";
+
+				request_resource(&iomem_resource, rom_resources + roms);
+				roms++;
+				if (roms >= MAXROMS)
+					return;
+			}
+		}
+	}
+
+	/* Final check for motherboard extension rom at E000:0000 */
+	base = 0xE0000;
+	romstart = bus_to_virt(base);
+
+	if (romsignature(romstart)) {
+		rom_resources[roms].start = base;
+		rom_resources[roms].end = base + 65535;
+		rom_resources[roms].name = "Extension ROM";
+
+		request_resource(&iomem_resource, rom_resources + roms);
+	}
+}
+
+void __init setup_arch(char **cmdline_p, unsigned long * memory_start_p, unsigned long * memory_end_p)
 {
 	unsigned long memory_start, memory_end;
 	char c = ' ', *to = command_line, *from = COMMAND_LINE;
@@ -298,6 +377,8 @@ __initfunc(void setup_arch(char **cmdline_p,
 	}
 #endif
 
+	ram_resources[1].end = memory_end-1;
+
 	memory_end &= PAGE_MASK;
 #ifdef CONFIG_BLK_DEV_RAM
 	rd_image_start = RAMDISK_FLAGS & RAMDISK_IMAGE_START_MASK;
@@ -307,10 +388,15 @@ __initfunc(void setup_arch(char **cmdline_p,
 	if (!MOUNT_ROOT_RDONLY)
 		root_mountflags &= ~MS_RDONLY;
 	memory_start = (unsigned long) &_end;
-	init_mm.start_code = PAGE_OFFSET;
+	init_mm.start_code = (unsigned long) &_text;
 	init_mm.end_code = (unsigned long) &_etext;
 	init_mm.end_data = (unsigned long) &_edata;
 	init_mm.brk = (unsigned long) &_end;
+
+	code_resource.start = virt_to_bus(&_text);
+	code_resource.end = virt_to_bus(&_etext)-1;
+	data_resource.start = virt_to_bus(&_etext);
+	data_resource.end = virt_to_bus(&_edata)-1;
 
 	/* Save unparsed command line copy for /proc/cmdline */
 	memcpy(saved_command_line, COMMAND_LINE, COMMAND_LINE_SIZE);
@@ -336,6 +422,8 @@ __initfunc(void setup_arch(char **cmdline_p,
 					memory_end = memory_end << 20;
 					from++;
 				}
+				if (memory_end > ram_resources[1].end)
+					ram_resources[1].end = memory_end-1;
 			}
 		}
 		c = *(from++);
@@ -347,6 +435,14 @@ __initfunc(void setup_arch(char **cmdline_p,
 	}
 	*to = '\0';
 	*cmdline_p = command_line;
+
+	/* Request the standard RAM and ROM resources - they eat up PCI memory space */
+	request_resource(&iomem_resource, ram_resources+0);
+	request_resource(&iomem_resource, ram_resources+1);
+	request_resource(&iomem_resource, ram_resources+2);
+	request_resource(ram_resources+1, &code_resource);
+	request_resource(ram_resources+1, &data_resource);
+	probe_roms();
 
 #define VMALLOC_RESERVE	(128 << 20)	/* 128MB for vmalloc and initrd */
 #define MAXMEM	((unsigned long)(-PAGE_OFFSET-VMALLOC_RESERVE))
@@ -383,9 +479,8 @@ __initfunc(void setup_arch(char **cmdline_p,
 #endif
 
 	/* request I/O space for devices used on all i[345]86 PCs */
-	for (i = 0; i < STANDARD_RESOURCES; i++)
-		request_resource(&ioport_resource, standard_resources+i);
-	request_resource(keyboard_resources, &kbd_status_resource);
+	for (i = 0; i < STANDARD_IO_RESOURCES; i++)
+		request_resource(&ioport_resource, standard_io_resources+i);
 
 #ifdef CONFIG_VT
 #if defined(CONFIG_VGA_CONSOLE)
@@ -396,7 +491,7 @@ __initfunc(void setup_arch(char **cmdline_p,
 #endif
 }
 
-__initfunc(static int get_model_name(struct cpuinfo_x86 *c))
+static int __init get_model_name(struct cpuinfo_x86 *c)
 {
 	unsigned int n, dummy, *v;
 
@@ -424,7 +519,7 @@ __initfunc(static int get_model_name(struct cpuinfo_x86 *c))
 	return 1;
 }
 
-__initfunc(static int amd_model(struct cpuinfo_x86 *c))
+static int __init amd_model(struct cpuinfo_x86 *c)
 {
 	u32 l, h;
 	unsigned long flags;
@@ -553,7 +648,7 @@ static char Cx86_cb[] __initdata = "?.5x Core/Bus Clock";
 static char cyrix_model_mult1[] __initdata = "12??43";
 static char cyrix_model_mult2[] __initdata = "12233445";
 
-__initfunc(static void cyrix_model(struct cpuinfo_x86 *c))
+static void __init cyrix_model(struct cpuinfo_x86 *c)
 {
 	unsigned char dir0, dir0_msn, dir0_lsn, dir1 = 0;
 	char *buf = c->x86_model_id;
@@ -661,7 +756,7 @@ __initfunc(static void cyrix_model(struct cpuinfo_x86 *c))
 	return;
 }
 
-__initfunc(void get_cpu_vendor(struct cpuinfo_x86 *c))
+void __init get_cpu_vendor(struct cpuinfo_x86 *c)
 {
 	char *v = c->x86_vendor_id;
 
@@ -721,7 +816,7 @@ static struct cpu_model_info cpu_models[] __initdata = {
 	    NULL, NULL, NULL, NULL, NULL, NULL, NULL }},
 };
 
-__initfunc(void identify_cpu(struct cpuinfo_x86 *c))
+void __init identify_cpu(struct cpuinfo_x86 *c)
 {
 	int i;
 	char *p = NULL;
@@ -818,7 +913,6 @@ __initfunc(void identify_cpu(struct cpuinfo_x86 *c))
 					p = "Celeron (Dixon)";
 			}
 		}
-			
 	}
 
 	if (p) {
@@ -833,7 +927,7 @@ __initfunc(void identify_cpu(struct cpuinfo_x86 *c))
  *	Perform early boot up checks for a valid TSC. See arch/i386/kernel/time.c
  */
  
-__initfunc(void dodgy_tsc(void))
+void __init dodgy_tsc(void)
 {
 	get_cpu_vendor(&boot_cpu_data);
 	
@@ -850,7 +944,7 @@ static char *cpu_vendor_names[] __initdata = {
 	"Intel", "Cyrix", "AMD", "UMC", "NexGen", "Centaur" };
 
 
-__initfunc(void print_cpu_info(struct cpuinfo_x86 *c))
+void __init print_cpu_info(struct cpuinfo_x86 *c)
 {
 	char *vendor = NULL;
 
@@ -868,22 +962,25 @@ __initfunc(void print_cpu_info(struct cpuinfo_x86 *c))
 		printk("%s", c->x86_model_id);
 
 	if (c->x86_mask || c->cpuid_level>=0) 
-		printk(" stepping %02x", c->x86_mask);
+		printk(" stepping %02x\n", c->x86_mask);
 
-	if(c->x86_vendor == X86_VENDOR_CENTAUR)
-	{
+	if(c->x86_vendor == X86_VENDOR_CENTAUR) {
 		u32 hv,lv;
 		rdmsr(0x107, lv, hv);
-		printk("\nCentaur FSR was 0x%X ",lv);
-		lv|=(1<<8);
-		lv|=(1<<7);
+		printk("Centaur FSR was 0x%X ",lv);
+		lv|=(1<<1 | 1<<2 | 1<<7);
 		/* lv|=(1<<6);	- may help too if the board can cope */
-		printk("now 0x%X", lv);
+		printk("now 0x%X\n", lv);
 		wrmsr(0x107, lv, hv);
 		/* Emulate MTRRs using Centaur's MCR. */
-		c->x86_capability |= X86_FEATURE_MTRR;	   	
+		c->x86_capability |= X86_FEATURE_MTRR;
+
+		/* Set 3DNow! on Winchip 2 and above. */
+		if (c->x86_model >=8)
+		    c->x86_capability |= X86_FEATURE_AMD3D;
+
+		c->x86_capability |=X86_FEATURE_CX8;
 	}
-	printk("\n");
 }
 
 /*
@@ -918,7 +1015,7 @@ int get_cpuinfo(char * buffer)
 			       c->x86 + '0',
 			       c->x86_model,
 			       c->x86_model_id[0] ? c->x86_model_id : "unknown");
-		
+
 		if (c->x86_mask || c->cpuid_level >= 0)
 			p += sprintf(p, "stepping\t: %d\n", c->x86_mask);
 		else
@@ -934,14 +1031,20 @@ int get_cpuinfo(char * buffer)
 			p += sprintf(p, "cache size\t: %d KB\n", c->x86_cache_size);
 		
 		/* Modify the capabilities according to chip type */
-		if (c->x86_vendor == X86_VENDOR_CYRIX) {
+		switch (c->x86_vendor) {
+
+		    case X86_VENDOR_CYRIX:
 			x86_cap_flags[24] = "cxmmx";
-		} else if (c->x86_vendor == X86_VENDOR_AMD) {
-			x86_cap_flags[16] = "fcmov";
-			x86_cap_flags[31] = "3dnow";
+			break;
+
+		    case X86_VENDOR_AMD:
 			if (c->x86 == 5 && c->x86_model == 6)
 				x86_cap_flags[10] = "sep";
-		} else if (c->x86_vendor == X86_VENDOR_INTEL) {
+			x86_cap_flags[16] = "fcmov";
+			x86_cap_flags[31] = "3dnow";
+			break;
+
+		    case X86_VENDOR_INTEL:
 			x86_cap_flags[6] = "pae";
 			x86_cap_flags[9] = "apic";
 			x86_cap_flags[14] = "mca";
@@ -949,6 +1052,16 @@ int get_cpuinfo(char * buffer)
 			x86_cap_flags[17] = "pse36";
 			x86_cap_flags[18] = "psn";
 			x86_cap_flags[24] = "osfxsr";
+			break;
+
+		    case X86_VENDOR_CENTAUR:
+			if (c->x86_model >=8)	/* Only Winchip2 and above */
+			    x86_cap_flags[31] = "3dnow";
+			break;
+
+		    default:
+			/* Unknown CPU manufacturer. Transmeta ? :-) */
+			break;
 		}
 
 		sep_bug = c->x86_vendor == X86_VENDOR_INTEL &&

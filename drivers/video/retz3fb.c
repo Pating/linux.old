@@ -170,7 +170,10 @@ under "programs/Xserver/hw/xfree86/doc/modeDB.txt".
  *    Predefined Video Modes
  */
 
-static struct fb_videomode retz3fb_predefined[] __initdata = {
+static struct {
+    const char *name;
+    struct fb_var_screeninfo var;
+} retz3fb_predefined[] __initdata = {
     /*
      * NB: it is very important to adjust the pixel-clock to the color-depth.
      */
@@ -262,7 +265,7 @@ static int z3fb_mode __initdata = 0;
  *    Interface used by the world
  */
 
-void retz3fb_setup(char *options);
+int retz3fb_setup(char *options);
 
 static int retz3fb_open(struct fb_info *info, int user);
 static int retz3fb_release(struct fb_info *info, int user);
@@ -287,7 +290,7 @@ static int retz3fb_ioctl(struct inode *inode, struct file *file,
  *    Interface to the low level console driver
  */
 
-void retz3fb_init(void);
+int retz3fb_init(void);
 static int z3fb_switch(int con, struct fb_info *info);
 static int z3fb_updatevar(int con, struct fb_info *info);
 static void z3fb_blank(int blank, struct fb_info *info);
@@ -487,7 +490,7 @@ static int retz3_set_video(struct fb_info *info,
 #endif
 
 	if (data.v_total >= 1024)
-		printk("MAYDAY: v_total >= 1024; bailing out!\n");
+		printk(KERN_ERR "MAYDAY: v_total >= 1024; bailing out!\n");
 
 	reg_w(regs, GREG_MISC_OUTPUT_W, 0xe3 | ((clocksel & 3) * 0x04));
 	reg_w(regs, GREG_FEATURE_CONTROL_W, 0x00);
@@ -767,7 +770,7 @@ static int retz3_set_video(struct fb_info *info,
 		reg_w(regs, 0x83c6, 0xe0);
 		break;
 	default:
-		printk("Illegal color-depth: %i\n", bpp);
+		printk(KERN_INFO "Illegal color-depth: %i\n", bpp);
 	}
 
 	reg_w(regs, VDAC_ADDRESS, 0x00);
@@ -1391,12 +1394,12 @@ static struct fb_ops retz3fb_ops = {
 };
 
 
-void __init retz3fb_setup(char *options, int *ints)
+int __init retz3fb_setup(char *options)
 {
 	char *this_opt;
 
 	if (!options || !*options)
-		return;
+		return 0;
 
 	for (this_opt = strtok(options, ","); this_opt;
 	     this_opt = strtok(NULL, ",")){
@@ -1409,6 +1412,7 @@ void __init retz3fb_setup(char *options, int *ints)
 		} else
 			z3fb_mode = get_video_mode(this_opt);
 	}
+	return 0;
 }
 
 
@@ -1416,7 +1420,7 @@ void __init retz3fb_setup(char *options, int *ints)
  *    Initialization
  */
 
-void __init retz3fb_init(void)
+int __init retz3fb_init(void)
 {
 	unsigned long board_addr, board_size;
 	unsigned int key;
@@ -1428,10 +1432,10 @@ void __init retz3fb_init(void)
 	short i;
 
 	if (!(key = zorro_find(ZORRO_PROD_MACROSYSTEMS_RETINA_Z3, 0, 0)))
-		return;
+		return -ENXIO;
 
 	if (!(zinfo = kmalloc(sizeof(struct retz3_fb_info), GFP_KERNEL)))
-		return;
+		return -ENOMEM;
 	memset(zinfo, 0, sizeof(struct retz3_fb_info));
 
 	cd = zorro_get_board (key);
@@ -1489,13 +1493,15 @@ void __init retz3fb_init(void)
 	do_install_cmap(0, fb_info);
 
 	if (register_framebuffer(fb_info) < 0)
-		return;
+		return -EINVAL;
 
-	printk("fb%d: %s frame buffer device, using %ldK of video memory\n",
+	printk(KERN_INFO "fb%d: %s frame buffer device, using %ldK of video memory\n",
 	       GET_FB_IDX(fb_info->node), fb_info->modename,zinfo->fbsize>>10);
 
 	/* TODO: This driver cannot be unloaded yet */
 	MOD_INC_USE_COUNT;
+
+	return 0;
 }
 
 
@@ -1576,8 +1582,7 @@ static int __init get_video_mode(const char *name)
 #ifdef MODULE
 int init_module(void)
 {
-	retz3fb_init();
-	return 0;
+	return retz3fb_init();
 }
 
 void cleanup_module(void)

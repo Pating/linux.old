@@ -140,7 +140,8 @@ enum
 	NET_X25=13,
 	NET_TR=14,
 	NET_DECNET=15,
-	NET_ECONET=16
+	NET_ECONET=16,
+	NET_KHTTPD=17
 };
 
 /* /proc/sys/bus/isa */
@@ -407,6 +408,23 @@ enum {
 	NET_DECNET_DEBUG_LEVEL = 255
 };
 
+/* /proc/sys/net/khttpd/ */
+enum {
+	NET_KHTTPD_DOCROOT	= 1,
+	NET_KHTTPD_START	= 2,
+	NET_KHTTPD_STOP		= 3,
+	NET_KHTTPD_UNLOAD	= 4,
+	NET_KHTTPD_CLIENTPORT	= 5,
+	NET_KHTTPD_PERMREQ	= 6,
+	NET_KHTTPD_PERMFORBID	= 7,
+	NET_KHTTPD_LOGGING	= 8,
+	NET_KHTTPD_SERVERPORT	= 9,
+	NET_KHTTPD_DYNAMICSTRING= 10,
+	NET_KHTTPD_SLOPPYMIME   = 11,
+	NET_KHTTPD_THREADS	= 12,
+	NET_KHTTPD_MAXCONNECT	= 13
+};
+
 /* /proc/sys/net/decnet/conf/<dev> */
 enum {
 	NET_DECNET_CONF_LOOPBACK = -2,
@@ -520,6 +538,10 @@ extern int proc_dointvec_minmax(ctl_table *, int, struct file *,
 				void *, size_t *);
 extern int proc_dointvec_jiffies(ctl_table *, int, struct file *,
 				 void *, size_t *);
+extern int proc_doulongvec_minmax(ctl_table *, int, struct file *,
+				  void *, size_t *);
+extern int proc_doulongvec_ms_jiffies_minmax(ctl_table *table, int,
+				      struct file *, void *, size_t *);
 
 extern int do_sysctl (int *name, int nlen,
 		      void *oldval, size_t *oldlenp,
