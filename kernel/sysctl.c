@@ -20,6 +20,8 @@
 #include <linux/ctype.h>
 #include <linux/utsname.h>
 #include <linux/swapctl.h>
+#include <linux/smp.h>
+#include <linux/smp_lock.h>
 
 #include <asm/bitops.h>
 #include <asm/uaccess.h>
@@ -59,7 +61,7 @@ struct file_operations proc_sys_file_operations =
 	proc_readsys,	/* read	   */
 	proc_writesys,	/* write   */
 	NULL,		/* readdir */
-	NULL,		/* select  */
+	NULL,		/* poll    */
 	NULL,		/* ioctl   */
 	NULL,		/* mmap	   */
 	NULL,		/* no special open code	   */
@@ -226,12 +228,17 @@ extern asmlinkage int sys_sysctl(struct __sysctl_args *args)
 {
 	struct __sysctl_args tmp;
 	int error;
+
+	lock_kernel();
 	error = verify_area(VERIFY_READ, args, sizeof(*args));
 	if (error)
-		return error;
+		goto out;
 	copy_from_user(&tmp, args, sizeof(tmp));
-	return do_sysctl(tmp.name, tmp.nlen, tmp.oldval, tmp.oldlenp, 
-			 tmp.newval, tmp.newlen);
+	error = do_sysctl(tmp.name, tmp.nlen, tmp.oldval, tmp.oldlenp,
+			  tmp.newval, tmp.newlen);
+out:
+	unlock_kernel();
+	return error;
 }
 
 /* Like in_group_p, but testing against egid, not fsgid */

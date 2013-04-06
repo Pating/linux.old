@@ -98,7 +98,7 @@ vcs_read(struct inode *inode, struct file *file, char *buf, unsigned long count)
 	unsigned int currcons = MINOR(inode->i_rdev);
 	int viewed, attr, size, read;
 	char *buf0;
-	unsigned short *org;
+	unsigned short *org = NULL;
 
 	attr = (currcons & 128);
 	currcons = (currcons & 127);
@@ -159,7 +159,7 @@ vcs_write(struct inode *inode, struct file *file, const char *buf, unsigned long
 	unsigned int currcons = MINOR(inode->i_rdev);
 	int viewed, attr, size, written;
 	const char *buf0;
-	unsigned short *org;
+	unsigned short *org = NULL;
 
 	attr = (currcons & 128);
 	currcons = (currcons & 127);
@@ -243,7 +243,7 @@ static struct file_operations vcs_fops = {
 	vcs_read,	/* read */
 	vcs_write,	/* write */
 	NULL,		/* readdir */
-	NULL,		/* select */
+	NULL,		/* poll */
 	NULL,		/* ioctl */
 	NULL,		/* mmap */
 	vcs_open,	/* open */

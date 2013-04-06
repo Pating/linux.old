@@ -62,6 +62,7 @@
 #include <linux/mm.h>
 #include <linux/string.h>
 #include <linux/malloc.h>
+#include <linux/poll.h>
 
 #include <asm/uaccess.h>
 #include <asm/system.h>
@@ -110,7 +111,7 @@ static void initialize_tty_struct(struct tty_struct *tty);
 
 static long tty_read(struct inode *, struct file *, char *, unsigned long);
 static long tty_write(struct inode *, struct file *, const char *, unsigned long);
-static int tty_select(struct inode *, struct file *, int, select_table *);
+static unsigned int tty_poll(struct file *, poll_table *);
 static int tty_open(struct inode *, struct file *);
 static void tty_release(struct inode *, struct file *);
 static int tty_ioctl(struct inode * inode, struct file * file,
@@ -322,10 +323,9 @@ static long hung_up_tty_write(struct inode * inode,
 	return -EIO;
 }
 
-static int hung_up_tty_select(struct inode * inode, struct file * filp,
-	int sel_type, select_table * wait)
+static unsigned int hung_up_tty_poll(struct file * filp, poll_table * wait)
 {
-	return 1;
+	return POLLIN | POLLOUT | POLLERR | POLLHUP | POLLRDNORM | POLLWRNORM;
 }
 
 static int hung_up_tty_ioctl(struct inode * inode, struct file * file,
@@ -345,7 +345,7 @@ static struct file_operations tty_fops = {
 	tty_read,
 	tty_write,
 	NULL,		/* tty_readdir */
-	tty_select,
+	tty_poll,
 	tty_ioctl,
 	NULL,		/* tty_mmap */
 	tty_open,
@@ -359,7 +359,7 @@ static struct file_operations hung_up_tty_fops = {
 	hung_up_tty_read,
 	hung_up_tty_write,
 	NULL,		/* hung_up_tty_readdir */
-	hung_up_tty_select,
+	hung_up_tty_poll,
 	hung_up_tty_ioctl,
 	NULL,		/* hung_up_tty_mmap */
 	NULL,		/* hung_up_tty_open */
@@ -607,6 +607,25 @@ void complete_change_console(unsigned int new_console)
 	if (vt_cons[new_console]->vc_mode == KD_TEXT)
 		set_palette() ;
 	
+#ifdef CONFIG_SUN_CONSOLE
+	if (old_vc_mode != vt_cons[new_console]->vc_mode)
+	{
+		extern void set_cursor(int currcons);
+		extern void hide_cursor(void);
+
+	 	if (old_vc_mode == KD_GRAPHICS)
+		{
+			extern void sun_clear_margin(void);
+			extern void render_screen(void);
+			
+			sun_clear_margin();
+			render_screen();
+			set_cursor(fg_console);
+		}
+		else
+			hide_cursor();
+	}
+#endif		
 	/*
 	 * Wake anyone waiting for their VT to activate
 	 */
@@ -1287,16 +1306,16 @@ static void tty_release(struct inode * inode, struct file * filp)
 	release_dev(filp);
 }
 
-static int tty_select(struct inode * inode, struct file * filp, int sel_type, select_table * wait)
+static unsigned int tty_poll(struct file * filp, poll_table * wait)
 {
 	struct tty_struct * tty;
 
 	tty = (struct tty_struct *)filp->private_data;
-	if (tty_paranoia_check(tty, inode->i_rdev, "tty_select"))
+	if (tty_paranoia_check(tty, filp->f_inode->i_rdev, "tty_poll"))
 		return 0;
 
-	if (tty->ldisc.select)
-		return (tty->ldisc.select)(tty, inode, filp, sel_type, wait);
+	if (tty->ldisc.poll)
+		return (tty->ldisc.poll)(tty, filp, wait);
 	return 0;
 }
 
@@ -1922,7 +1941,9 @@ int tty_init(void)
 	if (tty_register_driver(&dev_console_driver))
 		panic("Couldn't register /dev/console driver\n");
 	
+#if !CONFIG_NO_KEYBOARD
 	kbd_init();
+#endif
 #ifdef CONFIG_ESPSERIAL  /* init ESP before rs, so rs doesn't see the port */
 	espserial_init();
 #endif

@@ -199,6 +199,8 @@ entIF:
 .align 3
 .ent	kernel_clone
 kernel_clone:
+	.frame $30, 0, $26
+	.prologue 0
 	subq $30,6*8,$30
 	stq $31,0($30)
 	stq $26,8($30)
@@ -221,17 +223,19 @@ kernel_clone:
 .globl	__kernel_thread
 .ent	__kernel_thread
 __kernel_thread:
+	.frame $30, 4*8, $26
 	subq $30,4*8,$30
-	stq $9,0($30)
-	stq $10,8($30)
-	stq $26,16($30)
+	stq $10,16($30)
+	stq $9,8($30)
+	stq $26,0($30)
+	.prologue 0
 	bis $17,$17,$9		/* save fn */
 	bis $18,$18,$10		/* save arg */
 	bsr $26,kernel_clone
 	bne $20,1f		/* $20 is non-zero in child */
-	ldq $9,0($30)
-	ldq $10,8($30)
-	ldq $26,16($30)
+	ldq $26,0($30)
+	ldq $9,8($30)
+	ldq $10,16($30)
 	addq $30,4*8,$30
 	ret $31,($26),1
 /* this is in child: look out as we don't have any stack here.. */
@@ -718,7 +722,7 @@ sys_call_table:
 	.quad do_entSys, sys_ptrace, do_entSys, do_entSys, do_entSys
 	.quad do_entSys, do_entSys, do_entSys, sys_access, do_entSys
 	.quad do_entSys, sys_sync, sys_kill, do_entSys, sys_setpgid
-	.quad do_entSys, sys_dup, sys_pipe, do_entSys, do_entSys
+	.quad do_entSys, sys_dup, sys_pipe, osf_set_program_attributes, do_entSys
 	.quad sys_open, do_entSys, sys_getxgid, osf_sigprocmask, do_entSys
 /*50*/	.quad do_entSys, sys_acct, sys_sigpending, do_entSys, sys_ioctl
 	.quad do_entSys, do_entSys, sys_symlink, sys_readlink, sys_execve
@@ -729,7 +733,7 @@ sys_call_table:
 	/* map BSD's setpgrp to sys_setpgid for binary compatibility: */
 	.quad sys_setgroups, do_entSys, sys_setpgid, sys_setitimer, do_entSys
 	.quad do_entSys, sys_getitimer, sys_gethostname, sys_sethostname, sys_getdtablesize
-	.quad sys_dup2, sys_newfstat, sys_fcntl, sys_select, do_entSys
+	.quad sys_dup2, sys_newfstat, sys_fcntl, sys_select, sys_poll
 	.quad sys_fsync, sys_setpriority, sys_socket, sys_connect, sys_accept
 /*100*/	.quad osf_getpriority, sys_send, sys_recv, sys_sigreturn, sys_bind
 	.quad sys_setsockopt, sys_listen, do_entSys, do_entSys, do_entSys
@@ -759,7 +763,7 @@ sys_call_table:
 	.quad do_entSys, do_entSys, do_entSys, do_entSys, do_entSys
 	.quad do_entSys, do_entSys, do_entSys, sys_getpgid, sys_getsid
 	.quad do_entSys, do_entSys, do_entSys, do_entSys, do_entSys
-	.quad do_entSys, do_entSys, do_entSys, do_entSys, osf_proplist_syscall
+	.quad do_entSys, osf_sysinfo, do_entSys, do_entSys, osf_proplist_syscall
 	.quad do_entSys, do_entSys, do_entSys, do_entSys, do_entSys
 /*250*/	.quad do_entSys, osf_usleep_thread, do_entSys, do_entSys, sys_sysfs
 	.quad do_entSys, osf_getsysinfo, osf_setsysinfo, do_entSys, do_entSys
