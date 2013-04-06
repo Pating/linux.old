@@ -57,6 +57,11 @@ SUB_DIRS += macintosh
 MOD_SUB_DIRS += macintosh
 endif
 
+ifdef CONFIG_PPC
+SUB_DIRS += macintosh
+MOD_SUB_DIRS += macintosh
+endif
+
 ifeq ($(CONFIG_USB),y)
 SUB_DIRS += usb
 MOD_SUB_DIRS += usb
@@ -75,7 +80,7 @@ else
   endif
 endif 
 
-ifdef CONFIG_SGI
+ifdef CONFIG_SGI_IP22
 SUB_DIRS += sgi
 MOD_SUB_DIRS += sgi
 endif

@@ -5,6 +5,7 @@
  *
  *  Added devfs support. 
  *    Jan-11-1998, C. Scott Ananian <cananian@alumni.princeton.edu>
+ *  Shared /dev/zero mmaping support, Feb 2000, Kanoj Sarcar <kanoj@sgi.com>
  */
 
 #include <linux/config.h>
@@ -285,7 +286,7 @@ static ssize_t write_kmem(struct file * file, const char * buf,
 	return do_write_mem(file, (void*)p, p, buf, count, ppos);
 }
 
-#if !defined(CONFIG_PPC) && !defined(__mc68000__)
+#if !defined(__mc68000__)
 static ssize_t read_port(struct file * file, char * buf,
 			 size_t count, loff_t *ppos)
 {
@@ -434,7 +435,7 @@ out:
 static int mmap_zero(struct file * file, struct vm_area_struct * vma)
 {
 	if (vma->vm_flags & VM_SHARED)
-		return -EINVAL;
+		return map_zero_setup(vma);
 	if (zeromap_page_range(vma->vm_start, vma->vm_end - vma->vm_start, vma->vm_page_prot))
 		return -EAGAIN;
 	return 0;
@@ -514,7 +515,7 @@ static struct file_operations null_fops = {
 	write:		write_null,
 };
 
-#if !defined(CONFIG_PPC) && !defined(__mc68000__)
+#if !defined(__mc68000__)
 static struct file_operations port_fops = {
 	llseek:		memory_lseek,
 	read:		read_port,
@@ -548,7 +549,7 @@ static int memory_open(struct inode * inode, struct file * filp)
 		case 3:
 			filp->f_op = &null_fops;
 			break;
-#if !defined(CONFIG_PPC) && !defined(__mc68000__)
+#if !defined(__mc68000__)
 		case 4:
 			filp->f_op = &port_fops;
 			break;
