@@ -10,7 +10,7 @@
  * Modified:      Paul Bristow <paul.bristow@technologist.com>
  * Modified:      Mon Nov 11 19:10:05 1999
  * 
- *     Copyright (c) 1999 James McKenzie, All Rights Reserved.
+ *     Copyright (c) 1999-2000 James McKenzie, All Rights Reserved.
  *      
  *     This program is free software; you can redistribute it and/or 
  *     modify it under the terms of the GNU General Public License as 

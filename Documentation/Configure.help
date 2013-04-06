@@ -2537,7 +2537,7 @@ CONFIG_PARPORT
   drive, PLIP link (Parallel Line Internet Protocol is mainly used to
   create a mini network by connecting the parallel ports of two local
   machines) etc., then you need to say Y here; please read
-  Documentation/parport.txt and drivers/misc/BUGS-parport.
+  Documentation/parport.txt and drivers/parport/BUGS-parport.
 
   For extensive information about drivers for many devices attaching
   to the parallel port see http://www.torque.net/linux-pp.html on the
@@ -7487,8 +7487,17 @@ CONFIG_TMS380TR
   read the Token-Ring mini-HOWTO, available from
   http://metalab.unc.edu/mdw/linux.html#howto .
 
-  Also read the file linux/Documentation/networking/sktr.txt or check
+  Also read the file linux/Documentation/networking/tms380tr.txt or check
   http://www.auk.cx/tms380tr/
+
+SMC ISA TokenRing adapter support
+CONFIG_SMCTR
+  This is support for the ISA SMC Token Ring cards, specifically
+  SMC TokenCard Elite (8115T) and SMC TokenCard Elite/A (8115T/A) adapters.
+
+  If you have such an adapter and would like to use it, say Y or M and
+  read the Token-Ring mini-HOWTO, available from
+  http://metalab.unc.edu/mdw/linux.html#howto .
 
 Traffic Shaper (EXPERIMENTAL)
 CONFIG_SHAPER

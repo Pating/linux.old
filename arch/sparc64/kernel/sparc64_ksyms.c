@@ -1,4 +1,4 @@
-/* $Id: sparc64_ksyms.c,v 1.68 1999/12/17 12:32:05 jj Exp $
+/* $Id: sparc64_ksyms.c,v 1.70 2000/01/07 18:15:18 jj Exp $
  * arch/sparc64/kernel/sparc64_ksyms.c: Sparc64 specific ksyms support.
  *
  * Copyright (C) 1996 David S. Miller (davem@caip.rutgers.edu)
@@ -80,6 +80,7 @@ extern int svr4_setcontext(svr4_ucontext_t *uc, struct pt_regs *regs);
 extern int sys_ioctl(unsigned int fd, unsigned int cmd, unsigned long arg);
 extern int sys32_ioctl(unsigned int fd, unsigned int cmd, u32 arg);
 extern int (*handle_mathemu)(struct pt_regs *, struct fpustate *);
+extern long sparc32_open(const char * filename, int flags, int mode);
                 
 extern void bcopy (const char *, char *, int);
 extern int __ashrdi3(int, int);
@@ -122,6 +123,11 @@ EXPORT_SYMBOL_PRIVATE(read_unlock);
 EXPORT_SYMBOL_PRIVATE(write_lock);
 EXPORT_SYMBOL_PRIVATE(write_unlock);
 #endif
+
+/* rw semaphores */
+EXPORT_SYMBOL_NOVERS(__down_read_failed);
+EXPORT_SYMBOL_NOVERS(__down_write_failed);
+EXPORT_SYMBOL_NOVERS(__rwsem_wake);
 
 /* Kernel wide locking */
 EXPORT_SYMBOL(kernel_flag);
@@ -275,6 +281,7 @@ EXPORT_SYMBOL(svr4_setcontext);
 EXPORT_SYMBOL(prom_cpu_nodes);
 EXPORT_SYMBOL(sys_ioctl);
 EXPORT_SYMBOL(sys32_ioctl);
+EXPORT_SYMBOL(sparc32_open);
 EXPORT_SYMBOL(move_addr_to_kernel);
 EXPORT_SYMBOL(move_addr_to_user);
 #endif

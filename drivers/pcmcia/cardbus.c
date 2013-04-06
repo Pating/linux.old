@@ -99,6 +99,11 @@ static int pc_debug = PCMCIA_DEBUG;
 #define PCDATA_CODE_TYPE	0x0014
 #define PCDATA_INDICATOR	0x0015
 
+#ifndef CONFIG_PROC_FS
+#define pci_proc_attach_device(dev)	do { } while (0)
+#define pci_proc_detach_device(dev)	do { } while (0)
+#endif
+
 typedef struct cb_config_t {
 	struct pci_dev dev;
 } cb_config_t;
@@ -313,19 +318,11 @@ int cb_alloc(socket_info_t * s)
 				res->start = 0;
 				pci_assign_resource(dev, r);
 			}
-			printk("Resource %d at %08lx-%08lx (%04lx)\n",
-			       r,
-			       res->start,
-			       res->end,
-			       res->flags);
 		}
 
 		list_add_tail(&dev->bus_list, &bus->devices);
 		list_add_tail(&dev->global_list, &pci_devices);
-#ifdef CONFIG_PROC_FS
 		pci_proc_attach_device(dev);
-#endif
-
 		pci_enable_device(dev);
 	}
 
@@ -347,20 +344,20 @@ static void free_resources(struct pci_dev *dev)
 void cb_free(socket_info_t * s)
 {
 	cb_config_t *c = s->cb_config;
-	int i;
 
 	if (c) {
+		int i;
+
+		s->cb_config = NULL;
 		for(i=0; i<s->functions; i++) {
 			struct pci_dev *dev = &c[i].dev;
+
 			list_del(&dev->bus_list);
 			list_del(&dev->global_list);
 			free_resources(dev);
-#ifdef CONFIG_PROC_FS
 			pci_proc_detach_device(dev);
-#endif
 		}
-		kfree(s->cb_config);
-		s->cb_config = NULL;
+		kfree(c);
 		printk(KERN_INFO "cs: cb_free(bus %d)\n", s->cap.cb_dev->subordinate->number);
 	}
 }
@@ -377,59 +374,55 @@ void cb_free(socket_info_t * s)
     
 ======================================================================*/
 
+static int cb_assign_irq(u32 mask)
+{
+	int irq, try;
+
+	for (try = 0; try < 2; try++) {
+		for (irq = 1; irq < 32; irq++) {
+			if ((mask >> irq) & 1) {
+				if (try_irq(IRQ_TYPE_EXCLUSIVE, irq, try) == 0)
+					return irq;
+			}
+		}
+	}
+	return 0;
+}
+
 int cb_config(socket_info_t * s)
 {
 	cb_config_t *c = s->cb_config;
 	u_char fn = s->functions;
-	u_char i, j;
-	int irq, try, ret;
+	int i, irq;
 
 	printk(KERN_INFO "cs: cb_config(bus %d)\n", s->cap.cb_dev->subordinate->number);
 
-	/* Allocate interrupt if needed */
-	s->irq.AssignedIRQ = irq = 0;
-	ret = -1;
+	/*
+	 * If we have a PCI interrupt for the bridge,
+	 * then use that..
+	 */
+	irq = s->cap.pci_irq;
+
 	for (i = 0; i < fn; i++) {
 		struct pci_dev *dev = &c[i].dev;
-		pci_readb(dev, PCI_INTERRUPT_PIN, &j);
-		if (j == 0)
+		u8 irq_pin;
+
+		/* Does this function have an interrupt at all? */
+		pci_readb(dev, PCI_INTERRUPT_PIN, &irq_pin);
+		if (!irq_pin)
 			continue;
-		if (irq == 0) {
-			if (s->cap.irq_mask & (1 << s->cap.pci_irq)) {
-				irq = s->cap.pci_irq;
-				ret = 0;
-			}
-#ifdef CONFIG_ISA
-			else
-				for (try = 0; try < 2; try++) {
-					for (irq = 0; irq < 32; irq++)
-						if ((s->cap.irq_mask >> irq) & 1) {
-							ret = try_irq(IRQ_TYPE_EXCLUSIVE, irq, try);
-							if (ret == 0)
-								break;
-						}
-					if (ret == 0)
-						break;
-				}
-			if (ret != 0) {
-				printk(KERN_NOTICE "cs: could not allocate interrupt"
-				    " for CardBus socket %d\n", s->sock);
-				goto failed;
-			}
-#endif
-			s->irq.AssignedIRQ = irq;
+
+		if (!irq) {
+			irq = cb_assign_irq(s->cap.irq_mask);
+			if (!irq)
+				return CS_OUT_OF_RESOURCE;
 		}
-	}
-	for (i = 0; i < fn; i++) {
-		struct pci_dev *dev = &c[i].dev;
+
 		dev->irq = irq;
+		pci_writeb(dev, PCI_INTERRUPT_LINE, irq);
 	}
-
+	s->irq.AssignedIRQ = irq;
 	return CS_SUCCESS;
-
-      failed:
-	cb_release(s);
-	return CS_OUT_OF_RESOURCE;
 }
 
 /*======================================================================
