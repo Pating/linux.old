@@ -256,8 +256,7 @@ usb_kbd_disconnect(struct usb_device *dev, void *ptr)
 
 int usb_kbd_init(void)
 {
-    usb_register(&usb_kbd_driver);
-    return 0;
+	return usb_register(&usb_kbd_driver);
 }
 
 void usb_kbd_cleanup(void)

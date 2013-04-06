@@ -665,7 +665,11 @@ int usb_serial_init(void)
 	}
 	
 	/* register the USB driver */
-	usb_register(&usb_serial_driver);
+	if (usb_register(&usb_serial_driver) < 0) {
+		tty_unregister_driver(&serial_tty_driver);
+		return -1;
+	}
+
 	printk(KERN_INFO "USB Serial support registered.\n");
 	return 0;
 }

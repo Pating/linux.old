@@ -1309,9 +1309,7 @@ static struct usb_driver cpia_driver = {
 
 int usb_cpia_init(void)
 {
-	usb_register(&cpia_driver);
-
-	return 0;
+	return usb_register(&cpia_driver);
 }
 
 void usb_cpia_cleanup(void)

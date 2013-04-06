@@ -299,7 +299,9 @@ usb_driver scanner_driver = {
 int
 usb_hp_scanner_init(void)
 {
-	usb_register(&scanner_driver);
+	if (usb_register(&scanner_driver) < 0)
+		return -1;
+
 	printk(KERN_DEBUG "USB Scanner support registered.\n");
 	return 0;
 }

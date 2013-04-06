@@ -135,8 +135,6 @@ void swap_free(swp_entry_t entry)
 		goto out;
 
 	type = SWP_TYPE(entry);
-	if (type & SHM_SWP_TYPE)
-		goto out;
 	if (type >= nr_swapfiles)
 		goto bad_nofile;
 	p = & swap_info[type];
@@ -190,8 +188,6 @@ swp_entry_t acquire_swap_entry(struct page *page)
 		goto new_swap_entry;
 	entry.val = page->index;
 	type = SWP_TYPE(entry);
-	if (type & SHM_SWP_TYPE)
-		goto new_swap_entry;
 	if (type >= nr_swapfiles)
 		goto new_swap_entry;
 	p = type + swap_info;
@@ -617,7 +613,7 @@ asmlinkage long sys_swapon(const char * specialfile, int swap_flags)
 		swapfilesize = 0;
 		if (blk_size[MAJOR(dev)])
 			swapfilesize = blk_size[MAJOR(dev)][MINOR(dev)]
-				/ (PAGE_SIZE / 1024);
+				>> (PAGE_SHIFT - 10);
 	} else if (S_ISREG(swap_dentry->d_inode->i_mode)) {
 		error = -EBUSY;
 		for (i = 0 ; i < nr_swapfiles ; i++) {
@@ -626,7 +622,7 @@ asmlinkage long sys_swapon(const char * specialfile, int swap_flags)
 			if (swap_dentry->d_inode == swap_info[i].swap_file->d_inode)
 				goto bad_swap;
 		}
-		swapfilesize = swap_dentry->d_inode->i_size / PAGE_SIZE;
+		swapfilesize = swap_dentry->d_inode->i_size >> PAGE_SHIFT;
 	} else
 		goto bad_swap;
 

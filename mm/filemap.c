@@ -519,7 +519,7 @@ int add_to_page_cache_unique(struct page * page,
  * This adds the requested page to the page cache if it isn't already there,
  * and schedules an I/O to read in its contents from disk.
  */
-static inline void page_cache_read(struct file * file, unsigned long offset) 
+static inline int page_cache_read(struct file * file, unsigned long offset) 
 {
 	struct inode *inode = file->f_dentry->d_inode;
 	struct page **hash = page_hash(&inode->i_data, offset);
@@ -529,41 +529,45 @@ static inline void page_cache_read(struct file * file, unsigned long offset)
 	page = __find_page_nolock(&inode->i_data, offset, *hash); 
 	spin_unlock(&pagecache_lock);
 	if (page)
-		return;
+		return 0;
 
 	page = page_cache_alloc();
 	if (!page)
-		return;
+		return -ENOMEM;
 
 	if (!add_to_page_cache_unique(page, &inode->i_data, offset, hash)) {
-		inode->i_op->readpage(file, page);
+		int error = inode->i_op->readpage(file, page);
 		page_cache_release(page);
-		return;
+		return error;
 	}
 	/*
 	 * We arrive here in the unlikely event that someone 
 	 * raced with us and added our page to the cache first.
 	 */
 	page_cache_free(page);
-	return;
+	return 0;
 }
 
 /*
  * Read in an entire cluster at once.  A cluster is usually a 64k-
  * aligned block that includes the address requested in "offset."
  */
-static void read_cluster_nonblocking(struct file * file, unsigned long offset)
+static int read_cluster_nonblocking(struct file * file, unsigned long offset)
 {
+	int error = 0;
 	unsigned long filesize = (file->f_dentry->d_inode->i_size + PAGE_CACHE_SIZE - 1) >> PAGE_CACHE_SHIFT;
 	unsigned long pages = CLUSTER_PAGES;
 
 	offset = CLUSTER_OFFSET(offset);
 	while ((pages-- > 0) && (offset < filesize)) {
-		page_cache_read(file, offset);
-		offset ++;
+		error = page_cache_read(file, offset);
+		if (error >= 0)
+			offset ++;
+		else
+			break;
 	}
 
-	return;
+	return error;
 }
 
 /* 
@@ -833,13 +837,15 @@ static inline int get_max_readahead(struct inode * inode)
 
 static void generic_file_readahead(int reada_ok,
 	struct file * filp, struct inode * inode,
-	unsigned long ppos, struct page * page)
+	struct page * page)
 {
+	unsigned long end_index = inode->i_size >> PAGE_CACHE_SHIFT;
+	unsigned long index = page->index;
 	unsigned long max_ahead, ahead;
 	unsigned long raend;
 	int max_readahead = get_max_readahead(inode);
 
-	raend = filp->f_raend & PAGE_CACHE_MASK;
+	raend = filp->f_raend;
 	max_ahead = 0;
 
 /*
@@ -851,14 +857,14 @@ static void generic_file_readahead(int reada_ok,
  * page only.
  */
 	if (PageLocked(page)) {
-		if (!filp->f_ralen || ppos >= raend || ppos + filp->f_ralen < raend) {
-			raend = ppos;
-			if (raend < inode->i_size)
+		if (!filp->f_ralen || index >= raend || index + filp->f_ralen < raend) {
+			raend = index;
+			if (raend < end_index)
 				max_ahead = filp->f_ramax;
 			filp->f_rawin = 0;
-			filp->f_ralen = PAGE_CACHE_SIZE;
+			filp->f_ralen = 1;
 			if (!max_ahead) {
-				filp->f_raend  = ppos + filp->f_ralen;
+				filp->f_raend  = index + filp->f_ralen;
 				filp->f_rawin += filp->f_ralen;
 			}
 		}
@@ -871,17 +877,17 @@ static void generic_file_readahead(int reada_ok,
  *   it is the moment to try to read ahead asynchronously.
  * We will later force unplug device in order to force asynchronous read IO.
  */
-	else if (reada_ok && filp->f_ramax && raend >= PAGE_CACHE_SIZE &&
-		 ppos <= raend && ppos + filp->f_ralen >= raend) {
+	else if (reada_ok && filp->f_ramax && raend >= 1 &&
+		 index <= raend && index + filp->f_ralen >= raend) {
 /*
  * Add ONE page to max_ahead in order to try to have about the same IO max size
  * as synchronous read-ahead (MAX_READAHEAD + 1)*PAGE_CACHE_SIZE.
  * Compute the position of the last page we have tried to read in order to 
  * begin to read ahead just at the next page.
  */
-		raend -= PAGE_CACHE_SIZE;
-		if (raend < inode->i_size)
-			max_ahead = filp->f_ramax + PAGE_CACHE_SIZE;
+		raend -= 1;
+		if (raend < end_index)
+			max_ahead = filp->f_ramax + 1;
 
 		if (max_ahead) {
 			filp->f_rawin = filp->f_ralen;
@@ -896,10 +902,11 @@ static void generic_file_readahead(int reada_ok,
  */
 	ahead = 0;
 	while (ahead < max_ahead) {
-		ahead += PAGE_CACHE_SIZE;
-		if ((raend + ahead) >= inode->i_size)
+		ahead ++;
+		if ((raend + ahead) >= end_index)
 			break;
-		page_cache_read(filp, (raend + ahead) >> PAGE_CACHE_SHIFT);
+		if (page_cache_read(filp, raend + ahead) < 0)
+			break;
 	}
 /*
  * If we tried to read ahead some pages,
@@ -919,7 +926,7 @@ static void generic_file_readahead(int reada_ok,
 
 		filp->f_ralen += ahead;
 		filp->f_rawin += filp->f_ralen;
-		filp->f_raend = raend + ahead + PAGE_CACHE_SIZE;
+		filp->f_raend = raend + ahead + 1;
 
 		filp->f_ramax += filp->f_ramax;
 
@@ -947,17 +954,16 @@ void do_generic_file_read(struct file * filp, loff_t *ppos, read_descriptor_t * 
 {
 	struct dentry *dentry = filp->f_dentry;
 	struct inode *inode = dentry->d_inode;
-	unsigned long pos, pgpos;
+	unsigned long index, offset;
 	struct page *cached_page;
 	int reada_ok;
 	int error;
 	int max_readahead = get_max_readahead(inode);
-	unsigned long pgoff;
 
 	cached_page = NULL;
-	pos = *ppos;
-	pgpos = pos & PAGE_CACHE_MASK;
-	pgoff = pos >> PAGE_CACHE_SHIFT;
+	index = *ppos >> PAGE_CACHE_SHIFT;
+	offset = *ppos & ~PAGE_CACHE_MASK;
+
 /*
  * If the current position is outside the previous read-ahead window, 
  * we reset the current read-ahead context and set read ahead max to zero
@@ -965,7 +971,7 @@ void do_generic_file_read(struct file * filp, loff_t *ppos, read_descriptor_t * 
  * otherwise, we assume that the file accesses are sequential enough to
  * continue read-ahead.
  */
-	if (pgpos > filp->f_raend || pgpos + filp->f_rawin < filp->f_raend) {
+	if (index > filp->f_raend || index + filp->f_rawin < filp->f_raend) {
 		reada_ok = 0;
 		filp->f_raend = 0;
 		filp->f_ralen = 0;
@@ -981,12 +987,12 @@ void do_generic_file_read(struct file * filp, loff_t *ppos, read_descriptor_t * 
  * Then, at least MIN_READAHEAD if read ahead is ok,
  * and at most MAX_READAHEAD in all cases.
  */
-	if (pos + desc->count <= (PAGE_CACHE_SIZE >> 1)) {
+	if (!index && offset + desc->count <= (PAGE_CACHE_SIZE >> 1)) {
 		filp->f_ramax = 0;
 	} else {
 		unsigned long needed;
 
-		needed = ((pos + desc->count) & PAGE_CACHE_MASK) - pgpos;
+		needed = ((offset + desc->count) >> PAGE_CACHE_SHIFT) + 1;
 
 		if (filp->f_ramax < needed)
 			filp->f_ramax = needed;
@@ -999,17 +1005,27 @@ void do_generic_file_read(struct file * filp, loff_t *ppos, read_descriptor_t * 
 
 	for (;;) {
 		struct page *page, **hash;
+		unsigned long end_index, nr;
 
-		if (pos >= inode->i_size)
+		end_index = inode->i_size >> PAGE_CACHE_SHIFT;
+		if (index > end_index)
 			break;
+		nr = PAGE_CACHE_SIZE;
+		if (index == end_index) {
+			nr = inode->i_size & ~PAGE_CACHE_MASK;
+			if (nr <= offset)
+				break;
+		}
+
+		nr = nr - offset;
 
 		/*
 		 * Try to find the data in the page cache..
 		 */
-		hash = page_hash(&inode->i_data, pgoff);
+		hash = page_hash(&inode->i_data, index);
 
 		spin_lock(&pagecache_lock);
-		page = __find_page_nolock(&inode->i_data, pgoff, *hash);
+		page = __find_page_nolock(&inode->i_data, index, *hash);
 		if (!page)
 			goto no_cached_page;
 found_page:
@@ -1019,19 +1035,10 @@ found_page:
 		if (!Page_Uptodate(page))
 			goto page_not_up_to_date;
 page_ok:
-	/*
-	 * Ok, we have the page, and it's up-to-date, so
-	 * now we can copy it to user space...
-	 */
-	{
-		unsigned long offset, nr;
-
-		offset = pos & ~PAGE_CACHE_MASK;
-		nr = PAGE_CACHE_SIZE - offset;
-		if (nr > inode->i_size - pos)
-			nr = inode->i_size - pos;
-
 		/*
+		 * Ok, we have the page, and it's up-to-date, so
+		 * now we can copy it to user space...
+		 *
 		 * The actor routine returns how many bytes were actually used..
 		 * NOTE! This may not be the same as how much of a user buffer
 		 * we filled up (we may be padding etc), so we can only update
@@ -1039,20 +1046,20 @@ page_ok:
 		 * pointers and the remaining count).
 		 */
 		nr = actor(desc, page, offset, nr);
-		pos += nr;
-		pgoff = pos >> PAGE_CACHE_SHIFT;
+		offset += nr;
+		index += offset >> PAGE_CACHE_SHIFT;
+		offset &= ~PAGE_CACHE_MASK;
+	
 		page_cache_release(page);
 		if (nr && desc->count)
 			continue;
 		break;
-	}
 
 /*
  * Ok, the page was not immediately readable, so let's try to read ahead while we're at it..
  */
 page_not_up_to_date:
-		generic_file_readahead(reada_ok, filp, inode,
-					pos & PAGE_CACHE_MASK, page);
+		generic_file_readahead(reada_ok, filp, inode, page);
 
 		if (Page_Uptodate(page))
 			goto page_ok;
@@ -1073,8 +1080,7 @@ readpage:
 				goto page_ok;
 
 			/* Again, try some read-ahead while waiting for the page to finish.. */
-			generic_file_readahead(reada_ok, filp, inode,
-						pos & PAGE_CACHE_MASK, page);
+			generic_file_readahead(reada_ok, filp, inode, page);
 			wait_on_page(page);
 			if (Page_Uptodate(page))
 				goto page_ok;
@@ -1106,7 +1112,7 @@ no_cached_page:
 			 * dropped the page cache lock. Check for that.
 			 */
 			spin_lock(&pagecache_lock);
-			page = __find_page_nolock(&inode->i_data, pgoff, *hash);
+			page = __find_page_nolock(&inode->i_data, index, *hash);
 			if (page)
 				goto found_page;
 		}
@@ -1115,14 +1121,14 @@ no_cached_page:
 		 * Ok, add the new page to the hash-queues...
 		 */
 		page = cached_page;
-		__add_to_page_cache(page, &inode->i_data, pgoff, hash);
+		__add_to_page_cache(page, &inode->i_data, index, hash);
 		spin_unlock(&pagecache_lock);
 		cached_page = NULL;
 
 		goto readpage;
 	}
 
-	*ppos = pos;
+	*ppos = ((loff_t) index << PAGE_CACHE_SHIFT) + offset;
 	filp->f_reada = 1;
 	if (cached_page)
 		page_cache_free(cached_page);
@@ -1292,13 +1298,11 @@ out:
  * The goto's are kind of ugly, but this streamlines the normal case of having
  * it in the page cache, and handles the special cases reasonably without
  * having a lot of duplicated code.
- *
- * XXX - at some point, this should return unique values to indicate to
- *       the caller whether this is EIO, OOM, or SIGBUS.
  */
 static struct page * filemap_nopage(struct vm_area_struct * area,
 	unsigned long address, int no_share)
 {
+	int error;
 	struct file *file = area->vm_file;
 	struct dentry *dentry = file->f_dentry;
 	struct inode *inode = dentry->d_inode;
@@ -1347,7 +1351,8 @@ success:
 				BUG();
 			copy_highpage(new_page, old_page);
 			flush_page_to_ram(new_page);
-		}
+		} else
+			new_page = NOPAGE_OOM;
 		page_cache_release(page);
 		return new_page;
 	}
@@ -1364,16 +1369,26 @@ no_cached_page:
 	 * so we need to map a zero page.
 	 */
 	if (pgoff < size)
-		read_cluster_nonblocking(file, pgoff);
+		error = read_cluster_nonblocking(file, pgoff);
 	else
-		page_cache_read(file, pgoff);
+		error = page_cache_read(file, pgoff);
 
 	/*
 	 * The page we want has now been added to the page cache.
 	 * In the unlikely event that someone removed it in the
 	 * meantime, we'll just come back here and read it again.
 	 */
-	goto retry_find;
+	if (error >= 0)
+		goto retry_find;
+
+	/*
+	 * An error return from page_cache_read can result if the
+	 * system is low on memory, or a problem occurs while trying
+	 * to schedule I/O.
+	 */
+	if (error == -ENOMEM)
+		return NOPAGE_OOM;
+	return NULL;
 
 page_not_uptodate:
 	lock_page(page);
@@ -1777,12 +1792,15 @@ generic_file_write(struct file *file, const char *buf,
 {
 	struct dentry	*dentry = file->f_dentry; 
 	struct inode	*inode = dentry->d_inode; 
-	unsigned long	pos = *ppos;
 	unsigned long	limit = current->rlim[RLIMIT_FSIZE].rlim_cur;
+	loff_t		pos = *ppos;
 	struct page	*page, **hash, *cached_page;
 	unsigned long	written;
 	long		status;
 	int		err;
+
+	if (pos < 0)
+		return -EINVAL;
 
 	cached_page = NULL;
 
@@ -1802,37 +1820,35 @@ generic_file_write(struct file *file, const char *buf,
 	 * Check whether we've reached the file size limit.
 	 */
 	err = -EFBIG;
-	if (pos >= limit) {
-		send_sig(SIGXFSZ, current, 0);
-		goto out;
+	if (limit != RLIM_INFINITY) {
+		if (pos >= limit) {
+			send_sig(SIGXFSZ, current, 0);
+			goto out;
+		}
+		if (count > limit - pos) {
+			send_sig(SIGXFSZ, current, 0);
+			count = limit - pos;
+		}
 	}
 
 	status  = 0;
-	/*
-	 * Check whether to truncate the write,
-	 * and send the signal if we do.
-	 */
-	if (count > limit - pos) {
-		send_sig(SIGXFSZ, current, 0);
-		count = limit - pos;
-	}
 
 	while (count) {
-		unsigned long bytes, pgoff, offset;
+		unsigned long bytes, index, offset;
 
 		/*
 		 * Try to find the page in the cache. If it isn't there,
 		 * allocate a free page.
 		 */
 		offset = (pos & (PAGE_CACHE_SIZE -1)); /* Within page */
-		pgoff = pos >> PAGE_CACHE_SHIFT;
+		index = pos >> PAGE_CACHE_SHIFT;
 		bytes = PAGE_CACHE_SIZE - offset;
 		if (bytes > count)
 			bytes = count;
 
-		hash = page_hash(&inode->i_data, pgoff);
+		hash = page_hash(&inode->i_data, index);
 repeat_find:
-		page = __find_lock_page(&inode->i_data, pgoff, hash);
+		page = __find_lock_page(&inode->i_data, index, hash);
 		if (!page) {
 			if (!cached_page) {
 				cached_page = page_cache_alloc();
@@ -1842,7 +1858,7 @@ repeat_find:
 				break;
 			}
 			page = cached_page;
-			if (add_to_page_cache_unique(page,&inode->i_data,pgoff,hash))
+			if (add_to_page_cache_unique(page, &inode->i_data, index, hash))
 				goto repeat_find;
 
 			cached_page = NULL;

@@ -48,7 +48,7 @@ struct poll_table_struct;
 extern int max_files, nr_files, nr_free_files;
 extern int max_super_blocks, nr_super_blocks;
 
-#define NR_FILE  4096	/* this can well be larger on a larger system */
+#define NR_FILE  8192	/* this can well be larger on a larger system */
 #define NR_RESERVED_FILES 10 /* reserved for root */
 #define NR_SUPER 256
 
@@ -302,7 +302,7 @@ struct iattr {
 	umode_t		ia_mode;
 	uid_t		ia_uid;
 	gid_t		ia_gid;
-	off_t		ia_size;
+	loff_t		ia_size;
 	time_t		ia_atime;
 	time_t		ia_mtime;
 	time_t		ia_ctime;
@@ -347,7 +347,7 @@ struct inode {
 	uid_t			i_uid;
 	gid_t			i_gid;
 	kdev_t			i_rdev;
-	off_t			i_size;
+	loff_t			i_size;
 	time_t			i_atime;
 	time_t			i_mtime;
 	time_t			i_ctime;

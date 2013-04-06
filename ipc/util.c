@@ -14,6 +14,8 @@
 #include <linux/init.h>
 #include <linux/msg.h>
 
+#include "util.h"
+
 #if defined(CONFIG_SYSVIPC)
 
 extern void sem_init (void), msg_init (void), shm_init (void);
@@ -99,7 +101,7 @@ asmlinkage long sys_msgctl (int msqid, int cmd, struct msqid_ds *buf)
 	return -ENOSYS;
 }
 
-asmlinkage long sys_shmget (key_t key, int size, int flag)
+asmlinkage long sys_shmget (key_t key, size_t size, int shmflag)
 {
 	return -ENOSYS;
 }

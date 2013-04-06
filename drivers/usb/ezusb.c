@@ -311,7 +311,7 @@ static ssize_t ezusb_read(struct file *file, char *buf, size_t sz, loff_t *ppos)
 		if (pos + len > 0x10000)
 			len = 0x10000 - pos;
 		i = usb_control_msg(ez->usbdev, usb_rcvctrlpipe(ez->usbdev, 0), 0xa0, 0xc0, pos, 0, b, len, HZ);
-		if (i) {
+		if (i < 0) {
 			up(&ez->mutex);
 			printk(KERN_WARNING "ezusb: upload failed pos %u len %u ret %d\n", pos, len, i);
 			*ppos = pos;
@@ -366,7 +366,7 @@ static ssize_t ezusb_write(struct file *file, const char *buf, size_t sz, loff_t
 			return -EFAULT;
 		}
 		i = usb_control_msg(ez->usbdev, usb_sndctrlpipe(ez->usbdev, 0), 0xa0, 0x40, pos, 0, b, len, HZ);
-		if (i) {
+		if (i < 0) {
 			up(&ez->mutex);
 			printk(KERN_WARNING "ezusb: download failed pos %u len %u ret %d\n", pos, len, i);
 			*ppos = pos;
@@ -1052,7 +1052,9 @@ int ezusb_init(void)
 		init_waitqueue_head(&ezusb[u].wait);
 		spin_lock_init(&ezusb[u].lock);
 	}
-	usb_register(&ezusb_driver);
+	if (usb_register(&ezusb_driver) < 0)
+		return -1;
+
         printk(KERN_INFO "ezusb: Anchorchip firmware download driver registered\n");
 	return 0;
 }
