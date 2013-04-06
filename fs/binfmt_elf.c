@@ -40,7 +40,7 @@
 #include <linux/elf.h>
 
 static int load_elf_binary(struct linux_binprm * bprm, struct pt_regs * regs);
-static int load_elf_library(int fd);
+static int load_elf_library(struct file *file);
 extern int dump_fpu (struct pt_regs *, elf_fpregset_t *);
 extern void dump_thread(struct pt_regs *, struct user *);
 
@@ -54,7 +54,7 @@ extern void dump_thread(struct pt_regs *, struct user *);
  * don't even try.
  */
 #ifdef USE_ELF_CORE_DUMP
-static int elf_core_dump(long signr, struct pt_regs * regs);
+static int elf_core_dump(long signr, struct pt_regs * regs, struct file *);
 #else
 #define elf_core_dump	NULL
 #endif
@@ -64,11 +64,11 @@ static int elf_core_dump(long signr, struct pt_regs * regs);
 #define ELF_PAGEALIGN(_v) (((_v) + ELF_EXEC_PAGESIZE - 1) & ~(ELF_EXEC_PAGESIZE - 1))
 
 static struct linux_binfmt elf_format = {
-#ifndef MODULE
-	NULL, NULL, load_elf_binary, load_elf_library, elf_core_dump
-#else
-	NULL, &__this_module, load_elf_binary, load_elf_library, elf_core_dump
-#endif
+	module:		THIS_MODULE,
+	load_binary:	load_elf_binary,
+	load_shlib:	load_elf_library,
+	core_dump:	elf_core_dump,
+	min_coredump:	ELF_EXEC_PAGESIZE,
 };
 
 static void set_brk(unsigned long start, unsigned long end)
@@ -415,8 +415,7 @@ out:
 #define INTERPRETER_ELF 2
 
 
-static inline int
-do_load_elf_binary(struct linux_binprm * bprm, struct pt_regs * regs)
+static int load_elf_binary(struct linux_binprm * bprm, struct pt_regs * regs)
 {
 	struct file * file;
 	struct dentry *interpreter_dentry = NULL; /* to shut gcc up */
@@ -673,7 +672,7 @@ do_load_elf_binary(struct linux_binprm * bprm, struct pt_regs * regs)
 			if (elf_ex.e_type == ET_DYN) {
 				load_bias += error -
 				             ELF_PAGESTART(load_bias + vaddr);
-				load_addr += error;
+				load_addr += load_bias;
 			}
 		}
 		k = elf_ppnt->p_vaddr;
@@ -727,16 +726,12 @@ do_load_elf_binary(struct linux_binprm * bprm, struct pt_regs * regs)
 	if (interpreter_type != INTERPRETER_AOUT)
 		sys_close(elf_exec_fileno);
 
+	set_binfmt(&elf_format);
 	if (current->exec_domain && current->exec_domain->module)
 		__MOD_DEC_USE_COUNT(current->exec_domain->module);
-	if (current->binfmt && current->binfmt->module)
-		__MOD_DEC_USE_COUNT(current->binfmt->module);
 	current->exec_domain = lookup_exec_domain(current->personality);
-	current->binfmt = &elf_format;
 	if (current->exec_domain && current->exec_domain->module)
 		__MOD_INC_USE_COUNT(current->exec_domain->module);
-	if (current->binfmt && current->binfmt->module)
-		__MOD_INC_USE_COUNT(current->binfmt->module);
 
 	compute_creds(bprm);
 	current->flags &= ~PF_FORKNOEXEC;
@@ -799,7 +794,7 @@ do_load_elf_binary(struct linux_binprm * bprm, struct pt_regs * regs)
 #endif
 
 	start_thread(regs, elf_entry, bprm->p);
-	if (current->flags & PF_PTRACED)
+	if (current->ptrace & PT_PTRACED)
 		send_sig(SIGTRAP, current, 0);
 	retval = 0;
 out:
@@ -819,24 +814,11 @@ out_free_ph:
 	goto out;
 }
 
-static int
-load_elf_binary(struct linux_binprm * bprm, struct pt_regs * regs)
-{
-	int retval;
-
-	MOD_INC_USE_COUNT;
-	retval = do_load_elf_binary(bprm, regs);
-	MOD_DEC_USE_COUNT;
-	return retval;
-}
-
 /* This is really simpleminded and specialized - we are loading an
    a.out library that is given an ELF header. */
 
-static inline int
-do_load_elf_library(int fd)
+static int load_elf_library(struct file *file)
 {
-	struct file * file;
 	struct dentry * dentry;
 	struct inode * inode;
 	struct elf_phdr *elf_phdata;
@@ -845,10 +827,6 @@ do_load_elf_library(int fd)
 	struct elfhdr elf_ex;
 	loff_t offset = 0;
 
-	error = -EACCES;
-	file = fget(fd);
-	if (!file || !file->f_op)
-		goto out;
 	dentry = file->f_dentry;
 	inode = dentry->d_inode;
 
@@ -924,19 +902,7 @@ do_load_elf_library(int fd)
 out_free_ph:
 	kfree(elf_phdata);
 out_putf:
-	fput(file);
-out:
 	return error;
-}
-
-static int load_elf_library(int fd)
-{
-	int retval;
-
-	MOD_INC_USE_COUNT;
-	retval = do_load_elf_library(fd);
-	MOD_DEC_USE_COUNT;
-	return retval;
 }
 
 /*
@@ -1078,14 +1044,10 @@ static int writenote(struct memelfnote *men, struct file *file)
  * and then they are actually written out.  If we run out of core limit
  * we just truncate.
  */
-static int elf_core_dump(long signr, struct pt_regs * regs)
+static int elf_core_dump(long signr, struct pt_regs * regs, struct file * file)
 {
 	int has_dumped = 0;
-	struct file *file;
-	struct dentry *dentry;
-	struct inode *inode;
 	mm_segment_t fs;
-	char corefile[6+sizeof(current->comm)];
 	int segs;
 	int i;
 	size_t size = 0;
@@ -1098,16 +1060,6 @@ static int elf_core_dump(long signr, struct pt_regs * regs)
 	struct elf_prstatus prstatus;	/* NT_PRSTATUS */
 	elf_fpregset_t fpu;		/* NT_PRFPREG */
 	struct elf_prpsinfo psinfo;	/* NT_PRPSINFO */
-
-	if (!current->dumpable ||
-	    limit < ELF_EXEC_PAGESIZE ||
-	    atomic_read(&current->mm->count) != 1)
-		return 0;
-	current->dumpable = 0;
-
-#ifndef CONFIG_BINFMT_ELF
-	MOD_INC_USE_COUNT;
-#endif
 
 	segs = current->mm->map_count;
 
@@ -1138,27 +1090,6 @@ static int elf_core_dump(long signr, struct pt_regs * regs)
 
 	fs = get_fs();
 	set_fs(KERNEL_DS);
-
-	memcpy(corefile,"core.",5);
-#if 0
-	memcpy(corefile+5,current->comm,sizeof(current->comm));
-#else
-	corefile[4] = '\0';
-#endif
-	file = filp_open(corefile, O_CREAT | 2 | O_TRUNC | O_NOFOLLOW, 0600);
-	if (IS_ERR(file))
-		goto end_coredump;
-	dentry = file->f_dentry;
-	inode = dentry->d_inode;
-	if (inode->i_nlink > 1)
-		goto close_coredump;	/* multiple links - don't dump */
-
-	if (!S_ISREG(inode->i_mode))
-		goto close_coredump;
-	if (!inode->i_op || !inode->i_op->default_file_ops)
-		goto close_coredump;
-	if (!file->f_op->write)
-		goto close_coredump;
 
 	has_dumped = 1;
 	current->flags |= PF_DUMPCORE;
@@ -1358,13 +1289,8 @@ static int elf_core_dump(long signr, struct pt_regs * regs)
 	}
 
  close_coredump:
- 	filp_close(file, NULL);
-
  end_coredump:
 	set_fs(fs);
-#ifndef CONFIG_BINFMT_ELF
-	MOD_DEC_USE_COUNT;
-#endif
 	return has_dumped;
 }
 #endif		/* USE_ELF_CORE_DUMP */

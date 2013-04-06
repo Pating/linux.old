@@ -199,9 +199,9 @@ static void name##_IO_APIC_irq(unsigned int irq)			\
 /*
  * We disable IO-APIC IRQs by setting their 'destination CPU mask' to
  * zero. Trick by Ramesh Nalluri.
+ * Not anymore. This causes problems on some IO-APIC's, notably AMD 760MP's
+ * So we do it a more 2.4 kind of way now which should be safer -jerdfelt
  */
-DO_ACTION( disable, 1, &= 0x00ffffff, io_apic_sync(entry->apic))/* destination = 0x00 */
-DO_ACTION( enable,  1, |= 0xff000000, )				/* destination = 0xff */
 DO_ACTION( mask,    0, |= 0x00010000, io_apic_sync(entry->apic))/* mask = 1 */
 DO_ACTION( unmask,  0, &= 0xfffeffff, )				/* mask = 0 */
 
@@ -611,8 +611,8 @@ void __init setup_IO_APIC_irqs(void)
 
 		entry.delivery_mode = dest_LowestPrio;
 		entry.dest_mode = 1;			/* logical delivery */
-		entry.mask = 0;				/* enable IRQ */
-		entry.dest.logical.logical_dest = 0;	/* but no route */
+		entry.mask = 1;				/* disable IRQ */
+		entry.dest.logical.logical_dest = 0xff;
 
 		idx = find_irq_entry(apic,pin,mp_INT);
 		if (idx == -1) {
@@ -931,18 +931,60 @@ static void __init setup_ioapic_id(void)
 		panic("could not set ID");
 }
 
+static int __init ELCR_trigger(unsigned int irq)
+{
+	unsigned int port;
+
+	port = 0x4d0 + (irq >> 3);
+	return (inb(port) >> (irq & 7)) & 1;
+}
+
 static void __init construct_default_ISA_mptable(void)
 {
 	int i, pos = 0;
+	int ELCR_fallback = 0;
 	const int bus_type = (mpc_default_type == 2 || mpc_default_type == 3 ||
 			      mpc_default_type == 6) ? MP_BUS_EISA : MP_BUS_ISA;
+
+	/*
+	 *  If true, we have an ISA/PCI system with no IRQ entries
+	 *  in the MP table. To prevent the PCI interrupts from being set up
+	 *  incorrectly, we try to use the ELCR. The sanity check to see if
+	 *  there is good ELCR data is very simple - IRQ0, 1, 2 and 13 can
+	 *  never be level sensitive, so we simply see if the ELCR agrees.
+	 *  If it does, we assume it's valid.
+	 */
+	if (mpc_default_type == 5) {
+		printk("ISA/PCI bus type with no IRQ information... falling back to ELCR\n");
+
+		if (ELCR_trigger(0) || ELCR_trigger(1) || ELCR_trigger(2) || ELCR_trigger(13))
+			printk("ELCR contains invalid data... not using ELCR\n");
+		else {
+			printk("Using ELCR to identify PCI interrupts\n");
+			ELCR_fallback = 1;
+		}
+	}
 
 	for (i = 0; i < 16; i++) {
 		if (!IO_APIC_IRQ(i))
 			continue;
 
 		mp_irqs[pos].mpc_irqtype = mp_INT;
-		mp_irqs[pos].mpc_irqflag = 0;		/* default */
+
+		if (ELCR_fallback) {
+			/*
+			 *  If the ELCR indicates a level-sensitive interrupt, we
+			 *  copy that information over to the MP table in the
+			 *  irqflag field (level sensitive, active high polarity).
+			 */
+			if (ELCR_trigger(i))
+				mp_irqs[pos].mpc_irqflag = 13;
+			else
+				mp_irqs[pos].mpc_irqflag = 0;
+		}
+		else
+			mp_irqs[pos].mpc_irqflag = 0;		/* default */
+
 		mp_irqs[pos].mpc_srcbus = 0;
 		mp_irqs[pos].mpc_srcbusirq = i;
 		mp_irqs[pos].mpc_dstapic = 0;
@@ -1017,13 +1059,10 @@ static inline void self_IPI(unsigned int irq)
 static void enable_edge_ioapic_irq(unsigned int irq)
 {
 	self_IPI(irq);
-	enable_IO_APIC_irq(irq);
+	unmask_IO_APIC_irq(irq);
 }
 
-static void disable_edge_ioapic_irq(unsigned int irq)
-{
-	disable_IO_APIC_irq(irq);
-}
+static void disable_edge_ioapic_irq(unsigned int irq) { /* nothing */ }
 
 /*
  * Starting up a edge-triggered IO-APIC interrupt is
@@ -1239,7 +1278,7 @@ static inline void check_timer(void)
 
 	pin1 = find_timer_pin(mp_INT);
 	pin2 = find_timer_pin(mp_ExtINT);
-	enable_IO_APIC_irq(0);
+	unmask_IO_APIC_irq(0);
 	if (!timer_irq_works()) {
 
 		if (pin1 != -1)

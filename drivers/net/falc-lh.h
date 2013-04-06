@@ -3,14 +3,20 @@
  *
  * Author:	Ivan Passos <ivan@cyclades.com>
  *
- * Copyright:	(c) 2000 Cyclades Corp.
+ * Copyright:	(c) 2000-2001 Cyclades Corp.
  *
  *	This program is free software; you can redistribute it and/or
  *	modify it under the terms of the GNU General Public License
  *	as published by the Free Software Foundation; either version
  *	2 of the License, or (at your option) any later version.
  *
- * $Log: falc.h,v $
+ * $Log: falc-lh.h,v $
+ * Revision 3.1  2001/06/15 12:41:10  regina
+ * upping major version number
+ *
+ * Revision 1.1.1.1  2001/06/13 20:24:36  daniela
+ * PC300 initial CVS version (3.4.0-pre1)
+ *
  * Revision 1.1 2000/05/15 ivan
  * Included DJA bits for the LIM2 register.
  *
@@ -297,6 +303,7 @@
    ------------------- E1 --------------------------- */
 
 #define XSW_XSIS        0x80
+#define XSW_XTM         0x40
 #define XSW_XRA         0x20
 #define XSW_XY0         0x10
 #define XSW_XY1         0x08

@@ -439,7 +439,7 @@ int handle_vm86_trap(struct kernel_vm86_regs * regs, long error_code, int trapno
 	}
 	if (trapno !=1)
 		return 1; /* we let this handle by the calling routine */
-	if (current->flags & PF_PTRACED) {
+	if (current->ptrace & PT_PTRACED) {
 		unsigned long flags;
 		spin_lock_irqsave(&current->sigmask_lock, flags);
 		sigdelset(&current->blocked, SIGTRAP);
@@ -618,6 +618,14 @@ static inline int task_valid(struct task_struct *tsk)
 	}
 	read_unlock(&tasklist_lock);
 	return ret;
+}
+
+void release_x86_irqs(struct task_struct *task)
+{
+	int i;
+	for (i=3; i<16; i++)
+	    if (vm86_irqs[i].tsk == task)
+		free_vm86_irq(i);
 }
 
 static inline void handle_irq_zombies(void)

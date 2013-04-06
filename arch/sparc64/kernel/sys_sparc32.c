@@ -1,4 +1,4 @@
-/* $Id: sys_sparc32.c,v 1.107.2.16 2000/12/20 02:45:00 anton Exp $
+/* $Id: sys_sparc32.c,v 1.107.2.17 2001/07/06 05:04:31 davem Exp $
  * sys_sparc32.c: Conversion between 32bit and 64bit native syscalls.
  *
  * Copyright (C) 1997,1998 Jakub Jelinek (jj@sunsite.mff.cuni.cz)
@@ -3002,6 +3002,7 @@ do_execve32(char * filename, u32 * argv, u32 * envp, struct pt_regs * regs)
 {
 	struct linux_binprm bprm;
 	struct dentry * dentry;
+	int was_dumpable;
 	int retval;
 	int i;
 
@@ -3029,6 +3030,9 @@ do_execve32(char * filename, u32 * argv, u32 * envp, struct pt_regs * regs)
 		return bprm.envc;
 	}
 
+	was_dumpable = current->dumpable;
+	current->dumpable = 0;
+
 	retval = prepare_binprm(&bprm);
 	
 	if(retval>=0) {
@@ -3042,9 +3046,12 @@ do_execve32(char * filename, u32 * argv, u32 * envp, struct pt_regs * regs)
 
 	if (retval >= 0)
 		retval = search_binary_handler(&bprm,regs);
-	if(retval>=0)
+
+	if (retval >= 0) {
 		/* execve success */
+		current->dumpable = bprm.dumpable;
 		return retval;
+	}
 
 	/* Something went wrong, return the inode and free the argument pages*/
 	if(bprm.dentry)
@@ -3052,7 +3059,10 @@ do_execve32(char * filename, u32 * argv, u32 * envp, struct pt_regs * regs)
 
 	for (i=0 ; i<MAX_ARG_PAGES ; i++)
 		free_page(bprm.page[i]);
-	return(retval);
+
+	current->dumpable = was_dumpable;
+
+	return retval;
 }
 
 /*

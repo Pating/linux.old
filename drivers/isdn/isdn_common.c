@@ -1,4 +1,4 @@
-/* $Id: isdn_common.c,v 1.114.6.7 2001/02/10 14:41:19 kai Exp $
+/* $Id: isdn_common.c,v 1.114.6.12 2001/06/09 15:14:15 kai Exp $
 
  * Linux ISDN subsystem, common used functions (linklevel).
  *
@@ -42,7 +42,7 @@
 #endif
 #ifdef CONFIG_ISDN_DIVERSION
 #include <linux/isdn_divertif.h>
-#endif CONFIG_ISDN_DIVERSION
+#endif /* CONFIG_ISDN_DIVERSION */
 #include "isdn_v110.h"
 
 /* Debugflags */
@@ -50,7 +50,7 @@
 
 isdn_dev *dev;
 
-static char *isdn_revision = "$Revision: 1.114.6.7 $";
+static char *isdn_revision = "$Revision: 1.114.6.12 $";
 
 extern char *isdn_net_revision;
 extern char *isdn_tty_revision;
@@ -68,7 +68,7 @@ extern char *isdn_v110_revision;
 
 #ifdef CONFIG_ISDN_DIVERSION
 static isdn_divert_if *divert_if; /* = NULL */
-#endif CONFIG_ISDN_DIVERSION
+#endif /* CONFIG_ISDN_DIVERSION */
 
 
 static int isdn_writebuf_stub(int, int, const u_char *, int, int);
@@ -230,20 +230,6 @@ int isdn_msncmp( const char * msn1, const char * msn2 )
 	return isdn_wildmat( TmpMsn1, TmpMsn2 );
 }
 
-static void
-isdn_free_queue(struct sk_buff_head *queue)
-{
-	struct sk_buff *skb;
-	unsigned long flags;
-
-	save_flags(flags);
-	cli();
-	if (skb_queue_len(queue))
-		while ((skb = skb_dequeue(queue)))
-			dev_kfree_skb(skb);
-	restore_flags(flags);
-}
-
 int
 isdn_dc2minor(int di, int ch)
 {
@@ -257,7 +243,6 @@ isdn_dc2minor(int di, int ch)
 static int isdn_timer_cnt1 = 0;
 static int isdn_timer_cnt2 = 0;
 static int isdn_timer_cnt3 = 0;
-static int isdn_timer_cnt4 = 0;
 
 static void
 isdn_timer_funct(ulong dummy)
@@ -281,15 +266,10 @@ isdn_timer_funct(ulong dummy)
 			isdn_timer_cnt2 = 0;
 			if (tf & ISDN_TIMER_NETHANGUP)
 				isdn_net_autohup();
-			if (++isdn_timer_cnt3 > ISDN_TIMER_RINGING) {
+			if (++isdn_timer_cnt3 >= ISDN_TIMER_RINGING) {
 				isdn_timer_cnt3 = 0;
 				if (tf & ISDN_TIMER_MODEMRING)
 					isdn_tty_modem_ring();
-			}
-			if (++isdn_timer_cnt4 > ISDN_TIMER_KEEPINT) {
-				isdn_timer_cnt4 = 0;
-				if (tf & ISDN_TIMER_KEEPALIVE)
-					isdn_net_slarp_out();
 			}
 			if (tf & ISDN_TIMER_CARRIER)
 				isdn_tty_carrier_timeout();
@@ -309,7 +289,7 @@ isdn_timer_funct(ulong dummy)
 void
 isdn_timer_ctrl(int tf, int onoff)
 {
-	int flags;
+	int flags, old_tflags;
 
 	save_flags(flags);
 	cli();
@@ -318,11 +298,12 @@ isdn_timer_ctrl(int tf, int onoff)
 		isdn_timer_cnt1 = 0;
 		isdn_timer_cnt2 = 0;
 	}
+	old_tflags = dev->tflags;
 	if (onoff)
 		dev->tflags |= tf;
 	else
 		dev->tflags &= ~tf;
-	if (dev->tflags)
+	if (dev->tflags && !old_tflags)
 		mod_timer(&dev->timer, jiffies+ISDN_TIMER_RES);
 	restore_flags(flags);
 }
@@ -516,7 +497,7 @@ isdn_status_callback(isdn_ctrl * c)
                                          if (divert_if)
                  	                  if ((retval = divert_if->stat_callback(c))) 
 					    return(retval); /* processed */
-#endif CONFIG_ISDN_DIVERSION                        
+#endif /* CONFIG_ISDN_DIVERSION */                       
 					if ((!retval) && (dev->drv[di]->flags & DRV_FLAG_REJBUS)) {
 						/* No tty responding */
 						cmd.driver = di;
@@ -589,7 +570,7 @@ isdn_status_callback(isdn_ctrl * c)
 #ifdef CONFIG_ISDN_DIVERSION
                         if (divert_if)
                          divert_if->stat_callback(c); 
-#endif CONFIG_ISDN_DIVERSION
+#endif /* CONFIG_ISDN_DIVERSION */
 			break;
 		case ISDN_STAT_DISPLAY:
 #ifdef ISDN_DEBUG_STATCALLB
@@ -599,7 +580,7 @@ isdn_status_callback(isdn_ctrl * c)
 #ifdef CONFIG_ISDN_DIVERSION
                         if (divert_if)
                          divert_if->stat_callback(c); 
-#endif CONFIG_ISDN_DIVERSION
+#endif /* CONFIG_ISDN_DIVERSION */
 			break;
 		case ISDN_STAT_DCONN:
 			if (i < 0)
@@ -641,7 +622,7 @@ isdn_status_callback(isdn_ctrl * c)
 #ifdef CONFIG_ISDN_DIVERSION
                         if (divert_if)
                          divert_if->stat_callback(c); 
-#endif CONFIG_ISDN_DIVERSION
+#endif /* CONFIG_ISDN_DIVERSION */
 			break;
 			break;
 		case ISDN_STAT_BCONN:
@@ -740,7 +721,7 @@ isdn_status_callback(isdn_ctrl * c)
 			kfree(dev->drv[di]->rcverr);
 			kfree(dev->drv[di]->rcvcount);
 			for (i = 0; i < dev->drv[di]->channels; i++)
-				isdn_free_queue(&dev->drv[di]->rpqueue[i]);
+				skb_queue_purge(&dev->drv[di]->rpqueue[i]);
 			kfree(dev->drv[di]->rpqueue);
 			kfree(dev->drv[di]->rcv_waitq);
 			kfree(dev->drv[di]);
@@ -769,7 +750,7 @@ isdn_status_callback(isdn_ctrl * c)
 	        case ISDN_STAT_REDIR:
                         if (divert_if)
                           return(divert_if->stat_callback(c));
-#endif CONFIG_ISDN_DIVERSION
+#endif /* CONFIG_ISDN_DIVERSION */
 		default:
 			return -1;
 	}
@@ -1021,7 +1002,7 @@ isdn_read(struct file *file, char *buf, size_t count, loff_t * off)
 		retval = -ENODEV;
 		goto out;
 	}
-	if (minor < ISDN_MINOR_CTRL) {
+	if (minor <= ISDN_MINOR_BMAX) {
 		printk(KERN_WARNING "isdn_read minor %d obsolete!\n", minor);
 		drvidx = isdn_minor2drv(minor);
 		if (drvidx < 0) {
@@ -1112,7 +1093,7 @@ isdn_write(struct file *file, const char *buf, size_t count, loff_t * off)
 	if (!dev->drivers)
 		return -ENODEV;
 
-	if (minor < ISDN_MINOR_CTRL) {
+	if (minor <= ISDN_MINOR_BMAX) {
 		printk(KERN_WARNING "isdn_write minor %d obsolete!\n", minor);
 		drvidx = isdn_minor2drv(minor);
 		if (drvidx < 0) {
@@ -1262,7 +1243,7 @@ isdn_ioctl(struct inode *inode, struct file *file, uint cmd, ulong arg)
 	}
 	if (!dev->drivers)
 		return -ENODEV;
-	if (minor < ISDN_MINOR_CTRL) {
+	if (minor <= ISDN_MINOR_BMAX) {
 		drvidx = isdn_minor2drv(minor);
 		if (drvidx < 0)
 			return -ENODEV;
@@ -1678,7 +1659,7 @@ isdn_open(struct inode *ino, struct file *filep)
 	}
 	if (!dev->channels)
 		goto out;
-	if (minor < ISDN_MINOR_CTRL) {
+	if (minor <= ISDN_MINOR_BMAX) {
 		printk(KERN_WARNING "isdn_open minor %d obsolete!\n", minor);
 		drvidx = isdn_minor2drv(minor);
 		if (drvidx < 0)
@@ -1739,7 +1720,7 @@ isdn_close(struct inode *ino, struct file *filep)
 		goto out;
 	}
 	isdn_unlock_drivers();
-	if (minor < ISDN_MINOR_CTRL)
+	if (minor <= ISDN_MINOR_BMAX)
 		goto out;
 	if (minor <= ISDN_MINOR_CTRLMAX) {
 		if (dev->profd == current)
@@ -1869,7 +1850,7 @@ isdn_free_channel(int di, int ch, int usage)
 			dev->v110[i] = NULL;
 // 20.10.99 JIM, try to reinitialize v110 !
 			isdn_info_update();
-			isdn_free_queue(&dev->drv[di]->rpqueue[ch]);
+			skb_queue_purge(&dev->drv[di]->rpqueue[ch]);
 		}
 	restore_flags(flags);
 }
@@ -2032,7 +2013,7 @@ isdn_add_channels(driver *d, int drvidx, int n, int adding)
 
 	if ((adding) && (d->rpqueue)) {
 		for (j = 0; j < d->channels; j++)
-			isdn_free_queue(&d->rpqueue[j]);
+			skb_queue_purge(&d->rpqueue[j]);
 		kfree(d->rpqueue);
 	}
 	if (!(d->rpqueue =
@@ -2149,7 +2130,7 @@ int DIVERT_REG_NAME(isdn_divert_if *i_div)
 
 EXPORT_SYMBOL(DIVERT_REG_NAME);
 
-#endif CONFIG_ISDN_DIVERSION
+#endif /* CONFIG_ISDN_DIVERSION */
 
 
 EXPORT_SYMBOL(register_isdn);

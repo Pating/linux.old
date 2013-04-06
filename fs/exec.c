@@ -31,6 +31,8 @@
 #include <linux/fcntl.h>
 #include <linux/smp_lock.h>
 #include <linux/init.h>
+#define __NO_VERSION__
+#include <linux/module.h>
 
 #include <asm/uaccess.h>
 #include <asm/pgtable.h>
@@ -168,30 +170,40 @@ out:
  */
 asmlinkage int sys_uselib(const char * library)
 {
-	int fd, retval;
+	int retval;
 	struct file * file;
 	struct linux_binfmt * fmt;
+	char * tmp = getname(library);
 
 	lock_kernel();
-	fd = sys_open(library, 0, 0);
-	retval = fd;
-	if (fd < 0)
+	retval = PTR_ERR(tmp);
+	if (IS_ERR(tmp))
 		goto out;
-	file = fget(fd);
+
+	file = filp_open(tmp, 0, 0);
+	putname(tmp);
+
+	retval = PTR_ERR(file);
+	if (IS_ERR(file))
+		goto out;
+
+	retval = -EINVAL;
+	if (!S_ISREG(file->f_dentry->d_inode->i_mode))
+		goto out_fput;
+
 	retval = -ENOEXEC;
-	if (file && file->f_dentry && file->f_op && file->f_op->read) {
+	if (file->f_op && file->f_op->read) {
 		for (fmt = formats ; fmt ; fmt = fmt->next) {
-			int (*fn)(int) = fmt->load_shlib;
+			int (*fn)(struct file *) = fmt->load_shlib;
 			if (!fn)
 				continue;
-			/* N.B. Should use file instead of fd */
-			retval = fn(fd);
+			retval = fn(file);
 			if (retval != -ENOEXEC)
 				break;
 		}
 	}
+out_fput:
 	fput(file);
-	sys_close(fd);
 out:
 	unlock_kernel();
   	return retval;
@@ -520,6 +532,8 @@ int flush_old_exec(struct linux_binprm * bprm)
 	bprm->dumpable = 0;
 	if (current->euid == current->uid && current->egid == current->gid)
 		bprm->dumpable = !bprm->priv_change;
+	else
+		current->dumpable = 0;
 	name = bprm->filename;
 	for (i=0; (ch = *(name++)) != '\0';) {
 		if (ch == '/')
@@ -533,8 +547,10 @@ int flush_old_exec(struct linux_binprm * bprm)
 	flush_thread();
 
 	if (bprm->e_uid != current->euid || bprm->e_gid != current->egid ||
-	    permission(bprm->dentry->d_inode, MAY_READ))
+	    permission(bprm->dentry->d_inode, MAY_READ)) {
 		bprm->dumpable = 0;
+		current->dumpable = 0;
+	}
 
 	current->self_exec_id++;
 
@@ -552,12 +568,11 @@ flush_failed:
 }
 
 /*
- * We mustn't allow tracing of suid binaries, unless
- * the tracer has the capability to trace anything..
+ * We mustn't allow tracing of suid binaries, no matter what.
  */
 static inline int must_not_trace_exec(struct task_struct * p)
 {
-	return (p->flags & PF_PTRACED) && !cap_raised(p->p_pptr->cap_effective, CAP_SYS_PTRACE);
+	return (p->ptrace & PT_PTRACED);
 }
 
 /* 
@@ -649,6 +664,7 @@ int prepare_binprm(struct linux_binprm *bprm)
 
 	bprm->priv_change = id_change || cap_raised;
 	if (bprm->priv_change) {
+		current->dumpable = 0;
 		/* We can't suid-execute if we're sharing parts of the executable */
 		/* or if we're being traced (or if suid execs are not allowed)    */
 		/* (current->mm->count > 1 is ok, as we'll get a new mm anyway)   */
@@ -705,8 +721,10 @@ void compute_creds(struct linux_binprm *bprm)
         current->suid = current->euid = current->fsuid = bprm->e_uid;
         current->sgid = current->egid = current->fsgid = bprm->e_gid;
         if (current->euid != current->uid || current->egid != current->gid ||
-	    !cap_issubset(new_permitted, current->cap_permitted))
-                bprm->dumpable = 0;
+	    !cap_issubset(new_permitted, current->cap_permitted)) {
+		bprm->dumpable = 0;
+		current->dumpable = 0;
+	}
 
         current->keep_capabilities = 0;
 }
@@ -887,4 +905,67 @@ int do_execve(char * filename, char ** argv, char ** envp, struct pt_regs * regs
 	current->dumpable = was_dumpable;
 
 	return retval;
+}
+
+void set_binfmt(struct linux_binfmt *new)
+{
+	struct linux_binfmt *old = current->binfmt;
+	if (new && new->module)
+		__MOD_INC_USE_COUNT(new->module);
+	current->binfmt = new;
+	if (old && old->module)
+		__MOD_DEC_USE_COUNT(old->module);
+}
+
+int do_coredump(long signr, struct pt_regs * regs)
+{
+	struct linux_binfmt *binfmt;
+	char corename[6+sizeof(current->comm)];
+	struct file * file;
+	struct inode * inode;
+
+	lock_kernel();
+	binfmt = current->binfmt;
+	if (!binfmt || !binfmt->core_dump)
+		goto fail;
+	if (!current->dumpable || atomic_read(&current->mm->count) != 1)
+		goto fail;
+	if (current->rlim[RLIMIT_CORE].rlim_cur < binfmt->min_coredump)
+		goto fail;
+	current->dumpable = 0;
+
+	memcpy(corename,"core.", 5);
+#if 0
+	memcpy(corename+5,current->comm,sizeof(current->comm));
+#else
+	corename[4] = '\0';
+#endif
+	file = filp_open(corename, O_CREAT | 2 | O_NOFOLLOW, 0600);
+	if (IS_ERR(file))
+		goto fail;
+	inode = file->f_dentry->d_inode;
+	if (inode->i_nlink > 1)
+		goto close_fail;	/* multiple links - don't dump */
+	if (list_empty(&file->f_dentry->d_hash))
+		goto close_fail;
+
+	if (!S_ISREG(inode->i_mode))
+		goto close_fail;
+	if (!file->f_op)
+		goto close_fail;
+	if (!file->f_op->write)
+		goto close_fail;
+	if (do_truncate(file->f_dentry, 0) != 0)
+		goto close_fail;
+	if (!binfmt->core_dump(signr, regs, file))
+		goto close_fail;
+	filp_close(file, NULL);
+	unlock_kernel();
+	return 1;
+
+close_fail:
+	filp_close(file, NULL);
+fail:
+	unlock_kernel();
+	return 0;
 }

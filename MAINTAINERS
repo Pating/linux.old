@@ -199,9 +199,7 @@ W:	ftp.compaq.com/pub/products/drivers/linux
 S:      Supported
 
 COMPUTONE INTELLIPORT MULTIPORT CARD
-P:     Doug McNash
 P:     Michael H. Warfield
-M:     Doug McNash <dmcnash@computone.com>
 M:     Michael H. Warfield <mhw@wittsend.com>
 W:     http://www.computone.com/
 W:     http://www.wittsend.com/computone.html
@@ -211,7 +209,8 @@ S:     Supported
 CONFIGURE, MENUCONFIG, XCONFIG
 P:	Michael Elizabeth Chastain
 M:	mec@shout.net
-L:	linux-kbuild@torque.net
+L:	kbuild-devel@lists.sourceforge.net
+W:	http://kbuild.sourceforge.net
 S:	Maintained
 
 CONFIGURE.HELP
@@ -242,8 +241,8 @@ W:	http://www.cyclades.com/
 S:	Supported
 
 CYCLADES PC300 DRIVER
-P:	Ivan Passos
-M:	ivan@cyclades.com
+P:	Daniela Squassoni
+M:	daniela@cyclades.com
 W:	http://www.cyclades.com/
 S:	Supported
 
@@ -532,17 +531,13 @@ L:      linux-irda@list.uit.no
 W:      http://www.cs.uit.no/linux-irda/
 S:      Maintained
 
-ISDN SUBSYSTEM (general)
-P:	Fritz Elfert
-M:	fritz@isdn4linux.de
-L:	isdn4linux@listserv.isdn4linux.de
-W:	www.isdn4linux.de
-S:	Maintained
-
-ISDN SUBSYSTEM (HiSax)
+ISDN SUBSYSTEM
 P:	Karsten Keil
-M:	keil@isdn4linux.de
+M:	kkeil@suse.de
+P:	Kai Germaschewski
+M:	kai.germaschewski@gmx.de
 L:	isdn4linux@listserv.isdn4linux.de
+W:	http://www.isdn4linux.de
 S:	Maintained
 
 ISDN SUBSYSTEM (Eicon active card driver)
@@ -764,13 +759,13 @@ PARALLEL PORT SUPPORT
 P:	Phil Blundell
 M:	Philip.Blundell@pobox.com
 P:	Tim Waugh
-M:	tim@cyberelk.demon.co.uk
+M:	tim@cyberelk.net
 P:	David Campbell
 M:	campbell@torque.net
 P:	Andrea Arcangeli
 M:	andrea@e-mind.com
 L:	linux-parport@torque.net
-W:	http://www.cyberelk.demon.co.uk/parport.html
+W:	http://people.redhat.com/twaugh/parport/
 S:	Maintained
 
 PARIDE DRIVERS FOR PARALLEL PORT IDE DEVICES
@@ -1173,6 +1168,13 @@ M:	jreuter@yaina.de
 W:	http://yaina.de/jreuter
 W:	http://www.qsl.net/dl1bke/
 L:	linux-hams@vger.kernel.org
+S:	Maintained
+
+ZF MACHZ WATCHDOG
+P:	Fernando Fuganti
+M:	fuganti@conectiva.com.br
+M:	fuganti@netbank.com.br
+W:	http://cvs.conectiva.com.br/drivers/ZFL-watchdog/
 S:	Maintained
 
 THE REST

@@ -301,6 +301,7 @@ static void *setup_frame_common(int sig, struct k_sigaction *ka,
 		/* Set up registers for signal handler */
 		regs->gprs[15] = (addr_t)frame;
 		regs->psw.addr = FIX_PSW(ka->sa.sa_handler);
+		regs->psw.mask = _USER_PSW_MASK;
 	}
 	/* Set up to return from userspace.  If provided, use a stub
 	   already in userspace.  */
@@ -461,7 +462,7 @@ int do_signal(struct pt_regs *regs, sigset_t *oldset)
 		if (!signr)
 			break;
 
-		if ((current->flags & PF_PTRACED) && signr != SIGKILL) {
+		if ((current->ptrace & PT_PTRACED) && signr != SIGKILL) {
 			/* Let the debugger run.  */
 			current->exit_code = signr;
 			current->state = TASK_STOPPED;
@@ -529,12 +530,8 @@ int do_signal(struct pt_regs *regs, sigset_t *oldset)
 
 			case SIGQUIT: case SIGILL: case SIGTRAP:
 			case SIGABRT: case SIGFPE: case SIGSEGV:
-				lock_kernel();
-				if (current->binfmt
-				    && current->binfmt->core_dump
-				    && current->binfmt->core_dump(signr, regs))
+				if (do_coredump(signr, regs))
 					exit_code |= 0x80;
-				unlock_kernel();
 				/* FALLTHRU */
 
 			default:

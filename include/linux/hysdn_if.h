@@ -1,4 +1,4 @@
-/* $Id: hysdn_if.h,v 1.1 2000/02/10 19:47:50 werner Exp $
+/* $Id: hysdn_if.h,v 1.1.8.2 2001/05/17 20:41:52 kai Exp $
 
  * Linux driver for HYSDN cards, ioctl definitions shared by hynetmgr and driver.
  * written by Werner Cornelius (werner@titro.de) for Hypercope GmbH
@@ -19,18 +19,12 @@
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  *
- * $Log: hysdn_if.h,v $
- * Revision 1.1  2000/02/10 19:47:50  werner
- *
- * Initial release
- *
- *
  */
 
 /****************/
 /* error values */
 /****************/
-#define ERR_NONE             0 /* no error occured */
+#define ERR_NONE             0 /* no error occurred */
 #define ERR_ALREADY_BOOT  1000 /* we are already booting */
 #define EPOF_BAD_MAGIC    1001 /* bad magic in POF header */
 #define ERR_BOARD_DPRAM   1002 /* board DPRAM failed */

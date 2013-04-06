@@ -1,4 +1,4 @@
-/* $Id: envctrl.c,v 1.9.2.2 2000/11/08 09:43:04 davem Exp $
+/* $Id: envctrl.c,v 1.9.2.3 2001/06/19 16:49:44 davem Exp $
  * envctrl.c: Temperature and Fan monitoring on Machines providing it.
  *
  * Copyright (C) 1998  Eddie C. Dost  (ecd@skynet.be)
@@ -239,7 +239,7 @@ static void envctrl_i2c_test_bb(void)
 		printk(KERN_INFO "envctrl: Busy bit will not clear.\n");
 }
 
-/* Function Description: Send the adress for a read access.
+/* Function Description: Send the address for a read access.
  * Return : 0 if not acknowledged, otherwise acknowledged.
  */
 static int envctrl_i2c_read_addr(unsigned char addr)
@@ -265,7 +265,7 @@ static int envctrl_i2c_read_addr(unsigned char addr)
 	}
 }
 
-/* Function Description: Send the adress for write mode.  
+/* Function Description: Send the address for write mode.  
  * Return : None.
  */
 static void envctrl_i2c_write_addr(unsigned char addr)

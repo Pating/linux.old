@@ -104,6 +104,7 @@
    		flags that aren't... Restarting the DPLL does not help
    		either, it resynchronizes too slow and the first received
    		frame gets lost.
+   2001-10-05   Set skb to NULL when it is freed in scc_spint. (PE1RXQ)
 
    Thanks to all who contributed to this driver with ideas and bug
    reports!
@@ -222,7 +223,7 @@ static struct net_device_stats * scc_net_get_stats(struct device *dev);
 
 static unsigned char *SCC_DriverName = "scc";
 
-static struct irqflags { unsigned char used : 1; } Ivec[16];
+static struct irqflags { unsigned char used : 1; } Ivec[NR_IRQS];
 	
 static struct scc_channel SCC_Info[2 * SCC_MAXCHIPS];	/* information per channel */
 
@@ -618,6 +619,7 @@ static inline void scc_spint(struct scc_channel *scc)
 		if (skb != NULL) 
 			kfree_skb(skb);
 		scc->rx_buff = NULL;
+		skb=NULL;                        /* prevent reuse of skb */
 	}
 
 	if(status & END_FR && skb != NULL)	/* end of frame */
@@ -1547,7 +1549,7 @@ static void z8530_init(void)
 	printk(KERN_INFO "Init Z8530 driver: %u channels, IRQ", Nchips*2);
 	
 	flag=" ";
-	for (k = 0; k < 16; k++)
+	for (k = 0; k < NR_IRQS; k++)
 		if (Ivec[k].used) 
 		{
 			printk("%s%d", flag, k);
@@ -1873,6 +1875,9 @@ static int scc_net_ioctl(struct device *dev, struct ifreq *ifr, int cmd)
 
 			if (hwcfg.irq == 2) hwcfg.irq = 9;
 
+			if (hwcfg.irq <0 || hwcfg.irq > NR_IRQS)
+				return -EINVAL;
+				
 			if (!Ivec[hwcfg.irq].used && hwcfg.irq)
 			{
 				if (request_irq(hwcfg.irq, scc_isr, SA_INTERRUPT, "AX.25 SCC", NULL))
@@ -2323,7 +2328,7 @@ void cleanup_module(void)
 		}
 	}
 	
-	for (k=0; k < 16 ; k++)
+	for (k=0; k < NR_IRQS ; k++)
 		if (Ivec[k].used) free_irq(k, NULL);
 		
 	restore_flags(flags);

@@ -48,7 +48,7 @@ enum {
 typedef struct binfmt_entry {
 	struct binfmt_entry *next;
 	long id;
-	int flags;			/* type, status, etc. */
+	long flags;			/* type, status, etc. */
 	int offset;			/* offset of magic */
 	int size;			/* size of magic/mask */
 	char *magic;			/* magic or filename extension */
@@ -65,11 +65,8 @@ static void entry_proc_cleanup(Node *e);
 static int entry_proc_setup(Node *e);
 
 static struct linux_binfmt misc_format = {
-#ifndef MODULE
-	NULL, 0, load_misc_binary, NULL, NULL
-#else
-	NULL, &__this_module, load_misc_binary, NULL, NULL
-#endif
+	module:		THIS_MODULE,
+	load_binary:	load_misc_binary,
 };
 
 static struct proc_dir_entry *bm_dir = NULL;
@@ -190,7 +187,6 @@ static int load_misc_binary(struct linux_binprm *bprm, struct pt_regs *regs)
 	char *iname_addr = iname;
 	int retval;
 
-	MOD_INC_USE_COUNT;
 	retval = -ENOEXEC;
 	if (!enabled)
 		goto _ret;
@@ -230,7 +226,6 @@ static int load_misc_binary(struct linux_binprm *bprm, struct pt_regs *regs)
 	if (retval >= 0)
 		retval = search_binary_handler(bprm, regs);
 _ret:
-	MOD_DEC_USE_COUNT;
 	return retval;
 }
 

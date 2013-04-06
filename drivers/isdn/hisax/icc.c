@@ -1,4 +1,4 @@
-// $Id: icc.c,v 1.5 2000/11/24 17:05:37 kai Exp $
+// $Id: icc.c,v 1.5.6.3 2001/06/09 15:14:17 kai Exp $
 //-----------------------------------------------------------------------------
 //
 // ICC specific routines
@@ -7,10 +7,10 @@
 //              www.traverse.com.au
 //
 // 1999.6.25 Initial implementation of routines for Siemens ISDN
-// Communication Controler PEB 2070 based on the ISAC routines
+// Communication Controller PEB 2070 based on the ISAC routines
 // written by Karsten Keil.
 //
-// This file is (c) under GNU PUBLIC LICENSE
+// This file is (c) under GNU General Public License
 //
 //-----------------------------------------------------------------------------
 
@@ -551,8 +551,8 @@ ICC_l1hw(struct PStack *st, int pr, void *arg)
 			}
 			break;
 		case (HW_DEACTIVATE | RESPONSE):
-			discard_queue(&cs->rq);
-			discard_queue(&cs->sq);
+			skb_queue_purge(&cs->rq);
+			skb_queue_purge(&cs->sq);
 			if (cs->tx_skb) {
 				dev_kfree_skb(cs->tx_skb);
 				cs->tx_skb = NULL;

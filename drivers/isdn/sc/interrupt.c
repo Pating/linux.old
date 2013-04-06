@@ -1,5 +1,5 @@
 /*
- *  $Id: interrupt.c,v 1.4 1998/01/31 22:10:52 keil Exp $
+ *  $Id: interrupt.c,v 1.4.8.2 2001/04/08 17:51:43 kai Exp $
  *  Copyright (C) 1996  SpellCaster Telecommunications Inc.
  *
  *  This program is free software; you can redistribute it and/or modify
@@ -34,7 +34,6 @@
 
 extern int indicate_status(int, int, ulong, char *);
 extern void check_phystat(unsigned long);
-extern void dump_messages(int);
 extern int receivemessage(int, RspMessage *);
 extern int sendmessage(int, unsigned int, unsigned int, unsigned int,
         unsigned int, unsigned int, unsigned int, unsigned int *);
@@ -141,7 +140,7 @@ void interrupt_handler(int interrupt, void * cardptr, struct pt_regs *regs ) {
 			}
 			else if(callid>=0x0000 && callid<=0x7FFF)
 			{
-				pr_debug("%s: Got Incomming Call\n", adapter[card]->devicename);	
+				pr_debug("%s: Got Incoming Call\n", adapter[card]->devicename);	
 				strcpy(setup.phone,&(rcvmsg.msg_data.byte_array[4]));
 				strcpy(setup.eazmsn,adapter[card]->channel[rcvmsg.phy_link_no-1].dn);
 				setup.si1 = 7;

@@ -1,4 +1,4 @@
-/* $Id: hfc_sx.c,v 1.9 2000/11/24 17:05:37 kai Exp $
+/* $Id: hfc_sx.c,v 1.9.6.2 2001/07/18 16:25:12 kai Exp $
 
  * hfc_sx.c     low level driver for CCD´s hfc-s+/sp based cards
  *
@@ -32,7 +32,7 @@
 
 extern const char *CardType[];
 
-static const char *hfcsx_revision = "$Revision: 1.9 $";
+static const char *hfcsx_revision = "$Revision: 1.9.6.2 $";
 
 /***************************************/
 /* IRQ-table for CCDs demo board       */
@@ -1288,8 +1288,8 @@ close_hfcsx(struct BCState *bcs)
 {
 	mode_hfcsx(bcs, 0, bcs->channel);
 	if (test_and_clear_bit(BC_FLG_INIT, &bcs->Flag)) {
-		discard_queue(&bcs->rqueue);
-		discard_queue(&bcs->squeue);
+		skb_queue_purge(&bcs->rqueue);
+		skb_queue_purge(&bcs->squeue);
 		if (bcs->tx_skb) {
 			dev_kfree_skb(bcs->tx_skb);
 			bcs->tx_skb = NULL;
@@ -1492,7 +1492,7 @@ setup_hfcsx(struct IsdnCard *card)
 	        if ((!cs->hw.hfcsx.base) || 
 		    check_region((cs->hw.hfcsx.base), 2)) {
 		  printk(KERN_WARNING
-			 "HiSax: HFC-SX io-base 0x%x already in use\n",
+			 "HiSax: HFC-SX io-base %#lx already in use\n",
 		          cs->hw.hfcsx.base);
 		  return(0);
 		} else {

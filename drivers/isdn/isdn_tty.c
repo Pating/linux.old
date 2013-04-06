@@ -1,4 +1,4 @@
-/* $Id: isdn_tty.c,v 1.94 2000/11/25 17:00:59 kai Exp $
+/* $Id: isdn_tty.c,v 1.94.6.5 2001/08/14 14:12:18 kai Exp $
 
  * Linux ISDN subsystem, tty functions and AT-command emulator (linklevel).
  *
@@ -66,7 +66,7 @@ static int bit2si[8] =
 static int si2bit[8] =
 {4, 1, 4, 4, 4, 4, 4, 4};
 
-char *isdn_tty_revision = "$Revision: 1.94 $";
+char *isdn_tty_revision = "$Revision: 1.94.6.5 $";
 
 
 /* isdn_tty_try_read() is called from within isdn_tty_rcv_skb()
@@ -307,18 +307,13 @@ isdn_tty_rcv_skb(int i, int di, int channel, struct sk_buff *skb)
 void
 isdn_tty_cleanup_xmit(modem_info * info)
 {
-	struct sk_buff *skb;
 	unsigned long flags;
 
 	save_flags(flags);
 	cli();
-	if (skb_queue_len(&info->xmit_queue))
-		while ((skb = skb_dequeue(&info->xmit_queue)))
-			kfree_skb(skb);
+	skb_queue_purge(&info->xmit_queue);
 #ifdef CONFIG_ISDN_AUDIO
-	if (skb_queue_len(&info->dtmf_queue))
-		while ((skb = skb_dequeue(&info->dtmf_queue)))
-			kfree_skb(skb);
+	skb_queue_purge(&info->dtmf_queue);
 #endif
 	restore_flags(flags);
 }
@@ -1187,8 +1182,6 @@ isdn_tty_write(struct tty_struct *tty, int from_user, const u_char * buf, int co
 
 	if (isdn_tty_paranoia_check(info, tty->device, "isdn_tty_write"))
 		return 0;
-	if (!tty)
-		return 0;
 	if (from_user)
 		down(&info->write_sem);
 	/* See isdn_tty_senddown() */
@@ -1425,8 +1418,7 @@ isdn_tty_get_lsr_info(modem_info * info, uint * value)
 	status = info->lsr;
 	restore_flags(flags);
 	result = ((status & UART_LSR_TEMT) ? TIOCSER_TEMT : 0);
-	put_user(result, (uint *) value);
-	return 0;
+	return put_user(result, (uint *) value);
 }
 
 
@@ -1449,8 +1441,7 @@ isdn_tty_get_modem_info(modem_info * info, uint * value)
 	    | ((status & UART_MSR_RI) ? TIOCM_RNG : 0)
 	    | ((status & UART_MSR_DSR) ? TIOCM_DSR : 0)
 	    | ((status & UART_MSR_CTS) ? TIOCM_CTS : 0);
-	put_user(result, (uint *) value);
-	return 0;
+	return put_user(result, (uint *) value);
 }
 
 static int
@@ -1459,7 +1450,8 @@ isdn_tty_set_modem_info(modem_info * info, uint cmd, uint * value)
 	uint arg;
 	int pre_dtr;
 
-	get_user(arg, (uint *) value);
+	if (get_user(arg, (uint *) value))
+		return -EFAULT;
 	switch (cmd) {
 		case TIOCMBIS:
 #ifdef ISDN_DEBUG_MODEM_IOCTL
@@ -1527,7 +1519,6 @@ isdn_tty_ioctl(struct tty_struct *tty, struct file *file,
 	       uint cmd, ulong arg)
 {
 	modem_info *info = (modem_info *) tty->driver_data;
-	int error;
 	int retval;
 
 	if (isdn_tty_paranoia_check(info, tty->device, "isdn_tty_ioctl"))
@@ -1557,19 +1548,13 @@ isdn_tty_ioctl(struct tty_struct *tty, struct file *file,
 #ifdef ISDN_DEBUG_MODEM_IOCTL
 			printk(KERN_DEBUG "ttyI%d ioctl TIOCGSOFTCAR\n", info->line);
 #endif
-			error = verify_area(VERIFY_WRITE, (void *) arg, sizeof(long));
-			if (error)
-				return error;
-			put_user(C_CLOCAL(tty) ? 1 : 0, (ulong *) arg);
-			return 0;
+			return put_user(C_CLOCAL(tty) ? 1 : 0, (ulong *) arg);
 		case TIOCSSOFTCAR:
 #ifdef ISDN_DEBUG_MODEM_IOCTL
 			printk(KERN_DEBUG "ttyI%d ioctl TIOCSSOFTCAR\n", info->line);
 #endif
-			error = verify_area(VERIFY_READ, (void *) arg, sizeof(long));
-			if (error)
-				return error;
-			get_user(arg, (ulong *) arg);
+			if (get_user(arg, (ulong *) arg))
+				return -EFAULT;
 			tty->termios->c_cflag =
 			    ((tty->termios->c_cflag & ~CLOCAL) |
 			     (arg ? CLOCAL : 0));
@@ -1578,26 +1563,16 @@ isdn_tty_ioctl(struct tty_struct *tty, struct file *file,
 #ifdef ISDN_DEBUG_MODEM_IOCTL
 			printk(KERN_DEBUG "ttyI%d ioctl TIOCMGET\n", info->line);
 #endif
-			error = verify_area(VERIFY_WRITE, (void *) arg, sizeof(uint));
-			if (error)
-				return error;
 			return isdn_tty_get_modem_info(info, (uint *) arg);
 		case TIOCMBIS:
 		case TIOCMBIC:
 		case TIOCMSET:
-			error = verify_area(VERIFY_READ, (void *) arg, sizeof(uint));
-			if (error)
-				return error;
 			return isdn_tty_set_modem_info(info, cmd, (uint *) arg);
 		case TIOCSERGETLSR:	/* Get line status register */
 #ifdef ISDN_DEBUG_MODEM_IOCTL
 			printk(KERN_DEBUG "ttyI%d ioctl TIOCSERGETLSR\n", info->line);
 #endif
-			error = verify_area(VERIFY_WRITE, (void *) arg, sizeof(uint));
-			if (error)
-				return error;
-			else
-				return isdn_tty_get_lsr_info(info, (uint *) arg);
+			return isdn_tty_get_lsr_info(info, (uint *) arg);
 		default:
 #ifdef ISDN_DEBUG_MODEM_IOCTL
 			printk(KERN_DEBUG "UNKNOWN ioctl 0x%08x on ttyi%d\n", cmd, info->line);
@@ -2734,6 +2709,10 @@ isdn_tty_modem_result(int code, modem_info * info)
 			    if (!(m->mdmreg[REG_CIDONCE] & BIT_CIDONCE)) {
 				    isdn_tty_at_cout("\r\nCALLER NUMBER: ", info);
 				    isdn_tty_at_cout(dev->num[info->drv_index], info);
+				    if (m->mdmreg[REG_CDN] & BIT_CDN) {
+					    isdn_tty_at_cout("\r\nCALLED NUMBER: ", info);
+					    isdn_tty_at_cout(info->emu.cpn, info);
+				    }
 			    }
 			}
 			isdn_tty_at_cout("\r\n", info);
@@ -2759,6 +2738,10 @@ isdn_tty_modem_result(int code, modem_info * info)
 						isdn_tty_at_cout("\r\n", info);
 						isdn_tty_at_cout("CALLER NUMBER: ", info);
 						isdn_tty_at_cout(dev->num[info->drv_index], info);
+						if (m->mdmreg[REG_CDN] & BIT_CDN) {
+							isdn_tty_at_cout("\r\nCALLED NUMBER: ", info);
+							isdn_tty_at_cout(info->emu.cpn, info);
+						}
 					}
 					break;
 				case RESULT_NO_CARRIER:
@@ -3773,7 +3756,7 @@ isdn_tty_parse_at(modem_info * info)
                                                 sprintf(ds, "\r\n%d", info->emu.charge);
                                                 isdn_tty_at_cout(ds, info);
                                                 break;
-					default:
+					default:;
 				}
 				break;
 #ifdef DUMMY_HAYES_AT

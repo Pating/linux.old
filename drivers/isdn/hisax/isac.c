@@ -1,10 +1,10 @@
-/* $Id: isac.c,v 1.28 2000/11/24 17:05:37 kai Exp $
+/* $Id: isac.c,v 1.28.6.2 2001/06/09 15:14:17 kai Exp $
  *
  * isac.c   ISAC specific routines
  *
  * Author       Karsten Keil (keil@isdn4linux.de)
  *
- *		This file is (c) under GNU PUBLIC LICENSE
+ *		This file is (c) under GNU General Public License
  *		For changes and modifications please read
  *		../../../Documentation/isdn/HiSax.cert
  */
@@ -445,7 +445,7 @@ isac_interrupt(struct IsdnCardState *cs, u_char val)
 				if (cs->debug & L1_DEB_MONITOR)
 					debugl1(cs, "ISAC %02x -> MOX1", cs->dc.isac.mon_tx[cs->dc.isac.mon_txp -1]);
 			}
-		      AfterMOX1:
+		      AfterMOX1:;
 #endif
 		}
 	}
@@ -549,8 +549,8 @@ ISAC_l1hw(struct PStack *st, int pr, void *arg)
 			}
 			break;
 		case (HW_DEACTIVATE | RESPONSE):
-			discard_queue(&cs->rq);
-			discard_queue(&cs->sq);
+			skb_queue_purge(&cs->rq);
+			skb_queue_purge(&cs->sq);
 			if (cs->tx_skb) {
 				dev_kfree_skb(cs->tx_skb);
 				cs->tx_skb = NULL;

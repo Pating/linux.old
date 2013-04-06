@@ -420,6 +420,12 @@ S: Las Cuevas 2385 - Bo Guemes
 S: Las Heras, Mendoza CP 5539
 S: Argentina
 
+N: Steven P. Cole
+E: scole@lanl.gov
+E: elenstev@mesatop.com
+D: Configure.help and ver_linux additions/fixes.
+S: Los Alamos, New Mexico
+
 N: Hamish Coleman
 E: hamish@zot.apana.org.au
 D: SEEQ8005 network driver
@@ -702,6 +708,15 @@ D: AdvanSys SCSI driver
 S: 1150 Ringwood Court
 S: San Jose, California 95131
 S: USA
+
+N: Fernando Fuganti
+E: fuganti@conectiva.com.br
+E: fuganti@netbank.com.br
+D: random kernel hacker, ZF MachZ Watchdog driver
+S: Conectiva S.A.
+S: R. Tocantins, 89 - Cristo Rei
+S: 80050-430 - Curitiba - Paraná
+S: Brazil
 
 N: Kumar Gala
 E: kumar.gala@motorola.com
@@ -1051,16 +1066,16 @@ S: USA
 
 N: Dave Jones
 E: davej@suse.de
-E: dave@powertweak.com
-E: djones2@glam.ac.uk
-W: http://powertweak.sourceforge.net
-D: Userspace PCI bridge tuning (Powertweak).
-D: Centaur/IDT Winchip/Winchip 2 tweaks.
-D: Misc clean ups and other random hacking.
-S: 28 Laura Street,
-S: Treforest, Pontypridd,
-S: Mid Glamorgan, CF37 1NW,
-S: Wales, United Kingdom
+W: http://www.suse.de/~davej
+D: Moved PCI bridge tuning to userspace (Powertweak).
+D: Various x86 (& clones) setup code hacking.
+D: Various Janitorial hacks. (kernel-janitor.sourceforge.net)
+S: c/o SuSE Linux UK Ltd
+S: The Kinetic Centre
+S: Theobald Street
+S: Borehamwood
+S: Herts, WD6 4PJ
+S: United Kingdom
 
 N: Bernhard Kaindl
 E: bkaindl@netway.at
@@ -1833,14 +1848,15 @@ S: 75019 Paris
 S: France
 
 N: Rik van Riel
-E: riel@nl.linux.org
-W: http://www.nl.linux.org/~riel/
+E: riel@conectiva.com.br
+W: http://www.surriel.com/
 D: Linux-MM site, Documentation/sysctl/*, swap/mm readaround
 D: clustering contributor, kswapd fixes, random kernel hacker,
-D: nl.linux.org maintainer, minor scheduler additions
-S: IJsselstraat 23a
-S: 9725 GA  Groningen
-S: The Netherlands
+D: nl.linux.org administrator, minor scheduler additions
+S: Conectiva S.A.
+S: R. Tocantins, 89 - Cristo Rei
+S: 80050-430 - Curitiba - Paraná
+S: Brazil
 
 N: William E. Roadcap
 E: roadcapw@cfw.com
@@ -2063,14 +2079,13 @@ S: Sunyvale, CA 94086
 S: USA
 
 N: Henrik Storner
-E: storner@image.dk
-W: http://www.image.dk/~storner/
+E: henrik@storner.dk
 W: http://www.sslug.dk/
 D: Configure script: Invented tristate for module-configuration
 D: vfat/msdos integration, kerneld docs, Linux promotion
 D: Miscellaneous bug-fixes
-S: Chr. Winthersvej 1 B, st.th.
-S: DK-1860 Frederiksberg C
+S: Raunstrupvej 13
+S: DK-2720 Vanloese
 S: Denmark
 
 N: Drew Sullivan
@@ -2299,7 +2314,7 @@ S: 1098 VA Amsterdam
 S: The Netherlands
 
 N: Tim Waugh
-E: tim@cyberelk.demon.co.uk
+E: tim@cyberelk.net
 D: Co-architect of the parallel-port sharing system
 S: 17 Curling Vale
 S: GUILDFORD
@@ -2398,8 +2413,8 @@ N: Jonathan Woithe
 E: jwoithe@physics.adelaide.edu.au
 W: http://www.physics.adelaide.edu.au/~jwoithe
 D: ALS-007 sound card extensions to Sound Blaster driver
-S: 4/36 Trevelyan St
-S: Wayville SA 5034
+S: 20 Jordan St
+S: Valley View, SA 5093
 S: Australia
 
 N: Clifford Wolf

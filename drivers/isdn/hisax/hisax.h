@@ -1,8 +1,8 @@
-/* $Id: hisax.h,v 2.52.6.2 2001/02/10 14:41:22 kai Exp $
+/* $Id: hisax.h,v 2.52.6.7 2001/07/18 16:02:15 kai Exp $
  *
  *   Basic declarations, defines and prototypes
  *
- * This file is (c) under GNU PUBLIC LICENSE
+ * This file is (c) under GNU General Public License
  *
  */
 #include <linux/config.h>
@@ -125,13 +125,13 @@
   #define l3dss1_process
   #include "l3dss1.h" 
   #undef  l3dss1_process
-#endif CONFIG_HISAX_EURO
+#endif /* CONFIG_HISAX_EURO */
 
 #ifdef CONFIG_HISAX_NI1
   #define l3ni1_process
   #include "l3ni1.h" 
   #undef  l3ni1_process
-#endif CONFIG_HISAX_NI1
+#endif /* CONFIG_HISAX_NI1 */
 
 #define MAX_DFRAME_LEN	260
 #define MAX_DFRAME_LEN_L1	300
@@ -317,10 +317,10 @@ struct PStack {
 	 { u_char uuuu; /* only as dummy */
 #ifdef CONFIG_HISAX_EURO
            dss1_stk_priv dss1; /* private dss1 data */
-#endif CONFIG_HISAX_EURO              
+#endif /* CONFIG_HISAX_EURO */              
 #ifdef CONFIG_HISAX_NI1
            ni1_stk_priv ni1; /* private ni1 data */
-#endif CONFIG_HISAX_NI1              
+#endif /* CONFIG_HISAX_NI1 */             
 	 } prot;
 };
 
@@ -341,10 +341,10 @@ struct l3_process {
 	 { u_char uuuu; /* only when euro not defined, avoiding empty union */
 #ifdef CONFIG_HISAX_EURO 
            dss1_proc_priv dss1; /* private dss1 data */
-#endif CONFIG_HISAX_EURO            
+#endif /* CONFIG_HISAX_EURO */            
 #ifdef CONFIG_HISAX_NI1
            ni1_proc_priv ni1; /* private ni1 data */
-#endif CONFIG_HISAX_NI1              
+#endif /* CONFIG_HISAX_NI1 */             
 	 } prot;
 };
 
@@ -534,7 +534,7 @@ struct Channel {
 };
 
 struct elsa_hw {
-	unsigned int base;
+	unsigned long base;
 	unsigned int cfg;
 	unsigned int ctrl;
 	unsigned int ale;
@@ -596,9 +596,9 @@ struct diva_hw {
 	unsigned long cfg_reg;
 	unsigned long pci_cfg;
 	unsigned int ctrl;
-	unsigned int isac_adr;
+	unsigned long isac_adr;
 	unsigned int isac;
-	unsigned int hscx_adr;
+	unsigned long hscx_adr;
 	unsigned int hscx;
 	unsigned int status;
 	struct timer_list tl;
@@ -652,7 +652,7 @@ struct mic_hw {
 };
 
 struct njet_hw {
-	unsigned int base;
+	unsigned long base;
 	unsigned int isac;
 	unsigned int auxa;
 	unsigned char auxd;
@@ -686,11 +686,12 @@ struct hfcPCI_hw {
         unsigned char *pci_io; /* start of PCI IO memory */
         void *share_start; /* shared memory for Fifos start */
         void *fifos; /* FIFO memory */ 
+        int last_bfifo_cnt[2]; /* marker saving last b-fifo frame count */
 	struct timer_list timer;
 };
 
 struct hfcSX_hw {
-        unsigned int  base;
+        unsigned long base;
 	unsigned char cirm;
 	unsigned char ctmt;
 	unsigned char conn;
@@ -752,15 +753,15 @@ struct saphir_hw {
 };
 
 struct bkm_hw {
-	unsigned int base;
+	unsigned long base;
 	/* A4T stuff */
-	unsigned int isac_adr;
+	unsigned long isac_adr;
 	unsigned int isac_ale;
-	unsigned int jade_adr;
+	unsigned long jade_adr;
 	unsigned int jade_ale;
 	/* Scitel Quadro stuff */
-	unsigned int plx_adr;
-	unsigned int data_adr;
+	unsigned long plx_adr;
+	unsigned long data_adr;
 };	
 
 struct gazel_hw {
@@ -1273,7 +1274,7 @@ extern void Logl2Frame(struct IsdnCardState *cs, struct sk_buff *skb, char *buf,
 struct IsdnCard {
 	int typ;
 	int protocol;		/* EDSS1, 1TR6 or NI1 */
-	unsigned int para[4];
+	unsigned long para[4];
 	struct IsdnCardState *cs;
 };
 
@@ -1302,7 +1303,7 @@ u_char *findie(u_char * p, int size, u_char ie, int wanted_set);
 int getcallref(u_char * p);
 int newcallref(void);
 
-void FsmNew(struct Fsm *fsm, struct FsmNode *fnlist, int fncount);
+int FsmNew(struct Fsm *fsm, struct FsmNode *fnlist, int fncount);
 void FsmFree(struct Fsm *fsm);
 int FsmEvent(struct FsmInst *fi, int event, void *arg);
 void FsmChangeState(struct FsmInst *fi, int newstate);
@@ -1323,7 +1324,6 @@ int QuickHex(char *txt, u_char * p, int cnt);
 void LogFrame(struct IsdnCardState *cs, u_char * p, int size);
 void dlogframe(struct IsdnCardState *cs, struct sk_buff *skb, int dir);
 void iecpy(u_char * dest, u_char * iestart, int ieoffset);
-int discard_queue(struct sk_buff_head *q);
 #ifdef ISDN_CHIP_ISAC
 void setstack_isac(struct PStack *st, struct IsdnCardState *cs);
 #endif	/* ISDN_CHIP_ISAC */
@@ -1333,19 +1333,19 @@ void setstack_isac(struct PStack *st, struct IsdnCardState *cs);
 
 int ll_run(struct IsdnCardState *cs, int addfeatures);
 void ll_stop(struct IsdnCardState *cs);
-void CallcNew(void);
+int CallcNew(void);
 void CallcFree(void);
 int CallcNewChan(struct IsdnCardState *cs);
 void CallcFreeChan(struct IsdnCardState *cs);
-void Isdnl1New(void);
+int Isdnl1New(void);
 void Isdnl1Free(void);
-void Isdnl2New(void);
+int Isdnl2New(void);
 void Isdnl2Free(void);
-void Isdnl3New(void);
+int Isdnl3New(void);
 void Isdnl3Free(void);
 void init_tei(struct IsdnCardState *cs, int protocol);
 void release_tei(struct IsdnCardState *cs);
 char *HiSax_getrev(const char *revision);
-void TeiNew(void);
+int TeiNew(void);
 void TeiFree(void);
 int certification_check(int output);

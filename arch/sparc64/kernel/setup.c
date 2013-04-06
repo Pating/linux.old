@@ -1,4 +1,4 @@
-/*  $Id: setup.c,v 1.43.2.5 2000/10/02 02:05:37 anton Exp $
+/*  $Id: setup.c,v 1.43.2.7 2001/06/03 13:41:48 ecd Exp $
  *  linux/arch/sparc64/kernel/setup.c
  *
  *  Copyright (C) 1995,1996  David S. Miller (davem@caip.rutgers.edu)
@@ -65,6 +65,7 @@ struct screen_info screen_info = {
 #if CONFIG_SUN_CONSOLE
 void (*prom_palette)(int);
 #endif
+void (*prom_keyboard)(void);
 asmlinkage void sys_sync(void);	/* it's really int */
 
 static void
@@ -620,6 +621,10 @@ extern int smp_info(char *);
 extern int smp_bogo(char *);
 extern int mmu_info(char *);
 
+#ifndef __SMP__
+unsigned int up_clock_tick;
+#endif
+
 int get_cpuinfo(char *buffer)
 {
 	int cpuid=smp_processor_id();
@@ -634,7 +639,8 @@ int get_cpuinfo(char *buffer)
 	    "ncpus probed\t: %d\n"
 	    "ncpus active\t: %d\n"
 #ifndef __SMP__
-            "BogoMips\t: %lu.%02lu\n"
+            "Cpu0Bogo\t: %lu.%02lu\n"
+	    "Cpu0ClkTck\t: %016lx\n"
 #endif
 	    ,
             sparc_cpu_type[cpuid],
@@ -642,7 +648,8 @@ int get_cpuinfo(char *buffer)
             prom_rev, prom_prev >> 16, (prom_prev >> 8) & 0xff, prom_prev & 0xff,
 	    linux_num_cpus, smp_num_cpus
 #ifndef __SMP__
-            , loops_per_jiffy/(500000/HZ), (loops_per_jiffy/(5000/HZ)) % 100
+	    , loops_per_jiffy/(500000/HZ), (loops_per_jiffy/(5000/HZ)) % 100,
+	    (unsigned long) up_clock_tick
 #endif
 	    );
 #ifdef __SMP__

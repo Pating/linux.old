@@ -1,8 +1,8 @@
-/* $Id: elsa_ser.c,v 2.10 2000/11/19 17:02:47 kai Exp $
+/* $Id: elsa_ser.c,v 2.10.6.2 2001/06/09 15:14:17 kai Exp $
  *
  * stuff for the serial modem on ELSA cards
  *
- * This file is (c) under GNU PUBLIC LICENSE
+ * This file is (c) under GNU General Public License
  *
  */
 #include <linux/config.h>
@@ -439,8 +439,6 @@ extern void hscx_l2l1(struct PStack *st, int pr, void *arg);
 void
 close_elsastate(struct BCState *bcs)
 {
-	struct sk_buff *skb;
-
 	modehscx(bcs, 0, bcs->channel);
 	if (test_and_clear_bit(BC_FLG_INIT, &bcs->Flag)) {
 		if (bcs->hw.hscx.rcvbuf) {
@@ -448,12 +446,8 @@ close_elsastate(struct BCState *bcs)
 				kfree(bcs->hw.hscx.rcvbuf);
 			bcs->hw.hscx.rcvbuf = NULL;
 		}
-		while ((skb = skb_dequeue(&bcs->rqueue))) {
-			dev_kfree_skb(skb);
-		}
-		while ((skb = skb_dequeue(&bcs->squeue))) {
-			dev_kfree_skb(skb);
-		}
+		skb_queue_purge(&bcs->rqueue);
+		skb_queue_purge(&bcs->squeue);
 		if (bcs->tx_skb) {
 			dev_kfree_skb(bcs->tx_skb);
 			bcs->tx_skb = NULL;

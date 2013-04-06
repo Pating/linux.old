@@ -1,4 +1,4 @@
-/* $Id: netjet.c,v 1.24.6.3 2001/02/13 10:33:58 kai Exp $
+/* $Id: netjet.c,v 1.24.6.5 2001/06/09 15:14:18 kai Exp $
  *
  * netjet.c     low level stuff for Traverse Technologie NETJet ISDN cards
  *
@@ -6,7 +6,7 @@
  *
  * Thanks to Traverse Technologie Australia for documents and informations
  *
- * This file is (c) under GNU PUBLIC LICENSE
+ * This file is (c) under GNU General Public License
  *
  */
 
@@ -16,12 +16,13 @@
 #include "isac.h"
 #include "hscx.h"
 #include "isdnl1.h"
+#include <linux/pci.h>
 #include <linux/interrupt.h>
 #include <linux/ppp_defs.h>
 #include <asm/io.h>
 #include "netjet.h"
 
-const char *NETjet_revision = "$Revision: 1.24.6.3 $";
+const char *NETjet_revision = "$Revision: 1.24.6.5 $";
 
 /* Interface functions */
 
@@ -879,8 +880,8 @@ close_tigerstate(struct BCState *bcs)
 			kfree(bcs->hw.tiger.sendbuf);
 			bcs->hw.tiger.sendbuf = NULL;
 		}
-		discard_queue(&bcs->rqueue);
-		discard_queue(&bcs->squeue);
+		skb_queue_purge(&bcs->rqueue);
+		skb_queue_purge(&bcs->squeue);
 		if (bcs->tx_skb) {
 			dev_kfree_skb(bcs->tx_skb);
 			bcs->tx_skb = NULL;

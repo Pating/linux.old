@@ -43,16 +43,16 @@
 #undef DEBUG_ELF
 
 static int load_irix_binary(struct linux_binprm * bprm, struct pt_regs * regs);
-static int load_irix_library(int fd);
-static int irix_core_dump(long signr, struct pt_regs * regs);
+static int load_irix_library(struct file *file);
+static int irix_core_dump(long signr, struct pt_regs * regs, struct file *);
 extern int dump_fpu (elf_fpregset_t *);
 
 static struct linux_binfmt irix_format = {
-#ifndef MODULE
-	NULL, NULL, load_irix_binary, load_irix_library, irix_core_dump
-#else
-	NULL, &__this_module.usecount, load_irix_binary, load_irix_library, irix_core_dump
-#endif
+	module:		THIS_MODULE,
+	load_binary:	load_irix_binary,
+	load_shlib:	load_irix_library,
+	core_dump:	irix_core_dump,
+	min_coredump:	PAGE_SIZE,
 };
 
 #ifndef elf_addr_t
@@ -610,8 +610,7 @@ void irix_map_prda_page (void)
 /* These are the functions used to load ELF style executables and shared
  * libraries.  There is no binary dependent code anywhere else.
  */
-static inline int do_load_irix_binary(struct linux_binprm * bprm,
-				      struct pt_regs * regs)
+static int load_irix_binary(struct linux_binprm * bprm, struct pt_regs * regs)
 {
 	struct elfhdr elf_ex, interp_elf_ex;
 	struct dentry *interpreter_dentry;
@@ -750,16 +749,12 @@ static inline int do_load_irix_binary(struct linux_binprm * bprm,
 	sys_close(elf_exec_fileno);
 	current->personality = PER_IRIX32;
 
+	set_binfmt(&irix_format);
 	if (current->exec_domain && current->exec_domain->module)
 		__MOD_DEC_USE_COUNT(current->exec_domain->module);
-	if (current->binfmt && current->binfmt->module)
-		__MOD_DEC_USE_COUNT(current->binfmt->module);
 	current->exec_domain = lookup_exec_domain(current->personality);
-	current->binfmt = &irix_format;
 	if (current->exec_domain && current->exec_domain->module)
 		__MOD_INC_USE_COUNT(current->exec_domain->module);
-	if (current->binfmt && current->binfmt->module)
-		__MOD_INC_USE_COUNT(current->binfmt->module);
 
 	compute_creds(bprm);
 	current->flags &= ~PF_FORKNOEXEC;
@@ -806,7 +801,7 @@ static inline int do_load_irix_binary(struct linux_binprm * bprm,
 #endif
 
 	start_thread(regs, elf_entry, bprm->p);
-	if (current->flags & PF_PTRACED)
+	if (current->ptrace & PT_PTRACED)
 		send_sig(SIGTRAP, current, 0);
 	return 0;
 
@@ -822,20 +817,10 @@ out_phdata:
 	return retval;
 }
 
-static int load_irix_binary(struct linux_binprm * bprm, struct pt_regs * regs)
-{
-	int retval;
-
-	MOD_INC_USE_COUNT;
-	retval = do_load_irix_binary(bprm, regs);
-	MOD_DEC_USE_COUNT;
-	return retval;
-}
-
 /* This is really simpleminded and specialized - we are loading an
  * a.out library that is given an ELF header.
  */
-static inline int do_load_irix_library(struct file *file)
+static int load_irix_library(struct file *file)
 {
 	struct elfhdr elf_ex;
 	struct elf_phdr *elf_phdata  =  NULL;
@@ -931,21 +916,6 @@ static inline int do_load_irix_library(struct file *file)
 	return 0;
 }
 
-static int load_irix_library(int fd)
-{
-	int retval = -EACCES;
-	struct file *file;
-
-	MOD_INC_USE_COUNT;
-	file = fget(fd);
-	if (file) {
-		retval = do_load_irix_library(file);
-		fput(file);
-	}
-	MOD_DEC_USE_COUNT;
-	return retval;
-}
-	
 /* Called through irix_syssgi() to map an elf image given an FD,
  * a phdr ptr USER_PHDRP in userspace, and a count CNT telling how many
  * phdrs there are in the USER_PHDRP array.  We return the vaddr the
@@ -1128,14 +1098,10 @@ static int writenote(struct memelfnote *men, struct file *file)
  * and then they are actually written out.  If we run out of core limit
  * we just truncate.
  */
-static int irix_core_dump(long signr, struct pt_regs * regs)
+static int irix_core_dump(long signr, struct pt_regs * regs, struct file * file)
 {
 	int has_dumped = 0;
-	struct file *file;
-	struct dentry *dentry;
-	struct inode *inode;
 	mm_segment_t fs;
-	char corefile[6+sizeof(current->comm)];
 	int segs;
 	int i;
 	size_t size;
@@ -1148,14 +1114,6 @@ static int irix_core_dump(long signr, struct pt_regs * regs)
 	struct elf_prstatus prstatus;	/* NT_PRSTATUS */
 	elf_fpregset_t fpu;		/* NT_PRFPREG */
 	struct elf_prpsinfo psinfo;	/* NT_PRPSINFO */
-	
-	if (!current->dumpable || limit < PAGE_SIZE)
-		return 0;
-	current->dumpable = 0;
-
-#ifndef CONFIG_BINFMT_IRIX
-	MOD_INC_USE_COUNT;
-#endif
 
 	/* Count what's needed to dump, up to the limit of coredump size. */
 	segs = 0;
@@ -1200,27 +1158,6 @@ static int irix_core_dump(long signr, struct pt_regs * regs)
 	
 	fs = get_fs();
 	set_fs(KERNEL_DS);
-
-	memcpy(corefile,"core.", 5);
-#if 0
-	memcpy(corefile+5,current->comm,sizeof(current->comm));
-#else
-	corefile[4] = '\0';
-#endif
-	file = filp_open(corefile, O_CREAT | 2 | O_TRUNC | O_NOFOLLOW, 0600);
-	if (IS_ERR(file))
-		goto end_coredump;
-	dentry = file->f_dentry;
-	inode = dentry->d_inode;
-	if (inode->i_nlink > 1)
-		goto close_coredump;	/* multiple links - don't dump */
-
-	if (!S_ISREG(inode->i_mode))
-		goto close_coredump;
-	if (!inode->i_op || !inode->i_op->default_file_ops)
-		goto close_coredump;
-	if (!file->f_op->write)
-		goto close_coredump;
 
 	has_dumped = 1;
 	current->flags |= PF_DUMPCORE;
@@ -1386,13 +1323,7 @@ static int irix_core_dump(long signr, struct pt_regs * regs)
 	}
 
  close_coredump:
-	filp_close(file, NULL);
-
- end_coredump:
 	set_fs(fs);
-#ifndef CONFIG_BINFMT_ELF
-	MOD_DEC_USE_COUNT;
-#endif
 	return has_dumped;
 }
 

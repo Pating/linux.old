@@ -928,6 +928,9 @@ static int pc_write(struct tty_struct * tty, int from_user,
 
 		/* First we read the data in from the file system into a temp buffer */
 
+		memoff(ch);
+		restore_flags(flags);
+
 		if (bytesAvailable) 
 		{ /* Begin bytesAvailable */
 
@@ -953,7 +956,7 @@ static int pc_write(struct tty_struct * tty, int from_user,
 					Remember copy_from_user WILL generate a page fault if the
 					user memory being accessed has been swapped out.  This can
 					cause this routine to temporarily sleep while this page
-					fault is occuring.
+					fault is occurring.
 				
 				----------------------------------------------------------------- */
 
@@ -968,8 +971,6 @@ static int pc_write(struct tty_struct * tty, int from_user,
 			post_fep_init.
 		--------------------------------------------------------------------- */
 		buf = ch->tmp_buf;
-		memoff(ch);
-		restore_flags(flags);
 
 	} /* End from_user */
 
@@ -3601,7 +3602,7 @@ static void pc_start(struct tty_struct *tty)
 /* ------------------------------------------------------------------
 	The below routines pc_throttle and pc_unthrottle are used 
 	to slow (And resume) the receipt of data into the kernels
-	receive buffers.  The exact occurence of this depends on the
+	receive buffers.  The exact occurrence of this depends on the
 	size of the kernels receive buffer and what the 'watermarks'
 	are set to for that buffer.  See the n_ttys.c file for more
 	details. 

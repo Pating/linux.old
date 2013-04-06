@@ -115,7 +115,7 @@ static inline void __flush_global_tlb_csp(void)
 			     "lr    4,%2\n\t"
 			     "csp   2,4" :
 			     : "d" (cs1), "d" (dum), "d" (adr)
-			     : "2", "3", "4");
+			     : "2", "3", "4", "cc" );
 }
 
 static inline void __flush_global_tlb(void)
@@ -529,7 +529,7 @@ static inline void __flush_tlb_one(struct mm_struct *mm,
        	__asm__ __volatile("    ic   0,2(%0)\n"
 			   "    ipte %1,%2\n"
 			   "    stc  0,2(%0)"
-			   : : "a" (pte), "a" (pto), "a" (addr): "0");
+			   : : "a" (pte), "a" (pto), "a" (addr): "0", "cc" );
 }
 
 /*
@@ -711,10 +711,10 @@ extern inline void update_mmu_cache(struct vm_area_struct * vma,
 }
 
 /*
- * a page-table entry has only 19 bit for offset and 7 bit for type
- * if bits 0, 20 or 23 are set, a translation specification exceptions occures, and it's
- * hard to find out the failing address
- * therefor, we zero out this bits
+ * a page-table entry has only 19 bits for offset and 7 bits for type
+ * if bits 0, 20 or 23 are set, a translation specification exception occurs,
+ * and it's hard to find out the failing address
+ * therefore, we zero out these bits
  */
 
 #define SWP_TYPE(entry) (((entry) >> 1) & 0x3f)

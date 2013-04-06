@@ -1,81 +1,10 @@
 /*
- * $Id: capifs.c,v 1.14.6.3 2001/02/13 11:43:29 kai Exp $
+ * $Id: capifs.c,v 1.14.6.7 2001/05/24 08:29:08 kai Exp $
  * 
  * (c) Copyright 2000 by Carsten Paeth (calle@calle.de)
  *
  * Heavily based on devpts filesystem from H. Peter Anvin
  * 
- * $Log: capifs.c,v $
- * Revision 1.14.6.3  2001/02/13 11:43:29  kai
- * more compatility changes for 2.2.19
- *
- * Revision 1.14.6.2  2001/02/10 14:41:20  kai
- * Changes from kernel tree
- *
- * Revision 1.14.6.1  2000/11/28 12:02:45  kai
- * MODULE_DEVICE_TABLE for 2.4
- *
- * Revision 1.14.2.1  2000/11/26 17:47:53  kai
- * added PCI_DEV_TABLE for 2.4
- *
- * Revision 1.14  2000/11/23 20:45:14  kai
- * fixed module_init/exit stuff
- * Note: compiled-in kernel doesn't work pre 2.2.18 anymore.
- *
- * Revision 1.13  2000/11/18 16:17:25  kai
- * change from 2.4 tree
- *
- * Revision 1.12  2000/11/01 14:05:02  calle
- * - use module_init/module_exit from linux/init.h.
- * - all static struct variables are initialized with "membername:" now.
- * - avm_cs.c, let it work with newer pcmcia-cs.
- *
- * Revision 1.11  2000/10/24 15:08:47  calle
- * Too much includes.
- *
- * Revision 1.10  2000/10/12 10:12:35  calle
- * Bugfix: second iput(inode) on umount, destroies a foreign inode.
- *
- * Revision 1.9  2000/08/20 07:30:13  keil
- * changes for 2.4
- *
- * Revision 1.8  2000/07/20 10:23:13  calle
- * Include isdn_compat.h for people that don't use -p option of std2kern.
- *
- * Revision 1.7  2000/06/18 16:09:54  keil
- * more changes for 2.4
- *
- * Revision 1.6  2000/04/03 13:29:25  calle
- * make Tim Waugh happy (module unload races in 2.3.99-pre3).
- * no real problem there, but now it is much cleaner ...
- *
- * Revision 1.5  2000/03/13 17:49:52  calle
- * make it running with 2.3.51.
- *
- * Revision 1.4  2000/03/08 17:06:33  calle
- * - changes for devfs and 2.3.49
- * - capifs now configurable (no need with devfs)
- * - New Middleware ioctl CAPI_NCCI_GETUNIT
- * - Middleware again tested with 2.2.14 and 2.3.49 (with and without devfs)
- *
- * Revision 1.3  2000/03/06 18:00:23  calle
- * - Middleware extention now working with 2.3.49 (capifs).
- * - Fixed typos in debug section of capi.c
- * - Bugfix: Makefile corrected for b1pcmcia.c
- *
- * Revision 1.2  2000/03/06 09:17:07  calle
- * - capifs: fileoperations now in inode (change for 2.3.49)
- * - Config.in: Middleware extention not a tristate, uups.
- *
- * Revision 1.1  2000/03/03 16:48:38  calle
- * - Added CAPI2.0 Middleware support (CONFIG_ISDN_CAPI)
- *   It is now possible to create a connection with a CAPI2.0 applikation
- *   and than to handle the data connection from /dev/capi/ (capifs) and also
- *   using async or sync PPP on this connection.
- *   The two major device number 190 and 191 are not confirmed yet,
- *   but I want to save the code in cvs, before I go on.
- *
- *
  */
 
 #include <linux/version.h>
@@ -94,12 +23,13 @@
 #include <linux/major.h>
 #include <linux/slab.h>
 #include <linux/ctype.h>
+#include <linux/isdn_compat.h>
 #include <asm/bitops.h>
 #include <asm/uaccess.h>
 
 MODULE_AUTHOR("Carsten Paeth <calle@calle.de>");
 
-static char *revision = "$Revision: 1.14.6.3 $";
+static char *revision = "$Revision: 1.14.6.7 $";
 
 struct capifs_ncci {
 	struct inode *inode;
@@ -279,24 +209,16 @@ static void capifs_put_super(struct super_block *sb)
 
 	kfree(sbi->nccis);
 	kfree(sbi);
-#if LINUX_VERSION_CODE < KERNEL_VERSION(2,3,51)
 	MOD_DEC_USE_COUNT;
-#endif
 }
 
-#if LINUX_VERSION_CODE < KERNEL_VERSION(2,3,51)
 static int capifs_statfs(struct super_block *sb, struct statfs *buf, int bufsiz);
 static void capifs_write_inode(struct inode *inode) { };
-#else
-static int capifs_statfs(struct super_block *sb, struct statfs *buf);
-#endif
 static void capifs_read_inode(struct inode *inode);
 
 static struct super_operations capifs_sops = {
 	read_inode:	capifs_read_inode,
-#if LINUX_VERSION_CODE < KERNEL_VERSION(2,3,51)
 	write_inode:	capifs_write_inode,
-#endif
 	put_super:	capifs_put_super,
 	statfs:		capifs_statfs,
 };
@@ -367,10 +289,8 @@ struct super_block *capifs_read_super(struct super_block *s, void *data,
 	struct dentry * root;
 	struct capifs_sb_info *sbi;
 
-#if LINUX_VERSION_CODE < KERNEL_VERSION(2,3,51)
 	MOD_INC_USE_COUNT;
 	lock_super(s);
-#endif
 	/* Super block already completed? */
 	if (s->s_root)
 		goto out;
@@ -446,19 +366,14 @@ struct super_block *capifs_read_super(struct super_block *s, void *data,
 	mounts = s;
 
 out:	/* Success ... somebody else completed the super block for us. */ 
-#if LINUX_VERSION_CODE < KERNEL_VERSION(2,3,51)
 	unlock_super(s);
-#endif
 	return s;
 fail:
-#if LINUX_VERSION_CODE < KERNEL_VERSION(2,3,51)
 	unlock_super(s);
 	MOD_DEC_USE_COUNT;
-#endif
 	return NULL;
 }
 
-#if LINUX_VERSION_CODE < KERNEL_VERSION(2,3,51)
 static int capifs_statfs(struct super_block *sb, struct statfs *buf, int bufsiz)
 {
 	struct statfs tmp;
@@ -473,20 +388,6 @@ static int capifs_statfs(struct super_block *sb, struct statfs *buf, int bufsiz)
 	tmp.f_namelen = NAME_MAX;
 	return copy_to_user(buf, &tmp, bufsiz) ? -EFAULT : 0;
 }
-#else
-static int capifs_statfs(struct super_block *sb, struct statfs *buf)
-{
-	buf->f_type = CAPIFS_SUPER_MAGIC;
-	buf->f_bsize = 1024;
-	buf->f_blocks = 0;
-	buf->f_bfree = 0;
-	buf->f_bavail = 0;
-	buf->f_files = 0;
-	buf->f_ffree = 0;
-	buf->f_namelen = NAME_MAX;
-	return 0;
-}
-#endif
 
 static void capifs_read_inode(struct inode *inode)
 {
@@ -517,16 +418,12 @@ static void capifs_read_inode(struct inode *inode)
 	return;
 }
 
-#if LINUX_VERSION_CODE < KERNEL_VERSION(2,3,51)
 static struct file_system_type capifs_fs_type = {
 	"capifs",
 	0,
 	capifs_read_super,
 	NULL
 };
-#else
-static DECLARE_FSTYPE(capifs_fs_type, "capifs", capifs_read_super, 0);
-#endif
 
 void capifs_new_ncci(char type, unsigned int num, kdev_t device)
 {
@@ -547,8 +444,7 @@ void capifs_new_ncci(char type, unsigned int num, kdev_t device)
 				break;
 			}
 		}
-
-		if ((np->inode = iget(sb, ino+2)) != 0) {
+		if ((np->inode = iget(sb, ino+2)) != NULL) {
 			struct inode *inode = np->inode;
 			inode->i_uid = sbi->setuid ? sbi->uid : current->fsuid;
 			inode->i_gid = sbi->setgid ? sbi->gid : current->fsgid;
@@ -587,16 +483,17 @@ void capifs_free_ncci(char type, unsigned int num)
 
 static int __init capifs_init(void)
 {
-	char rev[10];
+	char rev[32];
 	char *p;
 	int err;
 
 	MOD_INC_USE_COUNT;
 
-	if ((p = strchr(revision, ':'))) {
-		strcpy(rev, p + 1);
-		p = strchr(rev, '$');
-		*p = 0;
+	if ((p = strchr(revision, ':')) != 0 && p[1]) {
+		strncpy(rev, p + 2, sizeof(rev));
+		rev[sizeof(rev)-1] = 0;
+		if ((p = strchr(rev, '$')) != 0 && p > rev)
+		   *(p-1) = 0;
 	} else
 		strcpy(rev, "1.0");
 
@@ -605,11 +502,7 @@ static int __init capifs_init(void)
 		MOD_DEC_USE_COUNT;
 		return err;
 	}
-#ifdef MODULE
-        printk(KERN_NOTICE "capifs: Rev%s: loaded\n", rev);
-#else
-	printk(KERN_NOTICE "capifs: Rev%s: started\n", rev);
-#endif
+        printk(KERN_NOTICE "capifs: Rev %s\n", rev);
 	MOD_DEC_USE_COUNT;
 	return 0;
 }

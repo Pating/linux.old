@@ -1,7 +1,7 @@
 /*
  * USB ConnectTech WhiteHEAT driver
  *
- *	Copyright (C) 1999, 2000
+ *	Copyright (C) 1999 - 2001
  *	    Greg Kroah-Hartman (greg@kroah.com)
  *
  *	This program is free software; you can redistribute it and/or modify
@@ -10,7 +10,27 @@
  *	(at your option) any later version.
  *
  * See Documentation/usb/usb-serial.txt for more information on using this driver
+ *
+ * (04/08/2001) gb
+ *	Identify version on module load.
  * 
+ * 2001_Mar_19 gkh
+ *	Fixed MOD_INC and MOD_DEC logic, the ability to open a port more 
+ *	than once, and the got the proper usb_device_id table entries so
+ *	the driver works again.
+ * 
+ * (10/05/2000) gkh
+ *	Fixed bug with urb->dev not being set properly, now that the usb
+ *	core needs it.
+ * 
+ * (10/03/2000) smd
+ *	firmware is improved to guard against crap sent to device
+ *	firmware now replies CMD_FAILURE on bad things
+ *	read_callback fix you provided for private info struct
+ *	command_finished now indicates success or fail
+ *	setup_port struct now packed to avoid gcc padding
+ *	firmware uses 1 based port numbering, driver now handles that
+ *
  * (09/11/2000) gkh
  *	Removed DEBUG #ifdefs with call to usb_serial_debug_data
  *
@@ -42,24 +62,29 @@
 #include <linux/init.h>
 #include <linux/malloc.h>
 #include <linux/fcntl.h>
+#include <linux/tty.h>
 #include <linux/tty_driver.h>
 #include <linux/tty_flip.h>
-#include <linux/tty.h>
 #include <linux/module.h>
 #include <linux/spinlock.h>
-
-#ifdef CONFIG_USB_SERIAL_DEBUG
-	#define DEBUG
-#else
-	#undef DEBUG
-#endif
 #include <linux/usb.h>
 
+#ifdef CONFIG_USB_SERIAL_DEBUG
+	static int debug = 1;
+#else
+	static int debug;
+#endif
+
 #include "usb-serial.h"
-
 #include "whiteheat_fw.h"		/* firmware for the ConnectTech WhiteHEAT device */
-
 #include "whiteheat.h"			/* WhiteHEAT specific commands */
+
+/*
+ * Version Information
+ */
+#define DRIVER_VERSION "v1.0.0"
+#define DRIVER_AUTHOR "Greg Kroah-Hartman <greg@kroah.com>"
+#define DRIVER_DESC "USB ConnectTech WhiteHEAT driver"
 
 #define CONNECT_TECH_VENDOR_ID		0x0710
 #define CONNECT_TECH_FAKE_WHITE_HEAT_ID	0x0001
@@ -148,8 +173,11 @@ static void command_port_write_callback (struct urb *urb)
 
 static void command_port_read_callback (struct urb *urb)
 {
-	struct whiteheat_private *info = (struct whiteheat_private *)urb->context;
+	struct usb_serial_port *port = (struct usb_serial_port *)urb->context;
+	struct usb_serial *serial = get_usb_serial (port, __FUNCTION__);
+	struct whiteheat_private *info;
 	unsigned char *data = urb->transfer_buffer;
+	int result;
 
 	dbg (__FUNCTION__);
 
@@ -158,15 +186,39 @@ static void command_port_read_callback (struct urb *urb)
 		return;
 	}
 
+	if (!serial) {
+		dbg(__FUNCTION__ " - bad serial pointer, exiting");
+		return;
+	}
+	
 	usb_serial_debug_data (__FILE__, __FUNCTION__, urb->actual_length, data);
+
+	info = (struct whiteheat_private *)port->private;
+	if (!info) {
+		dbg (__FUNCTION__ " - info is NULL, exiting.");
+		return;
+	}
 
 	/* right now, if the command is COMMAND_COMPLETE, just flip the bit saying the command finished */
 	/* in the future we're going to have to pay attention to the actual command that completed */
 	if (data[0] == WHITEHEAT_CMD_COMPLETE) {
-		info->command_finished = TRUE;
+		info->command_finished = WHITEHEAT_CMD_COMPLETE;
+		wake_up_interruptible(&info->wait_command);
 	}
 	
-	return;
+	if (data[0] == WHITEHEAT_CMD_FAILURE) {
+		info->command_finished = WHITEHEAT_CMD_FAILURE;
+		wake_up_interruptible(&info->wait_command);
+	}
+	
+	/* Continue trying to always read */
+	FILL_BULK_URB(port->read_urb, serial->dev, 
+		      usb_rcvbulkpipe(serial->dev, port->bulk_in_endpointAddress),
+		      port->read_urb->transfer_buffer, port->read_urb->transfer_buffer_length,
+		      command_port_read_callback, port);
+	result = usb_submit_urb(port->read_urb);
+	if (result)
+		dbg(__FUNCTION__ " - failed resubmitting read urb, error %d", result);
 }
 
 
@@ -187,6 +239,7 @@ static int whiteheat_send_cmd (struct usb_serial *serial, __u8 command, __u8 *da
 	transfer_buffer[0] = command;
 	memcpy (&transfer_buffer[1], data, datasize);
 	port->write_urb->transfer_buffer_length = datasize + 1;
+	port->write_urb->dev = serial->dev;
 	if (usb_submit_urb (port->write_urb)) {
 		dbg (__FUNCTION__" - submit urb failed");
 		return -1;
@@ -203,6 +256,16 @@ static int whiteheat_send_cmd (struct usb_serial *serial, __u8 command, __u8 *da
 		return -1;
 	}
 
+	if (info->command_finished == WHITEHEAT_CMD_FAILURE) {
+		dbg (__FUNCTION__ " - command failed.");
+		return -1;
+	}
+
+	if (info->command_finished == WHITEHEAT_CMD_COMPLETE) {
+		dbg (__FUNCTION__ " - command completed.");
+		return 0;
+	}
+
 	return 0;
 }
 
@@ -212,41 +275,48 @@ static int whiteheat_open (struct usb_serial_port *port, struct file *filp)
 	struct whiteheat_min_set	open_command;
 	struct usb_serial_port 		*command_port;
 	struct whiteheat_private	*info;
+	int				result;
 
 	dbg(__FUNCTION__" - port %d", port->number);
 
-	if (port->active) {
-		dbg (__FUNCTION__ " - device already open");
-		return -EINVAL;
-	}
-	port->active = 1;
+	++port->open_count;
+	MOD_INC_USE_COUNT;
+	
+	if (!port->active) {
+		port->active = 1;
 
-	/* set up some stuff for our command port */
-	command_port = &port->serial->port[COMMAND_PORT];
-	if (command_port->private == NULL) {
-		info = (struct whiteheat_private *)kmalloc (sizeof(struct whiteheat_private), GFP_KERNEL);
-		if (info == NULL) {
-			err(__FUNCTION__ " - out of memory");
-			return -ENOMEM;
+		/* set up some stuff for our command port */
+		command_port = &port->serial->port[COMMAND_PORT];
+		if (command_port->private == NULL) {
+			info = (struct whiteheat_private *)kmalloc (sizeof(struct whiteheat_private), GFP_KERNEL);
+			if (info == NULL) {
+				err(__FUNCTION__ " - out of memory");
+				return -ENOMEM;
+			}
+			
+			init_waitqueue_head(&info->wait_command);
+			command_port->private = info;
+			command_port->write_urb->complete = command_port_write_callback;
+			command_port->read_urb->complete = command_port_read_callback;
+			command_port->read_urb->dev = port->serial->dev;
+			command_port->tty = port->tty;		/* need this to "fake" our our sanity check macros */
+			usb_submit_urb (command_port->read_urb);
 		}
 		
-		init_waitqueue_head(&info->wait_command);
-		command_port->private = info;
-		command_port->write_urb->complete = command_port_write_callback;
-		command_port->read_urb->complete = command_port_read_callback;
-		usb_submit_urb (command_port->read_urb);	
-	}
+		/* Start reading from the device */
+		port->read_urb->dev = port->serial->dev;
+		result = usb_submit_urb(port->read_urb);
+		if (result)
+			err(__FUNCTION__ " - failed submitting read urb, error %d", result);
 	
-	/* Start reading from the device */
-	if (usb_submit_urb(port->read_urb))
-		dbg(__FUNCTION__ " - usb_submit_urb(read bulk) failed");
-
-	/* send an open port command */
-	open_command.port = port->number - port->serial->minor;
-	whiteheat_send_cmd (port->serial, WHITEHEAT_OPEN, (__u8 *)&open_command, sizeof(open_command));
-
-	/* Need to do device specific setup here (control lines, baud rate, etc.) */
-	/* FIXME!!! */
+		/* send an open port command */
+		/* firmware uses 1 based port numbering */
+		open_command.port = port->number - port->serial->minor + 1;
+		whiteheat_send_cmd (port->serial, WHITEHEAT_OPEN, (__u8 *)&open_command, sizeof(open_command));
+	
+		/* Need to do device specific setup here (control lines, baud rate, etc.) */
+		/* FIXME!!! */
+	}
 
 	dbg(__FUNCTION__ " - exit");
 	
@@ -260,17 +330,23 @@ static void whiteheat_close(struct usb_serial_port *port, struct file * filp)
 	
 	dbg(__FUNCTION__ " - port %d", port->number);
 	
-	/* send a close command to the port */
-	close_command.port = port->number - port->serial->minor;
-	whiteheat_send_cmd (port->serial, WHITEHEAT_CLOSE, (__u8 *)&close_command, sizeof(close_command));
+	--port->open_count;
 
-	/* Need to change the control lines here */
-	/* FIXME */
+	if (port->open_count <= 0) {
+		/* send a close command to the port */
+		/* firmware uses 1 based port numbering */
+		close_command.port = port->number - port->serial->minor + 1;
+		whiteheat_send_cmd (port->serial, WHITEHEAT_CLOSE, (__u8 *)&close_command, sizeof(close_command));
 	
-	/* shutdown our bulk reads and writes */
-	usb_unlink_urb (port->write_urb);
-	usb_unlink_urb (port->read_urb);
-	port->active = 0;
+		/* Need to change the control lines here */
+		/* FIXME */
+		
+		/* shutdown our bulk reads and writes */
+		usb_unlink_urb (port->write_urb);
+		usb_unlink_urb (port->read_urb);
+		port->active = 0;
+	}
+	MOD_DEC_USE_COUNT;
 }
 
 
@@ -303,6 +379,10 @@ static void whiteheat_set_termios (struct usb_serial_port *port, struct termios 
 		return;
 	}
 	
+	/* set the port number */
+	/* firmware uses 1 based port numbering */
+	port_settings.port = port->number + 1;
+
 	/* get the byte size */
 	switch (cflag & CSIZE) {
 		case CS5:	port_settings.bits = 5;   break;
@@ -337,10 +417,10 @@ static void whiteheat_set_termios (struct usb_serial_port *port, struct termios 
 	else
 		port_settings.hflow = 0;
 	dbg(__FUNCTION__ " - hardware flow control = %s %s %s %s",
-	    (port_settings.hflow | WHITEHEAT_CTS_FLOW) ? "CTS" : "",
-	    (port_settings.hflow | WHITEHEAT_RTS_FLOW) ? "RTS" : "",
-	    (port_settings.hflow | WHITEHEAT_DSR_FLOW) ? "DSR" : "",
-	    (port_settings.hflow | WHITEHEAT_DTR_FLOW) ? "DTR" : "");
+	    (port_settings.hflow & WHITEHEAT_CTS_FLOW) ? "CTS" : "",
+	    (port_settings.hflow & WHITEHEAT_RTS_FLOW) ? "RTS" : "",
+	    (port_settings.hflow & WHITEHEAT_DSR_FLOW) ? "DSR" : "",
+	    (port_settings.hflow & WHITEHEAT_DTR_FLOW) ? "DTR" : "");
 	
 	/* determine software flow control */
 	if (I_IXOFF(port->tty))
@@ -464,8 +544,16 @@ static int  whiteheat_startup (struct usb_serial *serial)
 static void whiteheat_shutdown (struct usb_serial *serial)
 {
 	struct usb_serial_port 		*command_port;
+	int i;
 
 	dbg(__FUNCTION__);
+
+	/* stop reads and writes on all ports */
+	for (i=0; i < serial->num_ports; ++i) {
+		while (serial->port[i].open_count > 0) {
+			whiteheat_close (&serial->port[i], NULL);
+		}
+	}
 
 	/* free up our private data for our command port */
 	command_port = &serial->port[COMMAND_PORT];
@@ -485,7 +573,8 @@ static void set_command (struct usb_serial_port *port, unsigned char state, unsi
 	struct whiteheat_rdb_set rdb_command;
 	
 	/* send a set rts command to the port */
-	rdb_command.port = port->number - port->serial->minor;
+	/* firmware uses 1 based port numbering */
+	rdb_command.port = port->number - port->serial->minor + 1;
 	rdb_command.state = state;
 
 	whiteheat_send_cmd (port->serial, command, (__u8 *)&rdb_command, sizeof(rdb_command));
@@ -514,6 +603,7 @@ static int __init whiteheat_init (void)
 {
 	usb_serial_register (&whiteheat_fake_device);
 	usb_serial_register (&whiteheat_device);
+	info(DRIVER_VERSION " " DRIVER_DESC);
 	return 0;
 }
 
@@ -528,5 +618,9 @@ static void __exit whiteheat_exit (void)
 module_init(whiteheat_init);
 module_exit(whiteheat_exit);
 
-MODULE_AUTHOR("Greg Kroah-Hartman <greg@kroah.com>");
-MODULE_DESCRIPTION("USB ConnectTech WhiteHEAT driver");
+MODULE_AUTHOR( DRIVER_AUTHOR );
+MODULE_DESCRIPTION( DRIVER_DESC );
+
+MODULE_PARM(debug, "i");
+MODULE_PARM_DESC(debug, "Debug enabled or not");
+

@@ -1,4 +1,4 @@
-/* $Id: psycho.c,v 1.85.2.11 2000/10/24 21:00:53 davem Exp $
+/* $Id: psycho.c,v 1.85.2.14 2001/08/12 13:17:25 davem Exp $
  * psycho.c: Ultra/AX U2P PCI controller support.
  *
  * Copyright (C) 1997 David S. Miller (davem@caipfs.rutgers.edu)
@@ -412,6 +412,7 @@ void __init sabre_init(int pnode)
 			pbm = &sabre->pbm_A;
 
 		pbm->parent = sabre;
+		pbm->pci_first_slot = 1;
 		pbm->IO_assignments = NULL;
 		pbm->MEM_assignments = NULL;
 		pbm->prom_node = node;
@@ -586,9 +587,17 @@ void __init pcibios_init(void)
 			pbm = &psycho->pbm_B;
 
 		pbm->parent = psycho;
+		pbm->pci_first_slot = 1;
 		pbm->IO_assignments = NULL;
 		pbm->MEM_assignments = NULL;
 		pbm->prom_node = node;
+
+		if (!is_pbm_a) {
+			prom_getstring(prom_root_node, "name",
+				       namebuf, sizeof(namebuf));
+			if (!strcmp(namebuf, "SUNW,Ultra-1-Engine"))
+				pbm->pci_first_slot = 2;
+		}
 
 		prom_getstring(node, "name", namebuf, sizeof(namebuf));
 		strcpy(pbm->prom_name, namebuf);
@@ -682,12 +691,26 @@ static inline void pci_add_vma(struct linux_pbm_info *pbm, struct pci_vma *new, 
 
 static inline struct pci_vma *pci_vma_alloc(void)
 {
-	return kmalloc(sizeof(struct pci_vma), GFP_ATOMIC);
+	struct pci_vma *vma = kmalloc(sizeof(struct pci_vma), GFP_ATOMIC);
+
+	if (!vma) {
+		prom_printf("PCI: Critical error, cannot allocate PCI_VMA.\n");
+		prom_halt();
+	}
+
+	return vma;
 }
 
 static inline struct pcidev_cookie *pci_devcookie_alloc(void)
 {
-	return kmalloc(sizeof(struct pcidev_cookie), GFP_ATOMIC);
+	struct pcidev_cookie *cookie = kmalloc(sizeof(struct pcidev_cookie), GFP_ATOMIC);
+
+	if (!cookie) {
+		prom_printf("PCI: Critical error, cannot allocate PCIDEV_COOKIE.\n");
+		prom_halt();
+	}
+
+	return cookie;
 }
 
 
@@ -804,10 +827,37 @@ static void __init apb_init(struct linux_psycho *sabre)
 	}
 }
 
+static void __init pci_fixup_host_bridge_self(struct pci_bus *pbus)
+{
+	struct pci_dev *pdev;
+
+	for (pdev = pbus->devices; pdev; pdev = pdev->sibling) {
+		if (pdev->class >> 8 == PCI_CLASS_BRIDGE_HOST) {
+			pbus->self = pdev;
+			return;
+		}
+	}
+
+	prom_printf("PCI: Critical error, cannot find host bridge PDEV.\n");
+	prom_halt();
+}
+
+static struct pcidev_cookie * __init pci_alloc_hostbridge_cookie(struct linux_pbm_info *pbm)
+{
+	struct pcidev_cookie *cookie = pci_devcookie_alloc();
+
+	memset(cookie, 0, sizeof(*cookie));
+	cookie->pbm = pbm;
+
+	return cookie;
+}
+
 static void __init sabre_probe(struct linux_psycho *sabre)
 {
 	struct pci_bus *pbus = sabre->pci_bus;
 	static unsigned char busno = 0;
+
+	sabre->pbms_same_domain = 1;
 
 	pbus->number = pbus->secondary = busno;
 	pbus->sysdata = sabre;
@@ -815,7 +865,10 @@ static void __init sabre_probe(struct linux_psycho *sabre)
 	pbus->subordinate = pci_scan_bus(pbus);
 	busno = pbus->subordinate + 1;
 
-	for(pbus = pbus->children; pbus; pbus = pbus->next) {
+	pci_fixup_host_bridge_self(pbus);
+	pbus->self->sysdata = pci_alloc_hostbridge_cookie(&sabre->pbm_A);
+
+	for (pbus = pbus->children; pbus; pbus = pbus->next) {
 		if (pbus->number == sabre->pbm_A.pci_first_busno)
 			memcpy(&sabre->pbm_A.pci_bus, pbus, sizeof(*pbus));
 		if (pbus->number == sabre->pbm_B.pci_first_busno)
@@ -844,6 +897,9 @@ static void __init pbm_probe(struct linux_pbm_info *pbm)
 	pbm_fixup_busno(pbm, busno);
 
 	pbus->subordinate = pci_scan_bus(pbus);
+
+	pci_fixup_host_bridge_self(pbus);
+	pbus->self->sysdata = pci_alloc_hostbridge_cookie(pbm);
 
 	/*
 	 * Set the maximum subordinate bus of this pbm.
@@ -1852,20 +1908,21 @@ static void __init fixup_irq(struct pci_dev *pdev,
 
 		/* Slot determination is only slightly complex.  Handle
 		 * the easy case first.
+		 *
+		 * Basically, device number zero on the top-level bus is
+		 * always the PCI host controller.  Slot 0 is then device 1.
+		 * PBM A supports two external slots (0 and 1), and PBM B
+		 * supports 4 external slots (0, 1, 2, and 3).  On-board PCI
+		 * devices are wired to device numbers outside of these
+		 * ranges. -DaveM
 		 */
 		if(pdev->bus->number == pbm->pci_first_busno) {
-			if(pbm == &pbm->parent->pbm_A)
-				slot = (pdev->devfn >> 3) - 1;
-			else
-				slot = (pdev->devfn >> 3) - 2;
+			slot = (pdev->devfn >> 3) - pbm->pci_first_slot;
 		} else {
 			/* Underneath a bridge, use slot number of parent
 			 * bridge.
 			 */
-			if(pbm == &pbm->parent->pbm_A)
-				slot = (pdev->bus->self->devfn >> 3) - 1;
-			else
-				slot = (pdev->bus->self->devfn >> 3) - 2;
+			slot = (pdev->bus->self->devfn >> 3) - pbm->pci_first_slot;
 
 			/* Use low slot number bits of child as IRQ line. */
 			line = (pdev->devfn >> 3) & 0x03;
@@ -2082,6 +2139,8 @@ void __init pcibios_fixup(void)
 		if (apb_present(psycho)) {
 			sabre_probe(psycho);
 		} else {
+			psycho->pbms_same_domain = 0;
+
 			/* Probe busses under PBM B. */
 			pbm_probe(&psycho->pbm_B);
 
@@ -2654,6 +2713,150 @@ char * __init pcibios_setup(char *str)
 		return NULL;
 	}
 	return str;
+}
+
+/* Platform support for /proc/bus/pci/X/Y mmap()s. */
+
+/* Adjust vm_offset of VMA such that it is the physical page offset corresponding
+ * to the 32-bit pci bus offset for DEV requested by the user.
+ *
+ * Basically, the user finds the base address for his device which he wishes
+ * to mmap.  They read the 32-bit value from the config space base register,
+ * add whatever PAGE_SIZE multiple offset they wish, and feed this into the
+ * offset parameter of mmap on /proc/bus/pci/XXX for that device.
+ *
+ * Returns negative error code on failure, zero on success.
+ */
+static __inline__ int __pci_mmap_make_offset(struct pci_dev *dev, struct vm_area_struct *vma,
+					     enum pci_mmap_state mmap_state)
+{
+	unsigned long user_offset = vma->vm_offset;
+	unsigned long user32 = user_offset & 0xffffffffUL;
+	unsigned long largest_base, this_base, addr32;
+	int i;
+
+	/* Figure out which base address this is for. */
+	largest_base = 0UL;
+	for (i = 0; i <= 6; i++) {
+		unsigned long base = dev->base_address[i];
+
+		/* Active? */
+		if (!base)
+			continue;
+
+		/* Same type? */
+		if (i == 6) {
+			if (mmap_state != pci_mmap_mem)
+				continue;
+		} else {
+			if ((mmap_state == pci_mmap_io &&
+			     (base & PCI_BASE_ADDRESS_SPACE_IO) == 0) ||
+			    (mmap_state == pci_mmap_mem &&
+			     (base & PCI_BASE_ADDRESS_SPACE_IO) != 0))
+				continue;
+		}
+
+		this_base = base;
+
+		addr32 = (this_base & PAGE_MASK) & 0xffffffffUL;
+
+		if (mmap_state == pci_mmap_io)
+			addr32 &= 0xffffff;
+
+		if (addr32 <= user32 && this_base > largest_base)
+			largest_base = this_base;
+	}
+
+	if (largest_base == 0UL)
+		return -EINVAL;
+
+	largest_base = __pa(largest_base);
+
+	/* Now construct the final physical address. */
+	if (mmap_state == pci_mmap_io)
+		vma->vm_offset = (((largest_base & ~0xffffffUL) | user32) & PAGE_MASK);
+	else
+		vma->vm_offset = (((largest_base & ~0xffffffffUL) | user32) & PAGE_MASK);
+
+	return 0;
+}
+
+/* Set vm_flags of VMA, as appropriate for this architecture, for a pci device
+ * mapping.
+ */
+static __inline__ void __pci_mmap_set_flags(struct pci_dev *dev, struct vm_area_struct *vma,
+					    enum pci_mmap_state mmap_state)
+{
+	vma->vm_flags |= (VM_SHM | VM_LOCKED);
+}
+
+/* Set vm_page_prot of VMA, as appropriate for this architecture, for a pci
+ * device mapping.
+ */
+static __inline__ void __pci_mmap_set_pgprot(struct pci_dev *dev, struct vm_area_struct *vma,
+					     enum pci_mmap_state mmap_state)
+{
+	/* Our io_remap_page_range takes care of this, do nothing. */
+}
+
+extern int io_remap_page_range(unsigned long from, unsigned long offset,
+			       unsigned long size, pgprot_t prot, int space);
+
+/* Perform the actual remap of the pages for a PCI device mapping, as appropriate
+ * for this architecture.  The region in the process to map is described by vm_start
+ * and vm_end members of VMA, the base physical address is found in vm_pgoff.
+ * The pci device structure is provided so that architectures may make mapping
+ * decisions on a per-device or per-bus basis.
+ *
+ * Returns a negative error code on failure, zero on success.
+ */
+int pci_mmap_page_range(struct pci_dev *dev, struct vm_area_struct *vma,
+			enum pci_mmap_state mmap_state,
+			int write_combine)
+{
+	int ret;
+
+	ret = __pci_mmap_make_offset(dev, vma, mmap_state);
+	if (ret < 0)
+		return ret;
+
+	__pci_mmap_set_flags(dev, vma, mmap_state);
+	__pci_mmap_set_pgprot(dev, vma, mmap_state);
+
+	ret = io_remap_page_range(vma->vm_start,
+				  (vma->vm_offset |
+				   (write_combine ? 0x1UL : 0x0UL)),
+				  vma->vm_end - vma->vm_start, vma->vm_page_prot, 0);
+	if (ret)
+		return ret;
+
+	vma->vm_flags |= VM_IO;
+	return 0;
+}
+
+/* Return the index of the PCI controller for device PDEV. */
+
+int pci_controller_num(struct pci_dev *pdev)
+{
+	struct pcidev_cookie *cookie = pdev->sysdata;
+	int ret;
+
+	if (cookie != NULL) {
+		struct linux_pbm_info *pbm = cookie->pbm;
+
+		if (pbm == NULL || pbm->parent == NULL) {
+			ret = -ENXIO;
+		} else {
+			ret = pbm->parent->index;
+			if (!pbm->parent->pbms_same_domain)
+				ret = ((ret << 1) +
+				       ((pbm == &pbm->parent->pbm_B) ? 1 : 0));
+		}
+	} else {
+		ret = -ENXIO;
+	}
+
+	return ret;
 }
 
 #endif

@@ -1,7 +1,7 @@
 VERSION = 2
 PATCHLEVEL = 2
-SUBLEVEL = 19
-EXTRAVERSION = 
+SUBLEVEL = 20
+EXTRAVERSION =
 
 ARCH := $(shell uname -m | sed -e s/i.86/i386/ -e s/sun4u/sparc64/ -e s/arm.*/arm/ -e s/sa110/arm/)
 
@@ -200,6 +200,10 @@ endif
 
 ifeq ($(CONFIG_USB),y)
 DRIVERS := $(DRIVERS) drivers/usb/usbdrv.o
+else
+  ifdef CONFIG_INPUT_ADBHID
+  DRIVERS := $(DRIVERS) drivers/usb/usbdrv.o
+  endif
 endif
 
 ifeq ($(CONFIG_I2O),y)
@@ -423,7 +427,8 @@ mrproper: clean archmrproper
 	rm -rf modules
 
 distclean: mrproper
-	rm -f core `find . \( -name '*.orig' -o -name '*.rej' -o -name '*~' \
+	rm -f core `find . \( -not -type d \) -and \
+		\( -name '*.orig' -o -name '*.rej' -o -name '*~' \
 		-o -name '*.bak' -o -name '#*#' -o -name '.*.orig' \
 		-o -name '.*.rej' -o -name '.SUMS' -o -size 0 \) -print` TAGS
 

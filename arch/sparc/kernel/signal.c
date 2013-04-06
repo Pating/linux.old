@@ -1,4 +1,4 @@
-/*  $Id: signal.c,v 1.91.2.2 2000/05/28 19:13:21 ecd Exp $
+/*  $Id: signal.c,v 1.91.2.5 2001/08/12 10:56:22 davem Exp $
  *  linux/arch/sparc/kernel/signal.c
  *
  *  Copyright (C) 1991, 1992  Linus Torvalds
@@ -659,10 +659,45 @@ new_setup_rt_frame(struct k_sigaction *ka, struct pt_regs *regs,
 		switch (signr) {
 		case SIGSEGV:
 		case SIGILL:
-		case SIGFPE:
 		case SIGBUS:
 		case SIGEMT:
 			info->si_code = current->tss.sig_desc;
+			info->si_addr = (void *)current->tss.sig_address;
+			info->si_trapno = 0;
+			break;
+		case SIGFPE:
+			switch (current->tss.sig_desc) {
+			case SUBSIG_FPDISABLED:
+				info->si_code = FPE_FLTSUB;
+				break;
+			case SUBSIG_FPERROR:
+				info->si_code = FPE_FLTSUB;
+				break;
+			case SUBSIG_FPINTOVFL:
+				info->si_code = FPE_INTOVF;
+				break;
+			case SUBSIG_FPSTSIG:
+				info->si_code = FPE_FLTSUB;
+				break;
+			case SUBSIG_IDIVZERO:
+				info->si_code = FPE_INTDIV;
+				break;
+			case SUBSIG_FPINEXACT:
+				info->si_code = FPE_FLTRES;
+				break;
+			case SUBSIG_FPDIVZERO:
+				info->si_code = FPE_FLTDIV;
+				break;
+			case SUBSIG_FPUNFLOW:
+				info->si_code = FPE_FLTUND;
+				break;
+			case SUBSIG_FPOPERROR:
+				info->si_code = FPE_FLTINV;
+				break;
+			case SUBSIG_FPOVFLOW:
+				info->si_code = FPE_FLTOVF;
+				break;
+			}
 			info->si_addr = (void *)current->tss.sig_address;
 			info->si_trapno = 0;
 			break;
@@ -1139,7 +1174,7 @@ asmlinkage int do_signal(sigset_t *oldset, struct pt_regs * regs,
 
 		if (!signr) break;
 
-		if ((current->flags & PF_PTRACED) && signr != SIGKILL) {
+		if ((current->ptrace & PT_PTRACED) && signr != SIGKILL) {
 			current->exit_code = signr;
 			current->state = TASK_STOPPED;
 
@@ -1203,7 +1238,7 @@ asmlinkage int do_signal(sigset_t *oldset, struct pt_regs * regs,
 					continue;
 
 			case SIGSTOP:
-				if (current->flags & PF_PTRACED)
+				if (current->ptrace & PT_PTRACED)
 					continue;
 				current->state = TASK_STOPPED;
 				current->exit_code = signr;
@@ -1217,14 +1252,8 @@ asmlinkage int do_signal(sigset_t *oldset, struct pt_regs * regs,
 
 			case SIGQUIT: case SIGILL: case SIGTRAP:
 			case SIGABRT: case SIGFPE: case SIGSEGV: case SIGBUS:
-				if(current->binfmt && current->binfmt->core_dump) {
-					lock_kernel();
-					if(current->binfmt &&
-					   current->binfmt->core_dump &&
-					   current->binfmt->core_dump(signr, regs))
-						exit_code |= 0x80;
-					unlock_kernel();
-				}
+				if (do_coredump(signr, regs))
+					exit_code |= 0x80;
 #ifdef DEBUG_SIGNALS
 				/* Very useful to debug dynamic linker problems */
 				printk ("Sig %ld going for %s[%d]...\n", signr, current->comm, current->pid);

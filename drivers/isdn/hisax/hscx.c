@@ -1,10 +1,10 @@
-/* $Id: hscx.c,v 1.21 2000/11/24 17:05:37 kai Exp $
+/* $Id: hscx.c,v 1.21.6.2 2001/06/09 15:14:17 kai Exp $
  *
  * hscx.c   HSCX specific routines
  *
  * Author       Karsten Keil (keil@isdn4linux.de)
  *
- * This file is (c) under GNU PUBLIC LICENSE
+ * This file is (c) under GNU General Public License
  *
  */
 
@@ -166,8 +166,8 @@ close_hscxstate(struct BCState *bcs)
 			kfree(bcs->blog);
 			bcs->blog = NULL;
 		}
-		discard_queue(&bcs->rqueue);
-		discard_queue(&bcs->squeue);
+		skb_queue_purge(&bcs->rqueue);
+		skb_queue_purge(&bcs->squeue);
 		if (bcs->tx_skb) {
 			dev_kfree_skb(bcs->tx_skb);
 			bcs->tx_skb = NULL;

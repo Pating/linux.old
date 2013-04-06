@@ -41,8 +41,8 @@
 
 #define SMART2_DRIVER_VERSION(maj,min,submin) ((maj<<16)|(min<<8)|(submin))
 
-#define DRIVER_NAME "Compaq SMART2 Driver (v 1.0.11)"
-#define DRIVER_VERSION SMART2_DRIVER_VERSION(1,0,11)
+#define DRIVER_NAME "Compaq SMART2 Driver (v 1.0.12)"
+#define DRIVER_VERSION SMART2_DRIVER_VERSION(1,0,12)
 
 /* Embedded module documentation macros - see modules.h */
 /* Original author Chris Frantz - Compaq Computer Corporation */
@@ -1167,6 +1167,8 @@ static int ida_ioctl(struct inode *inode, struct file *filep, unsigned int cmd, 
 		put_user(read_ahead[MAJOR(inode->i_rdev)], (int*)arg);
 		return 0;
 	case BLKRRPART:
+		if(!capable(CAP_SYS_ADMIN))
+			return -EPERM;
 		return revalidate_logvol(inode->i_rdev, 1);
 	case IDAPASSTHRU:
 		if (!suser()) return -EPERM;
@@ -1556,7 +1558,7 @@ static int revalidate_logvol(kdev_t dev, int maxusage)
 	max_p = gdev->max_p;
 	start = target << gdev->minor_shift;
 
-	for(i=max_p; i>=0; i--) {
+	for(i=max_p-1; i>=0; i--) {
 		int minor = start+i;
 		kdev_t devi = MKDEV(MAJOR_NR + ctlr, minor);
 		struct super_block *sb = get_super(devi);

@@ -329,6 +329,7 @@
 #define PCI_DEVICE_ID_COMPAQ_NETEL100PI	0xae43
 #define PCI_DEVICE_ID_COMPAQ_NETEL100I	0xb011
 #define PCI_DEVICE_ID_COMPAQ_CISS	0xb060
+#define PCI_DEVICE_ID_COMPAQ_CISSB	0xb178
 #define PCI_DEVICE_ID_COMPAQ_THUNDER	0xf130
 #define PCI_DEVICE_ID_COMPAQ_NETFLEX3B	0xf150
 
@@ -626,7 +627,12 @@
 #define PCI_DEVICE_ID_APPLE_BANDIT	0x0001
 #define PCI_DEVICE_ID_APPLE_GC		0x0002
 #define PCI_DEVICE_ID_APPLE_HYDRA	0x000e
- 
+#define PCI_DEVICE_ID_APPLE_UNI_N_FW    0x0018
+#define PCI_DEVICE_ID_APPLE_KL_USB      0x0019
+#define PCI_DEVICE_ID_APPLE_UNI_N_AGP   0x0020
+#define PCI_DEVICE_ID_APPLE_UNI_N_GMAC  0x0021
+#define PCI_DEVICE_ID_APPLE_UNI_N_FW2   0x0030
+
 #define PCI_VENDOR_ID_YAMAHA		0x1073
 #define PCI_DEVICE_ID_YAMAHA_724	0x0004
 #define PCI_DEVICE_ID_YAMAHA_724F	0x000d
@@ -1350,10 +1356,23 @@
 #define PCI_SLOT(devfn)		(((devfn) >> 3) & 0x1f)
 #define PCI_FUNC(devfn)		((devfn) & 0x07)
 
+/* Ioctls for /proc/bus/pci/X/Y nodes. */
+#define PCIIOC_BASE		('P' << 24 | 'C' << 16 | 'I' << 8)
+#define PCIIOC_CONTROLLER	(PCIIOC_BASE | 0x00)	/* Get controller for PCI device. */
+#define PCIIOC_MMAP_IS_IO	(PCIIOC_BASE | 0x01)	/* Set mmap state to I/O space. */
+#define PCIIOC_MMAP_IS_MEM	(PCIIOC_BASE | 0x02)	/* Set mmap state to MEM space. */
+#define PCIIOC_WRITE_COMBINE	(PCIIOC_BASE | 0x03)	/* Enable/disable write-combining. */
+
 #ifdef __KERNEL__
 
 #include <linux/types.h>
 #include <linux/config.h>
+
+/* File state for mmap()s on /proc/bus/pci/X/Y */
+enum pci_mmap_state {
+	pci_mmap_io,
+	pci_mmap_mem
+};
 
 /*
  * There is one pci_dev structure for each slot-number/function-number
@@ -1423,6 +1442,10 @@ extern struct pci_dev	*pci_devices;	/* list of all devices */
 #define PCIBIOS_BAD_REGISTER_NUMBER	0x87
 #define PCIBIOS_SET_FAILED		0x88
 #define PCIBIOS_BUFFER_TOO_SMALL	0x89
+
+/* Include architecture-dependent settings and functions */
+
+#include <asm/pci.h>
 
 /* Low-level architecture-dependent routines */
 

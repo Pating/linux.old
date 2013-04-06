@@ -544,6 +544,7 @@ void flush_thread(void)
 
 void release_thread(struct task_struct *dead_task)
 {
+    release_x86_irqs(dead_task);
 }
 
 /*
@@ -808,7 +809,7 @@ asmlinkage int sys_execve(struct pt_regs regs)
 		goto out;
 	error = do_execve(filename, (char **) regs.ecx, (char **) regs.edx, &regs);
 	if (error == 0)
-		current->flags &= ~PF_DTRACE;
+		current->ptrace &= ~PT_DTRACE;
 	putname(filename);
 out:
 	unlock_kernel();

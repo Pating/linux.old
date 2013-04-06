@@ -5,7 +5,7 @@
  *
  *		Implementation of the Transmission Control Protocol(TCP).
  *
- * Version:	$Id: tcp_input.c,v 1.164.2.21 2001/03/06 05:39:39 davem Exp $
+ * Version:	$Id: tcp_input.c,v 1.164.2.25 2001/05/24 22:33:21 davem Exp $
  *
  * Authors:	Ross Biro, <bir7@leland.Stanford.Edu>
  *		Fred N. van Kempen, <waltje@uWalt.NL.Mugnet.ORG>
@@ -734,8 +734,6 @@ static void tcp_ack_saw_tstamp(struct sock *sk, struct tcp_opt *tp,
 	if (tp->retransmits) {
 		if (tp->packets_out == 0) {
 			tp->retransmits = 0;
-			tp->fackets_out = 0;
-			tp->retrans_out = 0;
 			tp->backoff = 0;
 			tcp_set_rto(tp);
 		} else {
@@ -782,8 +780,10 @@ static int tcp_ack(struct sock *sk, struct tcphdr *th,
 	if(sk->zapped)
 		return(1);	/* Dead, can't ack any more so why bother */
 
-	if (tp->pending == TIME_KEEPOPEN)
+	if (tp->pending == TIME_KEEPOPEN) {
 	  	tp->probes_out = 0;
+		tp->pending = 0;
+	}
 
 	tp->rcv_tstamp = tcp_time_stamp;
 
@@ -851,8 +851,6 @@ static int tcp_ack(struct sock *sk, struct tcphdr *th,
 		if (tp->retransmits) {
 			if (tp->packets_out == 0) {
 				tp->retransmits = 0;
-				tp->fackets_out = 0;
-				tp->retrans_out = 0;
 			}
 		} else {
 			/* We don't have a timestamp. Can only use
@@ -879,6 +877,8 @@ static int tcp_ack(struct sock *sk, struct tcphdr *th,
 			tcp_ack_packets_out(sk, tp);
 	} else {
 		tcp_clear_xmit_timer(sk, TIME_RETRANS);
+		tp->fackets_out = 0;
+		tp->retrans_out = 0;
 	}
 
 	flag &= (FLAG_DATA | FLAG_WIN_UPDATE);
@@ -1441,8 +1441,8 @@ static void tcp_data_queue(struct sock *sk, struct sk_buff *skb)
 	if (!after(TCP_SKB_CB(skb)->end_seq, tp->rcv_nxt)) {
 		/* A retransmit, 2nd most common case.  Force an imediate ack. */
 		SOCK_DEBUG(sk, "retransmit received: seq %X\n", TCP_SKB_CB(skb)->seq);
-		tcp_enter_quickack_mode(tp);
 out_of_window:
+		tcp_enter_quickack_mode(tp);
 		tp->delayed_acks++;
 		kfree_skb(skb);
 		return;
@@ -1538,7 +1538,7 @@ static int tcp_data(struct sk_buff *skb, struct sock *sk, unsigned int len)
 	skb_pull(skb, th->doff*4);
 	skb_trim(skb, len - (th->doff*4));
 
-        if (skb->len == 0 && !th->fin)
+	if (TCP_SKB_CB(skb)->seq == TCP_SKB_CB(skb)->end_seq)
 		return(0);
 
 	/* 
@@ -1961,7 +1961,7 @@ int tcp_rcv_established(struct sock *sk, struct sk_buff *skb,
 	 * Dave!!! Phrase above (and all about rcv_mss) has 
 	 * nothing to do with reality. rcv_mss must measure TOTAL
 	 * size, including sacks, IP options etc. Hence, measure_rcv_mss
-	 * must occure before pulling etc, otherwise it will flap
+	 * must occur before pulling etc, otherwise it will flap
 	 * like hell. Even putting it before tcp_data is wrong,
 	 * it should use skb->tail - skb->nh.raw instead.
 	 *					--ANK (980805)
@@ -2280,10 +2280,8 @@ int tcp_rcv_state_process(struct sock *sk, struct sk_buff *skb,
 		tcp_sync_mss(sk, tp->pmtu_cookie);
 		tp->rcv_mss = tp->mss_cache;
 
-		if (sk->state == TCP_SYN_RECV)
-			goto discard;
-		
-		goto step6; 
+		/* Discard data/urg received with SYN. Safety is the first. */
+		goto discard;
 	}
 
 	/*   Parse the tcp_options present on this header.
@@ -2418,7 +2416,6 @@ int tcp_rcv_state_process(struct sock *sk, struct sk_buff *skb,
 	} else
 		goto discard;
 
-step6:
 	/* step 6: check the URG bit */
 	tcp_urg(sk, th, len);
 

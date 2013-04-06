@@ -69,6 +69,7 @@
 #define TW_CONTROL_ENABLE_INTERRUPTS	       0x00000080
 #define TW_CONTROL_DISABLE_INTERRUPTS	       0x00000040
 #define TW_CONTROL_ISSUE_HOST_INTERRUPT	       0x00000020
+#define TW_CONTROL_CLEAR_PARITY_ERROR          0x00800000
 
 /* Status register bit definitions */
 #define TW_STATUS_MAJOR_VERSION_MASK	       0xF0000000
@@ -100,6 +101,7 @@
 #define TW_DEVICE_ID (0x1000)	/* Storage Controller */
 #define TW_DEVICE_ID2 (0x1001)  /* 7000 series controller */
 #define TW_NUMDEVICES 2
+#define TW_PCI_CLEAR_PARITY_ERRORS 0xc100
 
 /* Command packet opcodes */
 #define TW_OP_NOP	      0x0
@@ -122,6 +124,10 @@
 #define TW_AEN_REBUILD_DONE      0x0005
 #define TW_AEN_QUEUE_FULL        0x00ff
 #define TW_AEN_TABLE_UNDEFINED   0x15
+#define TW_AEN_APORT_TIMEOUT     0x0009
+#define TW_AEN_DRIVE_ERROR       0x000A
+#define TW_AEN_SMART_FAIL        0x000F
+#define TW_AEN_SBUF_FAIL         0x0024
 
 /* Misc defines */
 #define TW_ALIGNMENT			      0x200 /* 16 D-WORDS */
@@ -129,9 +135,9 @@
 #define TW_COMMAND_ALIGNMENT_MASK	      0x1ff
 #define TW_INIT_MESSAGE_CREDITS		      0x100
 #define TW_INIT_COMMAND_PACKET_SIZE	      0x3
-#define TW_POLL_MAX_RETRIES        	      10000
+#define TW_POLL_MAX_RETRIES        	      20000
 #define TW_MAX_SGL_LENGTH		      62
-#define TW_Q_LENGTH			      256
+#define TW_Q_LENGTH			      16
 #define TW_Q_START			      0
 #define TW_MAX_SLOT			      32
 #define TW_MAX_PCI_BUSES		      255
@@ -143,6 +149,7 @@
 #define TW_MAX_AEN_TRIES                      100
 #define TW_UNIT_ONLINE                        1
 #define TW_IN_INTR                            1
+#define TW_AEN_WAIT_TIME                      1000
 
 /* Macros */
 #define TW_STATUS_ERRORS(x) \
@@ -264,8 +271,11 @@ typedef struct TAG_TW_Device_Extension {
 	TW_Registers		registers;
 	u32			*alignment_virtual_address[TW_Q_LENGTH];
 	u32			alignment_physical_address[TW_Q_LENGTH];
+	u32                     *bounce_buffer[TW_Q_LENGTH];
 	int			is_unit_present[TW_MAX_UNITS];
+	int			is_raid_five[TW_MAX_UNITS];
 	int			num_units;
+	int			num_raid_five;
 	u32			*command_packet_virtual_address[TW_Q_LENGTH];
 	u32			command_packet_physical_address[TW_Q_LENGTH];
 	struct pci_dev		*tw_pci_dev;
@@ -288,6 +298,7 @@ typedef struct TAG_TW_Device_Extension {
 	u32			num_resets;
 	u32			sector_count;
 	u32			max_sector_count;
+	u32                     aen_count;
 	struct Scsi_Host	*host;
 	spinlock_t		tw_lock;
 	unsigned char		ioctl_size[TW_Q_LENGTH];
@@ -306,6 +317,8 @@ int tw_check_bits(u32 status_reg_value);
 int tw_check_errors(TW_Device_Extension *tw_dev);
 void tw_clear_attention_interrupt(TW_Device_Extension *tw_dev);
 void tw_clear_host_interrupt(TW_Device_Extension *tw_dev);
+void tw_decode_bits(TW_Device_Extension *tw_dev, u32 status_reg_value);
+void tw_decode_error(TW_Device_Extension *tw_dev, unsigned char status, unsigned char flags, unsigned char unit);
 void tw_disable_interrupts(TW_Device_Extension *tw_dev);
 int tw_empty_response_que(TW_Device_Extension *tw_dev);
 void tw_enable_interrupts(TW_Device_Extension *tw_dev);

@@ -3,7 +3,7 @@
  *
  * Author:	Ivan Passos <ivan@cyclades.com>
  *
- * Copyright:	(c) 1999-2000 Cyclades Corp.
+ * Copyright:	(c) 1999-2001 Cyclades Corp.
  *
  *	This program is free software; you can redistribute it and/or
  *	modify it under the terms of the GNU General Public License
@@ -11,6 +11,27 @@
  *	2 of the License, or (at your option) any later version.
  *
  * $Log: pc300.h,v $
+ * Revision 3.2 to 3.6  2001/09/28 13:16:03  daniela
+ * Included kernel version.
+ * New configuration parameters (line code, CRC calculation and clock).
+ * Increased DEF_MTU and TX_QUEUE_LEN.
+ *
+ * Revision 3.1  2001/06/15 12:41:10  regina
+ * upping major version number
+ *
+ * Revision 1.1.1.1  2001/06/13 20:24:38  daniela
+ * PC300 initial CVS version (3.4.0-pre1)
+ *
+ * Revision 2.5 2001/03/02 daniela
+ * Created struct pc300conf, to provide the hardware information to pc300util.
+ * 
+ * Revision 2.4 2000/12/22 daniela
+ * Structures and defines to support pc300util: statistics, status, 
+ * loopback tests, trace.
+ *
+ * Revision 2.3 2000/09/28 ivan
+ * Changed location of include files.
+ *
  * Revision 2.2 2000/06/23 ivan
  * Inclusion of 'loopback' field on structure 'pc300chconf', to allow 
  * loopback mode operation.
@@ -58,10 +79,10 @@
 #include <linux/hdlc.h>
 #endif
 #ifndef _HD64572_H
-#include <linux/hd64572.h>
+#include "hd64572.h"
 #endif
 #ifndef _FALC_LH_H
-#include <linux/falc-lh.h>
+#include "falc-lh.h"
 #endif
 
 #ifndef CY_TYPES
@@ -75,6 +96,8 @@ typedef	unsigned long	uclong;		/* 32 bits, unsigned */
 typedef	unsigned short	ucshort;	/* 16 bits, unsigned */
 typedef	unsigned char	ucchar;		/* 8 bits, unsigned */
 #endif /* CY_TYPES */
+
+#define PC300_KERNEL	"2.2.x"	/* Kernel supported by this driver */
 
 #define	PC300_DEVNAME	"hdlc"	/* Dev. name base (for hdlc0, hdlc1, etc.) */
 #define	PC300_MAXINDEX	100	/* Max dev. name index (the '0' in hdlc0) */
@@ -174,8 +197,13 @@ struct RUNTIME_9050 {
 #define	PC300_CTYPE_MASK		(0x00000800UL)
 
 /* CPLD Registers (base addr = falcbase, TE only) */
+/* CPLD v. 0 */
 #define CPLD_REG1	0x140	/* Chip resets, DCD/CTS status */
 #define CPLD_REG2	0x144	/* Clock enable , LED control */
+/* CPLD v. 2 or higher */
+#define CPLD_V2_REG1	0x100	/* Chip resets, DCD/CTS status */
+#define CPLD_V2_REG2	0x104	/* Clock enable , LED control */
+#define CPLD_ID_REG	0x108	/* CPLD version */
 
 /* CPLD Register bit description: for the FALC bits, they should always be 
    set based on the channel (use (bit<<(2*ch)) to access the correct bit for 
@@ -233,14 +261,58 @@ typedef struct falc {
 	ucchar prbs;
 } falc_t;
 
+typedef struct falc_status {
+	ucchar sync;  /* If true FALC is synchronized */
+	ucchar red_alarm;
+	ucchar blue_alarm;
+	ucchar loss_fa;
+	ucchar yellow_alarm;
+	ucchar loss_mfa;
+	ucchar prbs;
+} falc_status_t;
+
+typedef struct rsv_x21_status {
+	ucchar dcd;
+	ucchar dsr;
+	ucchar cts;
+	ucchar rts;
+	ucchar dtr;
+} rsv_x21_status_t;
+
+typedef struct pc300stats {
+	int hw_type;
+	uclong line_on;
+	uclong line_off;
+	struct net_device_stats gen_stats;
+	falc_t te_stats;
+} pc300stats_t;
+
+typedef struct pc300status {
+	int hw_type;
+	rsv_x21_status_t gen_status;
+	falc_status_t te_status;
+} pc300status_t;
+
+typedef struct pc300loopback {
+	char loop_type;
+	char loop_on;
+} pc300loopback_t;
+
+typedef struct pc300patterntst {
+	char patrntst_on;       /* 0 - off; 1 - on; 2 - read num_errors */
+	ucshort num_errors;
+} pc300patterntst_t;
+
 typedef struct pc300dev {
-	void *if_ptr;	/* General purpose pointer */
+	void *if_ptr;		/* General purpose pointer */
 	struct pc300ch *chan;
+	ucchar trace_on;
+	uclong line_on;		/* DCD(X.21, RSV) / sync(TE) change counters */
+	uclong line_off;
 #ifdef __KERNEL__
 	char name[16];
 	void *private;
 	hdlc_device *hdlc;
-	struct net_device_stats stats;
 	struct sk_buff *tx_skb;
 #endif /* __KERNEL__ */
 }pc300dev_t;
@@ -250,6 +322,9 @@ typedef struct pc300hw {
 	int nchan;		/* number of channels */
 	int irq;		/* interrupt request level */
 	uclong clock;		/* Board clock */
+	ucchar cpld_id;		/* CPLD ID (TE only) */
+	ucshort cpld_reg1;	/* CPLD reg 1 (TE only) */
+	ucshort cpld_reg2;	/* CPLD reg 2 (TE only) */
 	uclong plxphys;		/* PLX registers MMIO base (physical) */
 	uclong plxbase;		/* PLX registers MMIO base (virtual) */
 	uclong plxsize;		/* PLX registers MMIO size */
@@ -267,8 +342,12 @@ typedef struct pc300hw {
 typedef struct pc300chconf {
 	ucchar media;		/* HW media (RS232, V.35, etc.) */
 	uclong proto;		/* Protocol (PPP, X.25, etc.) */
+	uclong clktype;		/* Clock type (ext, int, txint, txfromrx) */
 	uclong clkrate;		/* Clock rate (in bps, 0 = ext. clock) */
 	ucchar loopback;	/* Loopback mode */
+	ucchar monitor;		/* Monitor mode (0 = off, !0 = on) */
+	ucshort encoding;	/* NRZ, NRZI, FM0, FM1 (FMi - only RSV/X.21) */
+	ucshort parity;		/* CRC calculation */
 
 	/* TE-specific parameters */
 	ucchar lcode;		/* Line Code (AMI, B8ZS, etc.) */
@@ -298,6 +377,11 @@ typedef struct pc300 {
 #endif /* __KERNEL__ */
 } pc300_t;
 
+typedef struct pc300conf {
+	pc300hw_t hw;
+	pc300chconf_t conf;
+} pc300conf_t;
+
 /* DEV ioctl() commands */
 #define	N_SPPP_IOCTLS	2
 
@@ -307,12 +391,45 @@ enum pc300_ioctl_cmds {
 	SIOCSPC300CONF,
 	SIOCGPC300STATUS,
 	SIOCGPC300FALCSTATUS,
+	SIOCGPC300UTILSTATS,
+	SIOCGPC300UTILSTATUS,
+	SIOCSPC300TRACE,
+	SIOCSPC300LOOPBACK,
+	SIOCSPC300PATTERNTEST,
+	SIOCGPC300HARDWARE,
+};
+
+/* Loopback types - PC300/TE boards */
+enum pc300_loopback_cmds {
+	PC300LOCLOOP = 1,
+	PC300REMLOOP,
+	PC300PAYLOADLOOP,
+	PC300GENLOOPUP,
+	PC300GENLOOPDOWN,
 };
 
 /* Control Constant Definitions */
 #define	PC300_RSV	0x01
 #define	PC300_X21	0x02
 #define	PC300_TE	0x03
+
+#define PC300_CLOCK_EXT		0  /* External TX and RX clock - DTE */
+#define PC300_CLOCK_INT		1  /* Internal TX and RX clock - DCE */
+#define PC300_CLOCK_TXINT	2  /* Internal TX and external RX clock */
+#define PC300_CLOCK_TXFROMRX	3  /* TX clock derived from external RX clock */
+
+#define PC300_ENCODING_NRZ		0x0000
+#define PC300_ENCODING_NRZI		0x0001
+#define PC300_ENCODING_FM_MARK		0x0002
+#define PC300_ENCODING_FM_SPACE		0x0003
+#define PC300_ENCODING_MANCHESTER	0x0004
+
+#define PC300_PARITY_NONE		0x0000
+#define PC300_PARITY_CRC16_PR0		0x0001
+#define PC300_PARITY_CRC16_PR1		0x0002
+#define PC300_PARITY_CRC16_PR0_CCITT	0x0003
+#define PC300_PARITY_CRC16_PR1_CCITT	0x0004
+#define PC300_PARITY_CRC32_PR1_CCITT	0x0005
 
 #define PC300_LC_AMI	0x01
 #define PC300_LC_B8ZS	0x02
@@ -327,6 +444,7 @@ enum pc300_ioctl_cmds {
 /* Framing (E1) */
 #define PC300_FR_MF_CRC4	0x04
 #define PC300_FR_MF_NON_CRC4	0x05
+#define PC300_FR_UNFRAMED	0x06
 
 #define PC300_LBO_0_DB		0x00
 #define PC300_LBO_7_5_DB	0x01
@@ -337,8 +455,8 @@ enum pc300_ioctl_cmds {
 #define PC300_RX_SENS_LH	0x02
 
 #define PC300_TX_TIMEOUT	(2*HZ)
-#define PC300_TX_QUEUE_LEN	10
-#define	PC300_DEF_MTU		1500
+#define PC300_TX_QUEUE_LEN	100
+#define	PC300_DEF_MTU		1600
 
 #ifdef __KERNEL__
 /* Function Prototypes */
@@ -377,6 +495,7 @@ void cpc_close(hdlc_device *);
 static uclong detect_ram(pc300_t *);
 static void plx_init(pc300_t *);
 static int cpc_detect(void);
+static void cpc_trace(struct device *, struct sk_buff *, char);
 #endif /* __KERNEL__ */
 
 #endif	/* _PC300_H */

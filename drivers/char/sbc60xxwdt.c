@@ -49,7 +49,7 @@
  *
  *  Why `V' ?  Well, `V' is the character in ASCII for the value 86,
  *  and we all know that 86 is _the_ most random number in the universe.
- *  Therefore it is the letter that has the slightest chance of occuring
+ *  Therefore it is the letter that has the slightest chance of occurring
  *  by chance, when the system becomes corrupted.
  *
  */
@@ -170,9 +170,13 @@ static ssize_t fop_write(struct file * file, const char * buf, size_t count, lof
 
     /* now scan */
     for(ofs = 0; ofs != count; ofs++) 
-      if(buf[ofs] == 'V')
+    {
+      char c;
+      if(get_user(c, buf+ofs))
+      	return -EFAULT;
+      if(c == 'V')
 	wdt_expect_close = 1;
-
+    }
     /* Well, anyhow someone wrote to us, we should return that favour */
     next_heartbeat = jiffies + WDT_HEARTBEAT;
   }
