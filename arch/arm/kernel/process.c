@@ -71,8 +71,9 @@ asmlinkage int sys_idle(void)
 	current->priority = -100;
 	for (;;)
 	{
+		check_pgt_cache();
 #if 0 //def ARCH_IDLE_OK
-		if (!hlt_counter && !need_resched)
+		if (!hlt_counter && !current->need_resched)
 			proc_idle ();
 #endif
 		run_task_queue(&tq_scheduler);

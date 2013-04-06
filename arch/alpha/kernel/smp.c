@@ -1,4 +1,3 @@
-#include <linux/config.h>
 #include <linux/errno.h>
 #include <linux/kernel.h>
 #include <linux/kernel_stat.h>
@@ -336,10 +335,8 @@ void smp_percpu_timer_interrupt(struct pt_regs *regs)
 
 #ifdef NOT_YET
         clear_profile_irq(mid_xlate[cpu]);
-#ifdef CONFIG_PROFILE
         if(!user_mode(regs))
-		sparc_do_profile(regs->pc);
-#endif
+		alpha_do_profile(regs->pc);
 #endif
 
         if (!--prof_counter[cpu]) {
@@ -349,7 +346,7 @@ void smp_percpu_timer_interrupt(struct pt_regs *regs)
 
                         if (--current->counter < 0) {
 				current->counter = 0;
-                                need_resched = 1;
+                                current->need_resched = 1;
                         }
 
                         spin_lock(&ticker_lock);

@@ -559,6 +559,8 @@ extern inline pmd_t * pmd_alloc(pgd_t *pgd, unsigned long address)
 #define pte_alloc_kernel	pte_alloc
 #define pmd_alloc_kernel	pmd_alloc
 
+extern int do_check_pgt_cache(int, int);
+
 extern inline void set_pgdir(unsigned long address, pgd_t entry)
 {
 	struct task_struct * p;
@@ -599,5 +601,8 @@ extern inline pte_t mk_swap_pte(unsigned long type, unsigned long offset)
 
 #define module_map	vmalloc
 #define module_unmap	vfree
+
+/* Needs to be defined here and not in linux/mm.h, as it is arch dependent */
+#define PageSkip(page)		(0)
 
 #endif /* _ALPHA_PGTABLE_H */

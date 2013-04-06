@@ -7,6 +7,7 @@
  * Paul Mackerras	August 1996.
  * Copyright (C) 1996 Paul Mackerras.
  */
+#include <linux/config.h>
 #include <linux/errno.h>
 #include <linux/sched.h>
 #include <linux/kernel.h>
@@ -134,6 +135,34 @@ __initfunc(int via_calibrate_decr(void))
 	return 1;
 }
 
+#ifdef CONFIG_PMAC_PBOOK
+/*
+ * Reset the time after a sleep.
+ */
+static int time_sleep_notify(struct notifier_block *this, unsigned long event,
+			     void *x)
+{
+	static unsigned long time_diff;
+
+	switch (event) {
+	case PBOOK_SLEEP:
+		time_diff = xtime.tv_sec - pmac_get_rtc_time();
+		break;
+	case PBOOK_WAKE:
+		xtime.tv_sec = pmac_get_rtc_time() + time_diff;
+		xtime.tv_usec = 0;
+		set_dec(decrementer_count);
+		last_rtc_update = xtime.tv_sec;
+		break;
+	}
+	return NOTIFY_DONE;
+}
+
+static struct notifier_block time_sleep_notifier = {
+	time_sleep_notify, NULL, 100
+};
+#endif /* CONFIG_PMAC_PBOOK */
+
 /*
  * Query the OF and get the decr frequency.
  * This was taken from the pmac time_init() when merging the prep/pmac
@@ -143,6 +172,10 @@ __initfunc(void pmac_calibrate_decr(void))
 {
 	struct device_node *cpu;
 	int freq, *fp, divisor;
+
+#ifdef CONFIG_PMAC_PBOOK
+	notifier_chain_register(&sleep_notifier_list, &time_sleep_notifier);
+#endif /* CONFIG_PMAC_PBOOK */
 
 	if (via_calibrate_decr())
 		return;

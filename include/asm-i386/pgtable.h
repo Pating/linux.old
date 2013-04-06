@@ -547,6 +547,8 @@ extern inline pmd_t * pmd_alloc(pgd_t * pgd, unsigned long address)
 #define pmd_free_kernel		pmd_free
 #define pmd_alloc_kernel	pmd_alloc
 
+extern int do_check_pgt_cache(int, int);
+
 extern inline void set_pgdir(unsigned long address, pgd_t entry)
 {
 	struct task_struct * p;
@@ -593,5 +595,8 @@ extern inline void update_mmu_cache(struct vm_area_struct * vma,
 #define module_unmap    vfree
 
 #endif /* !__ASSEMBLY__ */
+
+/* Needs to be defined here and not in linux/mm.h, as it is arch dependent */
+#define PageSkip(page)		(0)
 
 #endif /* _I386_PAGE_H */

@@ -192,6 +192,15 @@ N: Ross Biro
 E: bir7@leland.Stanford.Edu
 D: Original author of the Linux networking code
 
+N: Anton Blanchard
+E: anton@progsoc.uts.edu.au
+W: http://www.progsoc.uts.edu.au/~anton/
+P: 1024/8462A731 4C 55 86 34 44 59 A7 99  2B 97 88 4A 88 9A 0D 97
+D: sun4 port
+S: 47 Robert Street
+S: Marrickville NSW 2204
+S: Australia
+
 N: Philip Blundell
 E: Philip.Blundell@pobox.com
 D: Device driver hacking 
@@ -890,6 +899,13 @@ S: Kattreinstr 38
 S: D-64295
 S: Germany
 
+N: Andi Kleen
+E: ak@muc.de
+D: network hacker, syncookies
+S: Schwalbenstr. 96
+S: 85551 Ottobrunn
+S: Germany
+
 N: Ian Kluft
 E: ikluft@thunder.sbay.org
 W: http://www.kluft.com/~ikluft/
@@ -924,13 +940,6 @@ D: The Linux Support Team Erlangen
 N: Andreas Koensgen
 E: ajk@iehk.rwth-aachen.de
 D: 6pack driver for AX.25
-
-N: Andi Kleen
-E: ak@muc.de
-D: network hacker, syncookies
-S: Schwalbenstr. 96
-S: 85551 Ottobrunn
-S: Germany
 
 N: Willy Konynenberg
 E: willy@xos.nl

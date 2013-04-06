@@ -183,22 +183,11 @@ if [ "$CONFIG_SGI" != "y" ]; then
 	endmenu
 fi
 
-# Conditionally compile in the Uniform CD-ROM driver
-if [ "$CONFIG_BLK_DEV_IDECD" = "y" -o "$CONFIG_BLK_DEV_SR" = "y" -o "$CONFIG_SBPCD" = "y" -o "$CONFIG_MCD" = "y" -o "$CONFIG_CM206" = "y" -o "$CONFIG_CDU31A" = "y" ]; then
-  define_bool CONFIG_CDROM y
-else
-  if [ "$CONFIG_BLK_DEV_IDECD" = "m" -o "$CONFIG_BLK_DEV_SR" = "m" -o "$CONFIG_SBPCD" = "m" -o "$CONFIG_MCD" = "m" -o "$CONFIG_CM206" = "m" -o "$CONFIG_CDU31A" = "m" ]; then
-    define_bool CONFIG_CDROM m
-  else
-    define_bool CONFIG_CDROM n
-  fi
-fi
+source drivers/char/Config.in
 
 source fs/Config.in
 
 source fs/nls/Config.in
-
-source drivers/char/Config.in
 
 mainmenu_option next_comment
 comment 'Sound'
@@ -222,8 +211,4 @@ if [ "$CONFIG_MODULES" = "y" ]; then
   bool ' Build fp execption handler module' CONFIG_MIPS_FPE_MODULE
 fi
 bool 'Remote GDB kernel debugging' CONFIG_REMOTE_DEBUG
-bool 'Kernel profiling support' CONFIG_PROFILE
-if [ "$CONFIG_PROFILE" = "y" ]; then
-  int ' Profile shift count' CONFIG_PROFILE_SHIFT 2
-fi
 endmenu

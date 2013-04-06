@@ -120,7 +120,19 @@ static inline void free_one_pgd(pgd_t * dir)
 		free_one_pmd(pmd+j);
 	pmd_free(pmd);
 }
-	
+
+/* Low and high watermarks for page table cache.
+   The system should try to have pgt_water[0] <= cache elements <= pgt_water[1]
+ */
+int pgt_cache_water[2] = { 25, 50 };
+
+/* Returns the number of pages freed */
+int check_pgt_cache(void)
+{
+	return do_check_pgt_cache(pgt_cache_water[0], pgt_cache_water[1]);
+}
+
+
 /*
  * This function clears all user-level page tables of a process - this
  * is needed by execve(), so that old pages aren't in the way.
@@ -945,24 +957,5 @@ void make_pages_present(unsigned long addr, unsigned long end)
 	while (addr < end) {
 		handle_mm_fault(current, vma, addr, write);
 		addr += PAGE_SIZE;
-	}
-}
-
-/* Low and high watermarks for page table cache.
-   The system should try to have pgt_water[0] <= cache elements <= pgt_water[1]
- */
-int pgt_cache_water[2] = { 25, 50 };
-
-void check_pgt_cache(void)
-{
-	if (pgtable_cache_size > pgt_cache_water[1]) {
-		do {
-			if (pgd_quicklist)
-				free_pgd_slow(get_pgd_fast());
-			if (pmd_quicklist)
-				free_pmd_slow(get_pmd_fast());
-			if (pte_quicklist)
-				free_pte_slow(get_pte_fast());
-		} while (pgtable_cache_size > pgt_cache_water[0]);
 	}
 }
