@@ -7,7 +7,7 @@
  *		handler for protocols to use and generic option handler.
  *
  *
- * Version:	$Id: sock.c,v 1.77 1999/03/21 05:22:26 davem Exp $
+ * Version:	$Id: sock.c,v 1.79 1999/03/28 10:18:25 davem Exp $
  *
  * Authors:	Ross Biro, <bir7@leland.Stanford.Edu>
  *		Fred N. van Kempen, <waltje@uWalt.NL.Mugnet.ORG>
@@ -150,6 +150,9 @@ int sock_setsockopt(struct socket *sock, int level, int optname,
 		    char *optval, int optlen)
 {
 	struct sock *sk=sock->sk;
+#ifdef CONFIG_FILTER
+	struct sk_filter *filter;
+#endif
 	int val;
 	int valbool;
 	int err;
@@ -341,17 +344,11 @@ int sock_setsockopt(struct socket *sock, int level, int optname,
 			break;
 
 		case SO_DETACH_FILTER:
-                        if(sk->filter) {
-				struct sk_filter *filter;
-
-				filter = sk->filter;
-
-				net_serialize_enter();
+			filter = sk->filter;
+                        if(filter) {
 				sk->filter = NULL;
-				net_serialize_leave();
-				
-				if (filter)
-					sk_filter_release(sk, filter);
+				synchronize_bh();
+				sk_filter_release(sk, filter);
 				return 0;
 			}
 			return -ENOENT;
@@ -501,22 +498,16 @@ struct sock *sk_alloc(int family, int priority, int zero_it)
 
 void sk_free(struct sock *sk)
 {
+#ifdef CONFIG_FILTER
+	struct sk_filter *filter;
+#endif
 	if (sk->destruct)
 		sk->destruct(sk);
 
 #ifdef CONFIG_FILTER
-	if (sk->filter) {
-		sk_filter_release(sk, sk->filter);
-		sk->filter = NULL;
-	}
-#endif
-
-	if (atomic_read(&sk->omem_alloc))
-		printk(KERN_DEBUG "sk_free: optmem leakage (%d bytes) detected.\n", atomic_read(&sk->omem_alloc));
-
-#ifdef CONFIG_FILTER
-	if (sk->filter) {
-		sk_filter_release(sk, sk->filter);
+	filter = sk->filter;
+	if (filter) {
+		sk_filter_release(sk, filter);
 		sk->filter = NULL;
 	}
 #endif
