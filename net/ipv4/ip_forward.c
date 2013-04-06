@@ -16,6 +16,7 @@
  *					use output device for accounting.
  *		Jos Vos		:	Call forward firewall after routing
  *					(always use output device).
+ *		Philip Gladstone:	Add some missing ip_rt_put()
  */
 
 #include <linux/config.h>
@@ -113,7 +114,7 @@ int ip_forward(struct sk_buff *skb, struct device *dev, int is_frag,
 	struct device *dev2;	/* Output device */
 	struct iphdr *iph;	/* Our header */
 	struct sk_buff *skb2;	/* Output packet */
-	struct rtable *rt;	/* Route we use */
+	struct rtable *rt = NULL;	/* Route we use */
 	unsigned char *ptr;	/* Data pointer */
 	unsigned long raddr;	/* Router IP address */
 	struct   options * opt	= (struct options*)skb->proto_priv;
@@ -301,6 +302,8 @@ int ip_forward(struct sk_buff *skb, struct device *dev, int is_frag,
 			icmp_send(skb, ICMP_DEST_UNREACH, ICMP_HOST_UNREACH, 0, dev);
 			/* fall thru */
 		default:
+			if (rt)
+				ip_rt_put(rt);
 			return -1;
 		}
 
@@ -318,6 +321,17 @@ int ip_forward(struct sk_buff *skb, struct device *dev, int is_frag,
 	if (dev2->flags & IFF_UP)
 	{
 #ifdef CONFIG_IP_MASQUERADE
+		__u32	premasq_saddr = iph->saddr;
+		__u16	premasq_sport = 0;
+		__u16	*portptr;
+		long	premasq_len_diff = skb->len;
+
+		if (iph->protocol==IPPROTO_UDP ||
+                    iph->protocol==IPPROTO_TCP) {
+			portptr = (__u16 *)&(((char *)iph)[iph->ihl*4]);
+			premasq_sport = portptr[0];
+		}
+
 		/*
 		 * If this fragment needs masquerading, make it so...
 		 * (Don't masquerade de-masqueraded fragments)
@@ -338,6 +352,28 @@ int ip_forward(struct sk_buff *skb, struct device *dev, int is_frag,
 		if (skb->len+encap > dev2->mtu && (iph->frag_off & htons(IP_DF))) 
 		{
 			ip_statistics.IpFragFails++;
+#ifdef CONFIG_IP_MASQUERADE
+			/* If we're demasquerading, put the correct daddr back */
+			if (is_frag&IPFWD_MASQUERADED)
+				iph->daddr = dev->pa_addr;
+
+			/* If we're masquerading, put the correct source back */
+			else if (fw_res==FW_MASQUERADE) {
+				iph->saddr = premasq_saddr;
+				if (premasq_sport)
+					portptr[0] = premasq_sport;
+			}
+ 
+			/* If the packet has got larger and this has caused it to
+			   exceed the MTU, then we'll claim that our MTU just got
+			   smaller and hope it works */
+			premasq_len_diff -= skb->len;
+
+			if (premasq_len_diff < 0)
+				icmp_send(skb, ICMP_DEST_UNREACH, ICMP_FRAG_NEEDED,
+					  htonl(dev2->mtu+premasq_len_diff), dev);
+			else
+#endif
 			icmp_send(skb, ICMP_DEST_UNREACH, ICMP_FRAG_NEEDED, htonl(dev2->mtu), dev);
 			if(rt)
 				ip_rt_put(rt);
@@ -454,6 +490,8 @@ int ip_forward(struct sk_buff *skb, struct device *dev, int is_frag,
 				icmp_send(skb2, ICMP_DEST_UNREACH, ICMP_HOST_UNREACH, 0, dev);
 			if (skb != skb2)
 				kfree_skb(skb2,FREE_WRITE);
+			if (rt)
+				ip_rt_put(rt);
 			return -1;
 		}
 #endif
