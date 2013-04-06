@@ -27,8 +27,7 @@
 #include <asm/spinlock.h>
 #include <asm/atomic.h>
 #include <asm/debugreg.h>
-
-#include "desc.h"
+#include <asm/desc.h>
 
 asmlinkage int system_call(void);
 asmlinkage void lcall7(void);
