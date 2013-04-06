@@ -267,6 +267,7 @@ static inline int buffer_protected(struct buffer_head * bh)
 #include <linux/romfs_fs_i.h>
 #include <linux/smb_fs_i.h>
 #include <linux/hfs_fs_i.h>
+#include <linux/adfs_fs_i.h>
 
 /*
  * Attribute flags.  These should be or-ed together to figure out what
@@ -318,10 +319,11 @@ struct iattr {
 struct inode {
 	struct list_head	i_hash;
 	struct list_head	i_list;
+	struct list_head	i_dentry;
 
 	unsigned long		i_ino;
+	unsigned int		i_count;
 	kdev_t			i_dev;
-	unsigned short		i_count;
 	umode_t			i_mode;
 	nlink_t			i_nlink;
 	uid_t			i_uid;
@@ -368,6 +370,7 @@ struct inode {
 		struct romfs_inode_info		romfs_i;
 		struct smb_inode_info		smbfs_i;
 		struct hfs_inode_info		hfs_i;
+		struct adfs_inode_info		adfs_i;
 		struct socket			socket_i;
 		void				*generic_ip;
 	} u;
@@ -506,6 +509,7 @@ extern int fasync_helper(struct file *, int, struct fasync_struct **);
 #include <linux/romfs_fs_sb.h>
 #include <linux/smb_fs_sb.h>
 #include <linux/hfs_fs_sb.h>
+#include <linux/adfs_fs_sb.h>
 
 struct super_block {
 	kdev_t			s_dev;
@@ -542,6 +546,7 @@ struct super_block {
 		struct romfs_sb_info	romfs_sb;
 		struct smb_sb_info	smbfs_sb;
 		struct hfs_sb_info	hfs_sb;
+		struct adfs_sb_info	adfs_sb;
 		void			*generic_sbp;
 	} u;
 };
@@ -774,6 +779,7 @@ extern void clear_inode(struct inode *);
 extern struct inode * get_empty_inode(void);
 
 extern void insert_inode_hash(struct inode *);
+extern void remove_inode_hash(struct inode *);
 extern int get_unused_fd(void);
 extern void put_unused_fd(int);
 extern struct file * get_empty_filp(void);

@@ -50,6 +50,7 @@
 #include <linux/swap.h>
 #include <linux/ctype.h>
 #include <linux/file.h>
+#include <linux/console.h>
 
 extern unsigned char aux_device_present, kbd_read_mask;
 
@@ -119,6 +120,8 @@ EXPORT_SYMBOL(do_mmap);
 EXPORT_SYMBOL(do_munmap);
 EXPORT_SYMBOL(exit_mm);
 EXPORT_SYMBOL(exit_files);
+EXPORT_SYMBOL(exit_fs);
+EXPORT_SYMBOL(exit_sighand);
 
 /* internal kernel memory management */
 EXPORT_SYMBOL(__get_free_pages);
@@ -380,6 +383,7 @@ EXPORT_SYMBOL(read_ahead);
 EXPORT_SYMBOL(get_hash_table);
 EXPORT_SYMBOL(get_empty_inode);
 EXPORT_SYMBOL(insert_inode_hash);
+EXPORT_SYMBOL(remove_inode_hash);
 EXPORT_SYMBOL(make_bad_inode);
 EXPORT_SYMBOL(is_bad_inode);
 EXPORT_SYMBOL(event);
@@ -404,3 +408,7 @@ EXPORT_SYMBOL(disk_name);	/* for md.c */
 /* binfmt_aout */
 EXPORT_SYMBOL(get_write_access);
 EXPORT_SYMBOL(put_write_access);
+
+/* dynamic registering of consoles */
+EXPORT_SYMBOL(register_console);
+EXPORT_SYMBOL(unregister_console);

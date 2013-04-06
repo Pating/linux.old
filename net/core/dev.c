@@ -724,7 +724,7 @@ void netif_rx(struct sk_buff *skb)
 }
 
 #ifdef CONFIG_BRIDGE
-static inline void handle_bridge(struct skbuff *skb, unsigned short type)
+static inline void handle_bridge(struct sk_buff *skb, unsigned short type)
 {
 	if (br_stats.flags & BR_UP && br_protocol_ok(ntohs(type)))
 	{
@@ -739,7 +739,7 @@ static inline void handle_bridge(struct skbuff *skb, unsigned short type)
 		if(br_receive_frame(skb))
 		{
 			sti();
-			continue;
+			return;
 		}
 		/*
 		 *	Pull the MAC header off for the copy going to
@@ -1500,6 +1500,16 @@ static int dev_ifsioc(struct ifreq *ifr, unsigned int cmd)
 			ifr->ifr_ifindex = dev->ifindex;
 			return 0;
 
+		case SIOCGIFTXQLEN:
+			ifr->ifr_qlen = dev->tx_queue_len;
+			return 0;
+
+		case SIOCSIFTXQLEN:
+			if(ifr->ifr_qlen<2 || ifr->ifr_qlen>1024)
+				return -EINVAL;
+			dev->tx_queue_len = ifr->ifr_qlen;
+			return 0;
+
 		/*
 		 *	Unknown or private ioctl
 		 */
@@ -1591,6 +1601,7 @@ int dev_ioctl(unsigned int cmd, void *arg)
 		case SIOCGIFSLAVE:
 		case SIOCGIFMAP:
 		case SIOCGIFINDEX:
+		case SIOCGIFTXQLEN:
 			ret = dev_ifsioc(&ifr, cmd);
 			if (!ret) {
 #ifdef CONFIG_NET_ALIAS
@@ -1618,6 +1629,7 @@ int dev_ioctl(unsigned int cmd, void *arg)
 		case SIOCADDMULTI:
 		case SIOCDELMULTI:
 		case SIOCSIFHWBROADCAST:
+		case SIOCSIFTXQLEN:
 			if (!suser())
 				return -EPERM;
 			rtnl_lock();

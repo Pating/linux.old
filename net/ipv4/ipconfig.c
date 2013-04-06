@@ -767,7 +767,7 @@ __initfunc(static int ic_bootp_string(char *dest, char *src, int len, int max))
 /*
  *  Process BOOTP extension.
  */
-__initfunc(static void ic_do_bootp_ext(u8 *ext))
+__initfunc(static void ic_do_bootp_ext(struct bootp_pkt *b, u8 *ext))
 {
 #ifdef IPCONFIG_DEBUG
 	u8 *c;
@@ -799,9 +799,6 @@ __initfunc(static void ic_do_bootp_ext(u8 *ext))
 				ic_bootp_string(root_server_path, ext+1, *ext, sizeof(root_server_path));
 			break;
 	}
-
-	if (ic_gateway == INADDR_NONE && b->relay_ip)
-		ic_gateway = b->relay_ip;
 }
 
 
@@ -867,7 +864,7 @@ __initfunc(static void ic_bootp_recv(void))
 				opt = ext;
 				ext += ext[1] + 2;
 				if (ext <= end)
-					ic_do_bootp_ext(opt);
+					ic_do_bootp_ext(b, opt);
 			}
 		}
 	}
