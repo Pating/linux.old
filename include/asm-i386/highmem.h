@@ -20,6 +20,7 @@
 
 #ifdef __KERNEL__
 
+#include <linux/config.h>
 #include <linux/init.h>
 #include <linux/interrupt.h>
 #include <asm/kmap_types.h>
@@ -42,7 +43,7 @@ extern void kmap_init(void) __init;
  * easily, subsequent pte tables have to be allocated in one physical
  * chunk of RAM.
  */
-#define PKMAP_BASE (0xff000000UL)
+#define PKMAP_BASE (0xfe000000UL)
 #ifdef CONFIG_X86_PAE
 #define LAST_PKMAP 512
 #else

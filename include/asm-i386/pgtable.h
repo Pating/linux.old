@@ -37,6 +37,13 @@ do { unsigned long tmpreg; __asm__ __volatile__("movl %%cr3,%0\n\tmovl %0,%%cr3"
 __asm__ __volatile__("invlpg %0": :"m" (*(char *) addr))
 #endif
 
+/*
+ * ZERO_PAGE is a global shared page that is always zero: used
+ * for zero-mapped memory areas etc..
+ */
+extern unsigned long empty_zero_page[1024];
+#define ZERO_PAGE(vaddr) (mem_map + MAP_NR(empty_zero_page))
+
 #endif /* !__ASSEMBLY__ */
 
 /*
@@ -51,13 +58,6 @@ __asm__ __volatile__("invlpg %0": :"m" (*(char *) addr))
 # include <asm/pgtable-2level.h>
 #endif
 #endif
-
-/*
- * Certain architectures need to do special things when PTEs
- * within a page table are directly modified.  Thus, the following
- * hook is made available.
- */
-#define set_pte(pteptr, pteval) ((*(pteptr)) = (pteval))
 
 #define __beep() asm("movb $0x3,%al; outb %al,$0x61")
 
@@ -152,13 +152,6 @@ __asm__ __volatile__("invlpg %0": :"m" (*(char *) addr))
 extern unsigned long pg0[1024];
 
 /*
- * ZERO_PAGE is a global shared page that is always zero: used
- * for zero-mapped memory areas etc..
- */
-extern unsigned long empty_zero_page[1024];
-#define ZERO_PAGE(vaddr) (mem_map + MAP_NR(empty_zero_page))
-
-/*
  * Handling allocation failures during page table setup.
  */
 extern void __handle_bad_pmd(pmd_t * pmd);
@@ -166,20 +159,19 @@ extern void __handle_bad_pmd_kernel(pmd_t * pmd);
 
 #define pte_none(x)	(!pte_val(x))
 #define pte_present(x)	(pte_val(x) & (_PAGE_PRESENT | _PAGE_PROTNONE))
-#define pte_clear(xp)	do { pte_val(*(xp)) = 0; } while (0)
+#define pte_clear(xp)	do { set_pte(xp, __pte(0)); } while (0)
 #define pte_pagenr(x)	((unsigned long)((pte_val(x) >> PAGE_SHIFT)))
 
 #define pmd_none(x)	(!pmd_val(x))
-#define	pmd_bad(x)	((pmd_val(x) & (~PAGE_MASK & ~_PAGE_USER)) != _KERNPG_TABLE)
 #define pmd_present(x)	(pmd_val(x) & _PAGE_PRESENT)
-#define pmd_clear(xp)	do { pmd_val(*(xp)) = 0; } while (0)
+#define pmd_clear(xp)	do { set_pmd(xp, __pmd(0)); } while (0)
+#define	pmd_bad(x)	((pmd_val(x) & (~PAGE_MASK & ~_PAGE_USER)) != _KERNPG_TABLE)
 
 /*
  * Permanent address of a page. Obviously must never be
  * called on a highmem page.
  */
 #define page_address(page) ({ if (!(page)->virtual) BUG(); (page)->virtual; })
-#define __page_address(page) ({ if (PageHighMem(page)) BUG(); PAGE_OFFSET + (((page) - mem_map) << PAGE_SHIFT); })
 #define pages_to_mb(x) ((x) >> (20-PAGE_SHIFT))
 #define pte_page(x) (mem_map+pte_pagenr(x))
 
@@ -193,16 +185,16 @@ extern inline int pte_dirty(pte_t pte)		{ return pte_val(pte) & _PAGE_DIRTY; }
 extern inline int pte_young(pte_t pte)		{ return pte_val(pte) & _PAGE_ACCESSED; }
 extern inline int pte_write(pte_t pte)		{ return pte_val(pte) & _PAGE_RW; }
 
-extern inline pte_t pte_rdprotect(pte_t pte)	{ pte_val(pte) &= ~_PAGE_USER; return pte; }
-extern inline pte_t pte_exprotect(pte_t pte)	{ pte_val(pte) &= ~_PAGE_USER; return pte; }
-extern inline pte_t pte_mkclean(pte_t pte)	{ pte_val(pte) &= ~_PAGE_DIRTY; return pte; }
-extern inline pte_t pte_mkold(pte_t pte)	{ pte_val(pte) &= ~_PAGE_ACCESSED; return pte; }
-extern inline pte_t pte_wrprotect(pte_t pte)	{ pte_val(pte) &= ~_PAGE_RW; return pte; }
-extern inline pte_t pte_mkread(pte_t pte)	{ pte_val(pte) |= _PAGE_USER; return pte; }
-extern inline pte_t pte_mkexec(pte_t pte)	{ pte_val(pte) |= _PAGE_USER; return pte; }
-extern inline pte_t pte_mkdirty(pte_t pte)	{ pte_val(pte) |= _PAGE_DIRTY; return pte; }
-extern inline pte_t pte_mkyoung(pte_t pte)	{ pte_val(pte) |= _PAGE_ACCESSED; return pte; }
-extern inline pte_t pte_mkwrite(pte_t pte)	{ pte_val(pte) |= _PAGE_RW; return pte; }
+extern inline pte_t pte_rdprotect(pte_t pte)	{ set_pte(&pte, __pte(pte_val(pte) & ~_PAGE_USER)); return pte; }
+extern inline pte_t pte_exprotect(pte_t pte)	{ set_pte(&pte, __pte(pte_val(pte) & ~_PAGE_USER)); return pte; }
+extern inline pte_t pte_mkclean(pte_t pte)	{ set_pte(&pte, __pte(pte_val(pte) & ~_PAGE_DIRTY)); return pte; }
+extern inline pte_t pte_mkold(pte_t pte)	{ set_pte(&pte, __pte(pte_val(pte) & ~_PAGE_ACCESSED)); return pte; }
+extern inline pte_t pte_wrprotect(pte_t pte)	{ set_pte(&pte, __pte(pte_val(pte) & ~_PAGE_RW)); return pte; }
+extern inline pte_t pte_mkread(pte_t pte)	{ set_pte(&pte, __pte(pte_val(pte) | _PAGE_USER)); return pte; }
+extern inline pte_t pte_mkexec(pte_t pte)	{ set_pte(&pte, __pte(pte_val(pte) | _PAGE_USER)); return pte; }
+extern inline pte_t pte_mkdirty(pte_t pte)	{ set_pte(&pte, __pte(pte_val(pte) | _PAGE_DIRTY)); return pte; }
+extern inline pte_t pte_mkyoung(pte_t pte)	{ set_pte(&pte, __pte(pte_val(pte) | _PAGE_ACCESSED)); return pte; }
+extern inline pte_t pte_mkwrite(pte_t pte)	{ set_pte(&pte, __pte(pte_val(pte) | _PAGE_RW)); return pte; }
 
 /*
  * Conversion functions: convert a page and protection to a page entry,
@@ -213,17 +205,17 @@ extern inline pte_t pte_mkwrite(pte_t pte)	{ pte_val(pte) |= _PAGE_RW; return pt
 ({									\
 	pte_t __pte;							\
 									\
-	pte_val(__pte) = ((page)-mem_map)*(unsigned long long)PAGE_SIZE + \
-				pgprot_val(pgprot);			\
+	set_pte(&__pte, __pte(((page)-mem_map) * 			\
+		(unsigned long long)PAGE_SIZE + pgprot_val(pgprot)));	\
 	__pte;								\
 })
 
 /* This takes a physical page address that is used by the remapping functions */
 #define mk_pte_phys(physpage, pgprot) \
-({ pte_t __pte; pte_val(__pte) = physpage + pgprot_val(pgprot); __pte; })
+({ pte_t __pte; set_pte(&__pte, __pte(physpage + pgprot_val(pgprot))); __pte; })
 
 extern inline pte_t pte_modify(pte_t pte, pgprot_t newprot)
-{ pte_val(pte) = (pte_val(pte) & _PAGE_CHG_MASK) | pgprot_val(newprot); return pte; }
+{ set_pte(&pte, __pte((pte_val(pte) & _PAGE_CHG_MASK) | pgprot_val(newprot))); return pte; }
 
 #define page_pte(page) page_pte_prot(page, __pgprot(0))
 

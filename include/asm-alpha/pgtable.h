@@ -221,7 +221,6 @@ extern inline int pgd_present(pgd_t pgd)	{ return pgd_val(pgd) & _PAGE_VALID; }
 extern inline void pgd_clear(pgd_t * pgdp)	{ pgd_val(*pgdp) = 0; }
 
 #define page_address(page)	((page)->virtual)
-#define __page_address(page)	(PAGE_OFFSET + (((page) - mem_map) << PAGE_SHIFT))
 
 /*
  * The following only work if pte_present() is true.
@@ -297,7 +296,7 @@ extern inline pte_t mk_swap_pte(unsigned long type, unsigned long offset)
 #define kern_addr_valid(addr)	(1)
 
 #define io_remap_page_range(start, busaddr, size, prot) \
-	remap_page_range(start, virt_to_phys(__ioremap(busaddr), 0), size, prot)
+	remap_page_range(start, virt_to_phys(__ioremap(busaddr)), size, prot)
 
 #define pte_ERROR(e) \
 	printk("%s:%d: bad pte %016lx.\n", __FILE__, __LINE__, pte_val(e))

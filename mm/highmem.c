@@ -16,7 +16,6 @@
  * Copyright (C) 1999 Ingo Molnar <mingo@redhat.com>
  */
 
-#include <linux/config.h>
 #include <linux/mm.h>
 #include <linux/pagemap.h>
 #include <linux/highmem.h>
@@ -97,7 +96,7 @@ struct page * replace_with_highmem(struct page * page)
  */
 static int pkmap_count[LAST_PKMAP];
 static unsigned int last_pkmap_nr = 0;
-static spinlock_t kmap_lock;
+static spinlock_t kmap_lock = SPIN_LOCK_UNLOCKED;
 
 pte_t * pkmap_page_table;
 

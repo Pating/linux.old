@@ -3,24 +3,19 @@
 #
 
 #
+# Code maturity level options
+#
+CONFIG_EXPERIMENTAL=y
+
+#
 # Platform support
 #
 CONFIG_PPC=y
 CONFIG_6xx=y
+# CONFIG_4xx is not set
 # CONFIG_PPC64 is not set
 # CONFIG_82xx is not set
 # CONFIG_8xx is not set
-# CONFIG_MPC821 is not set
-# CONFIG_MPC823 is not set
-# CONFIG_MPC850 is not set
-# CONFIG_MPC855 is not set
-# CONFIG_MPC860 is not set
-# CONFIG_MPC860T is not set
-# CONFIG_RPXLITE is not set
-# CONFIG_RPXCLASSIC is not set
-# CONFIG_BSEIP is not set
-# CONFIG_MBX is not set
-# CONFIG_WINCEPT is not set
 # CONFIG_PMAC is not set
 # CONFIG_PREP is not set
 # CONFIG_CHRP is not set
@@ -28,24 +23,34 @@ CONFIG_6xx=y
 CONFIG_GEMINI=y
 # CONFIG_APUS is not set
 # CONFIG_SMP is not set
+# CONFIG_ALTIVEC is not set
 CONFIG_MACH_SPECIFIC=y
-CONFIG_6xx=y
+
+#
+# Loadable module support
+#
+CONFIG_MODULES=y
+CONFIG_MODVERSIONS=y
+CONFIG_KMOD=y
 
 #
 # General setup
 #
-CONFIG_EXPERIMENTAL=y
-CONFIG_MODULES=y
-CONFIG_MODVERSIONS=y
-CONFIG_KMOD=y
+# CONFIG_PCI is not set
 CONFIG_PCI=y
 CONFIG_NET=y
 CONFIG_SYSCTL=y
 CONFIG_SYSVIPC=y
 # CONFIG_BSD_PROCESS_ACCT is not set
+CONFIG_KCORE_ELF=y
 CONFIG_BINFMT_ELF=y
 CONFIG_KERNEL_ELF=y
 # CONFIG_BINFMT_MISC is not set
+
+#
+# PCMCIA/CardBus support
+#
+# CONFIG_PCMCIA is not set
 # CONFIG_PARPORT is not set
 # CONFIG_VGA_CONSOLE is not set
 # CONFIG_FB is not set
@@ -83,6 +88,7 @@ CONFIG_KERNEL_ELF=y
 # CONFIG_BLK_DEV_MD is not set
 # CONFIG_BLK_DEV_RAM is not set
 # CONFIG_BLK_DEV_XD is not set
+# CONFIG_BLK_DEV_DAC960 is not set
 CONFIG_PARIDE_PARPORT=y
 # CONFIG_PARIDE is not set
 # CONFIG_BLK_DEV_IDE_MODES is not set
@@ -181,12 +187,11 @@ CONFIG_SCSI_CONSTANTS=y
 # CONFIG_SCSI_FUTURE_DOMAIN is not set
 # CONFIG_SCSI_GDTH is not set
 # CONFIG_SCSI_GENERIC_NCR5380 is not set
-# CONFIG_SCSI_G_NCR5380_PORT is not set
-# CONFIG_SCSI_G_NCR5380_MEM is not set
 # CONFIG_SCSI_INITIO is not set
 # CONFIG_SCSI_INIA100 is not set
 # CONFIG_SCSI_NCR53C406A is not set
 # CONFIG_SCSI_SYM53C416 is not set
+# CONFIG_SCSI_SIM710 is not set
 # CONFIG_SCSI_NCR53C7xx is not set
 # CONFIG_SCSI_NCR53C8XX is not set
 CONFIG_SCSI_SYM53C8XX=y
@@ -238,10 +243,11 @@ CONFIG_NCR885E=y
 # CONFIG_LANCE is not set
 # CONFIG_NET_VENDOR_SMC is not set
 # CONFIG_NET_VENDOR_RACAL is not set
-# CONFIG_RTL8139 is not set
-# CONFIG_SIS900 is not set
 # CONFIG_YELLOWFIN is not set
-# CONFIG_ACENIC is not set
+# CONFIG_RTL8139 is not set
+# CONFIG_DM9102 is not set
+# CONFIG_AT1700 is not set
+# CONFIG_DEPCA is not set
 # CONFIG_NET_ISA is not set
 # CONFIG_NET_EISA is not set
 # CONFIG_NET_POCKET is not set
@@ -249,10 +255,14 @@ CONFIG_NCR885E=y
 # CONFIG_HIPPI is not set
 # CONFIG_PPP is not set
 # CONFIG_SLIP is not set
+
+#
+# Wireless LAN (non-hamradio)
+#
 # CONFIG_NET_RADIO is not set
 
 #
-# Token ring devices
+# Token Ring driver support
 #
 # CONFIG_TR is not set
 # CONFIG_NET_FC is not set
@@ -262,10 +272,7 @@ CONFIG_NCR885E=y
 #
 # Wan interfaces
 #
-# CONFIG_HOSTESS_SV11 is not set
-# CONFIG_COSA is not set
-# CONFIG_SEALEVEL_4021 is not set
-# CONFIG_DLCI is not set
+# CONFIG_WAN is not set
 
 #
 # Amateur Radio support
@@ -287,10 +294,14 @@ CONFIG_NCR885E=y
 #
 
 #
+# Frame-buffer support
+#
+# CONFIG_FB is not set
+
+#
 # Character devices
 #
-CONFIG_VT=y
-CONFIG_VT_CONSOLE=y
+# CONFIG_VT is not set
 CONFIG_SERIAL=y
 CONFIG_SERIAL_CONSOLE=y
 # CONFIG_SERIAL_EXTENDED is not set
@@ -301,15 +312,13 @@ CONFIG_UNIX98_PTY_COUNT=256
 #
 # Mice
 #
-CONFIG_BUSMOUSE=y
-# CONFIG_ATIXL_BUSMOUSE is not set
-# CONFIG_LOGIBUSMOUSE is not set
-# CONFIG_MS_BUSMOUSE is not set
-CONFIG_MOUSE=y
-CONFIG_PSMOUSE=y
-# CONFIG_82C710_MOUSE is not set
-# CONFIG_PC110_PAD is not set
+# CONFIG_BUSMOUSE is not set
+# CONFIG_MOUSE is not set
 # CONFIG_QIC02_TAPE is not set
+
+#
+# Watchdog Cards
+#
 # CONFIG_WATCHDOG is not set
 # CONFIG_NVRAM is not set
 # CONFIG_RTC is not set
@@ -331,18 +340,10 @@ CONFIG_PSMOUSE=y
 # Ftape, the floppy tape device driver
 #
 # CONFIG_FTAPE is not set
-# CONFIG_FT_NORMAL_DEBUG is not set
-# CONFIG_FT_FULL_DEBUG is not set
-# CONFIG_FT_NO_TRACE is not set
-# CONFIG_FT_NO_TRACE_AT_ALL is not set
-# CONFIG_FT_STD_FDC is not set
-# CONFIG_FT_MACH2 is not set
-# CONFIG_FT_PROBE_FC10 is not set
-# CONFIG_FT_ALT_FDC is not set
 # CONFIG_DRM is not set
 
 #
-# USB drivers - not for the faint of heart
+# Support for USB
 #
 # CONFIG_USB is not set
 
@@ -354,6 +355,7 @@ CONFIG_PSMOUSE=y
 # CONFIG_ADFS_FS is not set
 # CONFIG_AFFS_FS is not set
 # CONFIG_HFS_FS is not set
+# CONFIG_BFS_FS is not set
 # CONFIG_FAT_FS is not set
 # CONFIG_EFS_FS is not set
 CONFIG_ISO9660_FS=y

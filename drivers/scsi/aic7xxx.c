@@ -242,6 +242,7 @@
 #include <linux/proc_fs.h>
 #include <linux/blk.h>
 #include <linux/tqueue.h>
+#include <linux/init.h>
 #include "sd.h"
 #include "scsi.h"
 #include "hosts.h"
@@ -1499,8 +1500,8 @@ aic_outb(struct aic7xxx_host *p, unsigned char val, long port)
  *   to a parameter with a ':' between the parameter and the value.
  *   ie. aic7xxx=unpause:0x0A,extended
  *-F*************************************************************************/
-void
-aic7xxx_setup(char *s, int *dummy)
+static int
+aic7xxx_setup(char *s)
 {
   int   i, n;
   char *p;
@@ -1637,7 +1638,10 @@ aic7xxx_setup(char *s, int *dummy)
       }
     }
   }
+  return 1;
 }
+
+__setup("aic7xxx=", aic7xxx_setup);
 
 /*+F*************************************************************************
  * Function:

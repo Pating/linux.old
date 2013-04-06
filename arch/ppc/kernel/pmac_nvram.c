@@ -4,13 +4,10 @@
 #include <linux/config.h>
 #include <linux/kernel.h>
 #include <linux/stddef.h>
-#include <linux/reboot.h>
 #include <linux/nvram.h>
 #include <linux/init.h>
 #include <asm/init.h>
-#include <asm/ptrace.h>
 #include <asm/io.h>
-#include <asm/pgtable.h>
 #include <asm/system.h>
 #include <asm/prom.h>
 #include <linux/adb.h>
@@ -25,7 +22,6 @@ static volatile unsigned char *nvram_data;
 static int nvram_mult;
 
 #define NVRAM_SIZE	0x2000	/* 8kB of non-volatile RAM */
-
 
 __init
 void pmac_nvram_init(void)
@@ -56,6 +52,7 @@ void pmac_nvram_init(void)
 	}
 }
 
+__openfirmware
 unsigned char nvram_read_byte(int addr)
 {
 	struct adb_request req;
@@ -80,6 +77,7 @@ unsigned char nvram_read_byte(int addr)
 	return 0;
 }
 
+__openfirmware
 void nvram_write_byte(unsigned char val, int addr)
 {
 	struct adb_request req;

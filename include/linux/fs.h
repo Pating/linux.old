@@ -18,10 +18,10 @@
 #include <linux/list.h>
 #include <linux/dcache.h>
 #include <linux/stat.h>
+#include <linux/cache.h>
 
 #include <asm/atomic.h>
 #include <asm/bitops.h>
-#include <asm/cache.h>
 
 struct poll_table_struct;
 
@@ -637,7 +637,7 @@ struct inode_operations {
 	/*
 	 * the order of these functions within the VFS template has been
 	 * changed because SMP locking has changed: from now on all get_block,
-	 * readpage, writepage and flushpage functions are supposed to do
+	 * readpage and writepage functions are supposed to do
 	 * whatever locking they need to get proper SMP operation - for
 	 * now in most cases this means a lock/unlock_kernel at entry/exit.
 	 * [The new order is also slightly more logical :)]
@@ -649,13 +649,11 @@ struct inode_operations {
 	 */
 	int (*get_block) (struct inode *, long, struct buffer_head *, int);
 
-	int (*readpage) (struct file *, struct page *);
-	int (*writepage) (struct file *, struct page *);
-	int (*flushpage) (struct inode *, struct page *, unsigned long);
+	int (*readpage) (struct dentry *, struct page *);
+	int (*writepage) (struct dentry *, struct page *);
 
 	void (*truncate) (struct inode *);
 	int (*permission) (struct inode *, int);
-	int (*smap) (struct inode *,int);
 	int (*revalidate) (struct dentry *);
 };
 
@@ -676,11 +674,11 @@ struct super_operations {
 struct dquot_operations {
 	void (*initialize) (struct inode *, short);
 	void (*drop) (struct inode *);
-	int (*alloc_block) (const struct inode *, unsigned long, uid_t, char);
-	int (*alloc_inode) (const struct inode *, unsigned long, uid_t);
+	int (*alloc_block) (const struct inode *, unsigned long, char);
+	int (*alloc_inode) (const struct inode *, unsigned long);
 	void (*free_block) (const struct inode *, unsigned long);
 	void (*free_inode) (const struct inode *, unsigned long);
-	int (*transfer) (struct dentry *, struct iattr *, uid_t);
+	int (*transfer) (struct dentry *, struct iattr *);
 };
 
 struct file_system_type {
@@ -733,7 +731,7 @@ extern inline int locks_verify_area(int read_write, struct inode *inode,
 asmlinkage long sys_open(const char *, int, int);
 asmlinkage long sys_close(unsigned int);	/* yes, it's really unsigned */
 extern int do_close(unsigned int, int);		/* yes, it's really unsigned */
-extern int do_truncate(struct dentry *, unsigned long);
+extern int do_truncate(struct dentry *, loff_t start);
 extern int get_unused_fd(void);
 extern void put_unused_fd(unsigned int);
 
@@ -944,17 +942,16 @@ extern int brw_page(int, struct page *, kdev_t, int [], int);
 typedef int (*writepage_t)(struct file *, struct page *, unsigned long, unsigned long, const char *);
 
 /* Generic buffer handling for block filesystems.. */
-extern int block_read_full_page(struct file *, struct page *);
-extern int block_write_full_page (struct file *, struct page *);
+extern int block_read_full_page(struct dentry *, struct page *);
+extern int block_write_full_page (struct dentry *, struct page *);
 extern int block_write_partial_page (struct file *, struct page *, unsigned long, unsigned long, const char *);
 extern int block_write_cont_page (struct file *, struct page *, unsigned long, unsigned long, const char *);
-extern int block_flushpage(struct inode *, struct page *, unsigned long);
+extern int block_flushpage(struct page *, unsigned long);
 
 extern int generic_file_mmap(struct file *, struct vm_area_struct *);
 extern ssize_t generic_file_read(struct file *, char *, size_t, loff_t *);
 extern ssize_t generic_file_write(struct file *, const char *, size_t, loff_t *, writepage_t);
 extern void do_generic_file_read(struct file * filp, loff_t *ppos, read_descriptor_t * desc, read_actor_t actor);
-
 
 extern struct super_block *get_super(kdev_t);
 struct super_block *get_empty_super(void);
@@ -981,7 +978,7 @@ extern ssize_t block_write(struct file *, const char *, size_t, loff_t *);
 
 extern int block_fsync(struct file *, struct dentry *);
 extern int file_fsync(struct file *, struct dentry *);
-extern int generic_buffer_fdatasync(struct inode *inode, unsigned long start, unsigned long end);
+extern int generic_buffer_fdatasync(struct inode *inode, unsigned long start_idx, unsigned long end_idx);
 
 extern int inode_change_ok(struct inode *, struct iattr *);
 extern void inode_setattr(struct inode *, struct iattr *);

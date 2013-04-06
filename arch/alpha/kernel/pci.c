@@ -57,11 +57,32 @@ quirk_isa_bridge(struct pci_dev *dev)
 	dev->class = PCI_CLASS_BRIDGE_ISA;
 }
 
+static void __init
+quirk_vga_enable_rom(struct pci_dev *dev)
+{
+	/* If it's a VGA, enable its BIOS ROM at C0000.
+	   But if its a Cirrus 543x/544x DISABLE it, since
+	   enabling ROM disables the memory... */
+	if ((dev->class >> 8) == PCI_CLASS_DISPLAY_VGA &&
+	    /* But if its a Cirrus 543x/544x DISABLE it */
+	    (dev->vendor != PCI_VENDOR_ID_CIRRUS ||
+	     (dev->device < 0x00a0) || (dev->device > 0x00ac)))
+	{
+		u32 reg;
+
+		pci_read_config_dword(dev, dev->rom_base_reg, &reg);
+		reg |= PCI_ROM_ADDRESS_ENABLE;
+		pci_write_config_dword(dev, dev->rom_base_reg, reg);
+		dev->resource[PCI_ROM_RESOURCE].flags |= PCI_ROM_ADDRESS_ENABLE;
+	}
+}
+
 struct pci_fixup pcibios_fixups[] __initdata = {
 	{ PCI_FIXUP_HEADER, PCI_VENDOR_ID_INTEL, PCI_DEVICE_ID_INTEL_82375,
 	  quirk_eisa_bridge },
 	{ PCI_FIXUP_HEADER, PCI_VENDOR_ID_INTEL, PCI_DEVICE_ID_INTEL_82378,
 	  quirk_isa_bridge },
+	{ PCI_FIXUP_FINAL, PCI_ANY_ID, PCI_ANY_ID, quirk_vga_enable_rom },
 	{ 0 }
 };
 
@@ -70,13 +91,15 @@ struct pci_fixup pcibios_fixups[] __initdata = {
 #define KB			1024
 #define MB			(1024*KB)
 #define GB			(1024*MB)
-unsigned long resource_fixup(struct pci_dev * dev, struct resource * res,
-			     unsigned long start, unsigned long size)
-{
-	unsigned long alignto;
 
-	if (res->flags & IORESOURCE_IO)
-	{
+void
+pcibios_align_resource(void *data, struct resource *res, unsigned long size)
+{
+	struct pci_dev * dev = data;
+	unsigned long alignto;
+	unsigned long start = res->start;
+
+	if (res->flags & IORESOURCE_IO) {
 		/*
 		 * Aligning to 0x800 rather than the minimum base of
 		 * 0x400 is an attempt to avoid having devices in 
@@ -88,8 +111,7 @@ unsigned long resource_fixup(struct pci_dev * dev, struct resource * res,
 		alignto = MAX(0x800, size);
 		start = ALIGN(start, alignto);
 	}
-	else if	(res->flags & IORESOURCE_MEM)
-	{
+	else if	(res->flags & IORESOURCE_MEM) {
 		/*
 		 * The following holds at least for the Low Cost
 		 * Alpha implementation of the PCI interface:
@@ -105,17 +127,17 @@ unsigned long resource_fixup(struct pci_dev * dev, struct resource * res,
 		 * address space must be accessed through
 		 * dense memory space only!
 		 */
-		/* align to multiple of size of minimum base */
+
+		/* Align to multiple of size of minimum base.  */
 		alignto = MAX(0x1000, size);
 		start = ALIGN(start, alignto);
-		if (size > 7 * 16*MB)
+		if (size > 7 * 16*MB) {
 			printk(KERN_WARNING "PCI: dev %s "
 			       "requests %ld bytes of contiguous "
 			       "address space---don't use sparse "
 			       "memory accesses on this device!\n",
 			       dev->name, size);
-		else
-		{
+		} else {
 			if (((start / (16*MB)) & 0x7) == 0) {
 				start &= ~(128*MB - 1);
 				start += 16*MB;
@@ -129,7 +151,7 @@ unsigned long resource_fixup(struct pci_dev * dev, struct resource * res,
 		}
 	}
 
-	return start;
+	res->start = start;
 }
 #undef MAX
 #undef ALIGN
@@ -144,14 +166,13 @@ unsigned long resource_fixup(struct pci_dev * dev, struct resource * res,
 static void __init
 pcibios_assign_special(struct pci_dev * dev)
 {
+	int i;
+
 	/* The first three resources of an IDE controler are often magic, 
 	   so leave them unchanged.  This is true, for instance, of the
 	   Contaq 82C693 as seen on SX164 and DP264.  */
 
-	if (dev->class >> 8 == PCI_CLASS_STORAGE_IDE)
-	{
-		int i;
-
+	if (dev->class >> 8 == PCI_CLASS_STORAGE_IDE) {
 		/* Resource 1 of IDE controller is the address of HD_CMD
 		   register which actually occupies a single byte (0x3f6
 		   for ide0) in reported 0x3f4-3f7 range. We have to fix
@@ -163,6 +184,16 @@ pcibios_assign_special(struct pci_dev * dev)
 			if (dev->resource[i].flags && dev->resource[i].start)
 				pci_claim_resource(dev, i);
 	}
+	/*
+	 * We don't have code that will init the CYPRESS bridge correctly
+	 * so we do the next best thing, and depend on the previous
+	 * console code to do the right thing, and ignore it here... :-\
+	 */
+	else if (dev->vendor == PCI_VENDOR_ID_CONTAQ &&
+		 dev->device == PCI_DEVICE_ID_CONTAQ_82C693)
+		for (i = 0; i < PCI_NUM_RESOURCES; i++)
+			if (dev->resource[i].flags && dev->resource[i].start)
+				pci_claim_resource(dev, i);
 }
 
 
@@ -217,9 +248,10 @@ pcibios_fixup_bus(struct pci_bus *bus)
 
 	bus->resource[0] = hose->io_space;
 	bus->resource[1] = hose->mem_space;
-	for (dev = bus->devices; dev; dev = dev->sibling)
+	for (dev = bus->devices; dev; dev = dev->sibling) {
 		if ((dev->class >> 8) != PCI_CLASS_BRIDGE_PCI)
 			pcibios_fixup_device_resources(dev, bus);
+	}
 }
 
 void __init
@@ -232,9 +264,10 @@ pcibios_update_resource(struct pci_dev *dev, struct resource *root,
 	where = PCI_BASE_ADDRESS_0 + (resource * 4);
 	reg = (res->start - root->start) | (res->flags & 0xf);
 	pci_write_config_dword(dev, where, reg);
-	if ((res->flags & (PCI_BASE_ADDRESS_SPACE | PCI_BASE_ADDRESS_MEM_TYPE_MASK))
-	    == (PCI_BASE_ADDRESS_SPACE_MEMORY | PCI_BASE_ADDRESS_MEM_TYPE_64))
-	{
+	if ((res->flags & (PCI_BASE_ADDRESS_SPACE
+			   | PCI_BASE_ADDRESS_MEM_TYPE_MASK))
+	    == (PCI_BASE_ADDRESS_SPACE_MEMORY
+		| PCI_BASE_ADDRESS_MEM_TYPE_64)) {
 		pci_write_config_dword(dev, where+4, 0);
 		printk(KERN_WARNING "PCI: dev %s type 64-bit\n", dev->name);
 	}
@@ -273,7 +306,8 @@ common_swizzle(struct pci_dev *dev, u8 *pinp)
 }
 
 void __init
-pcibios_fixup_pbus_ranges(struct pci_bus * bus, struct pbus_set_ranges_data * ranges)
+pcibios_fixup_pbus_ranges(struct pci_bus * bus,
+			  struct pbus_set_ranges_data * ranges)
 {
 	ranges->io_start -= bus->resource[0]->start;
 	ranges->io_end -= bus->resource[0]->start;

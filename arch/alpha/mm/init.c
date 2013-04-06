@@ -17,6 +17,7 @@
 #include <linux/mman.h>
 #include <linux/mm.h>
 #include <linux/swap.h>
+#include <linux/init.h>
 #include <linux/bootmem.h> /* max_low_pfn */
 #ifdef CONFIG_BLK_DEV_INITRD
 #include <linux/blk.h>
@@ -189,7 +190,8 @@ load_PCB(struct thread_struct * pcb)
  * paging_init() sets up the page tables: in the alpha version this actually
  * unmaps the bootup page table (as we're now in KSEG, so we don't need it).
  */
-void paging_init(void)
+void
+paging_init(void)
 {
 	unsigned long newptbr;
 	unsigned long original_pcb_ptr;
@@ -210,13 +212,12 @@ void paging_init(void)
 
 	if (dma_pfn > high_pfn)
 		zones_size[ZONE_DMA] = high_pfn;
-	else
-	{
-		zones_size[0] = dma_pfn;
+	else {
+		zones_size[ZONE_DMA] = dma_pfn;
 		zones_size[ZONE_NORMAL] = high_pfn - dma_pfn;
 	}
 
-	/* initialize mem_map[] */
+	/* Initialize mem_map[].  */
 	free_area_init(zones_size);
 
 	/* Initialize the kernel's page tables.  Linux puts the vptb in
@@ -273,12 +274,42 @@ srm_paging_stop (void)
 }
 #endif
 
-void
+static void __init printk_memory_info(void)
+{
+	unsigned long codesize, reservedpages, datasize, initsize, tmp;
+	extern int page_is_ram(unsigned long) __init;
+	extern char _text, _etext, _data, _edata;
+	extern char __init_begin, __init_end;
+
+	/* printk all informations */
+	reservedpages = 0;
+	for (tmp = 0; tmp < max_low_pfn; tmp++)
+		/*
+		 * Only count reserved RAM pages
+		 */
+		if (page_is_ram(tmp) && PageReserved(mem_map+tmp))
+			reservedpages++;
+
+	codesize =  (unsigned long) &_etext - (unsigned long) &_text;
+	datasize =  (unsigned long) &_edata - (unsigned long) &_data;
+	initsize =  (unsigned long) &__init_end - (unsigned long) &__init_begin;
+
+	printk("Memory: %luk/%luk available (%luk kernel code, %luk reserved, %luk data, %luk init)\n",
+	       (unsigned long) nr_free_pages() << (PAGE_SHIFT-10),
+	       max_mapnr << (PAGE_SHIFT-10),
+	       codesize >> 10,
+	       reservedpages << (PAGE_SHIFT-10),
+	       datasize >> 10,
+	       initsize >> 10);
+}
+
+void __init
 mem_init(void)
 {
 	max_mapnr = num_physpages = max_low_pfn;
 	totalram_pages += free_all_bootmem();
-	printk("Memory: %luk available\n", totalram_pages >> 10);
+
+	printk_memory_info();
 }
 
 void
@@ -299,7 +330,8 @@ free_initmem (void)
 }
 
 #ifdef CONFIG_BLK_DEV_INITRD
-void free_initrd_mem(unsigned long start, unsigned long end)
+void
+free_initrd_mem(unsigned long start, unsigned long end)
 {
 	for (; start < end; start += PAGE_SIZE) {
 		ClearPageReserved(mem_map + MAP_NR(start));

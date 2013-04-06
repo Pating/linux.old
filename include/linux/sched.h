@@ -84,20 +84,20 @@ extern int last_pid;
 #define TASK_EXCLUSIVE		32
 
 #define __set_task_state(tsk, state_value)		\
-	do { tsk->state = state_value; } while (0)
+	do { (tsk)->state = (state_value); } while (0)
 #ifdef __SMP__
 #define set_task_state(tsk, state_value)		\
-	set_mb(tsk->state, state_value)
+	set_mb((tsk)->state, (state_value))
 #else
 #define set_task_state(tsk, state_value)		\
-	__set_task_state(tsk, state_value)
+	__set_task_state((tsk), (state_value))
 #endif
 
 #define __set_current_state(state_value)			\
-	do { current->state = state_value; } while (0)
+	do { current->state = (state_value); } while (0)
 #ifdef __SMP__
 #define set_current_state(state_value)		\
-	set_mb(current->state, state_value)
+	set_mb(current->state, (state_value))
 #else
 #define set_current_state(state_value)		\
 	__set_current_state(state_value)
@@ -513,6 +513,7 @@ extern void FASTCALL(wake_up_process(struct task_struct * tsk));
 #define wake_up_interruptible_sync(x)	__wake_up_sync((x),TASK_INTERRUPTIBLE)
 
 extern int in_group_p(gid_t);
+extern int in_egroup_p(gid_t);
 
 extern void flush_signals(struct task_struct *);
 extern void flush_signal_handlers(struct task_struct *);

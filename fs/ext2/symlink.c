@@ -15,7 +15,6 @@
  *  ext2 symlink handling code
  */
 
-#include <linux/module.h>
 #include <linux/fs.h>
 #include <asm/uaccess.h>
 
@@ -43,10 +42,8 @@ struct inode_operations ext2_symlink_inode_operations = {
 	NULL,			/* get_block */
 	NULL,			/* readpage */
 	NULL,			/* writepage */
-	NULL,			/* flushpage */
 	NULL,			/* truncate */
 	NULL,			/* permission */
-	NULL,			/* smap */
 	NULL			/* revalidate */
 };
 

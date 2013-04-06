@@ -156,12 +156,9 @@ S: Notre Dame, Indiana
 S: USA
 
 N: James Banks
-E: james.banks@caldera.com
+E: james@sovereign.org
 D: TLAN network driver
-S: Caldera, Inc.
-S: 633 South 550 East
-S: Provo, Utah 84606
-S: USA
+D: Logitech Busmouse driver
 
 N: Krzysztof G. Baranowski
 E: kgb@manjak.knm.org.pl
@@ -439,11 +436,11 @@ D: Linux/SMP x86 (up to 2.0 only)
 D: Initial Mac68K port
 D: Video4Linux design, bw-qcam and PMS driver ports.
 D: 2.1.x modular sound
-S: c/o I2IT Limited
-S: The Innovation Centre
-S: Singleton Park
-S: Swansea, SA2 8PP
-S: Wales, United Kingdom
+S: c/o Red Hat UK Ltd
+S: Alexandra House
+S: Alexandra Terrace
+S: Guildford, GU1 3DA
+S: United Kingdom
 
 N: Laurence Culhane
 E: loz@holmes.demon.co.uk
@@ -1468,8 +1465,10 @@ S: Victoria 3163
 S: Australia
 
 N: Pauline Middelink
-E: middelin@polyware.iaf.nl
+E: middelin@polyware.nl
 D: General low-level bug fixes, /proc fixes, identd support
+D: Author of IP masquerading
+D: Zoran ZR36120 Video For Linux driver
 S: Boterkorfhoek 34
 S: 7546 JA  Enschede
 S: Netherlands

@@ -6,7 +6,7 @@
  *	Copyright 1993 -- 1997 Drew Eckhardt, Frederic Potter,
  *	David Mosberger-Tang
  *
- *	Copyright 1997 -- 1999 Martin Mares <mj@atrey.karlin.mff.cuni.cz>
+ *	Copyright 1997 -- 1999 Martin Mares <mj@suse.cz>
  */
 
 #include <linux/types.h>

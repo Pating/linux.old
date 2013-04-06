@@ -3,7 +3,7 @@
  *
  *	Procfs interface for the PCI bus.
  *
- *	Copyright (c) 1997, 1998 Martin Mares <mj@atrey.karlin.mff.cuni.cz>
+ *	Copyright (c) 1997--1999 Martin Mares <mj@suse.cz>
  */
 
 #include <linux/types.h>
@@ -207,25 +207,6 @@ static struct file_operations proc_bus_pci_operations = {
 
 static struct inode_operations proc_bus_pci_inode_operations = {
 	&proc_bus_pci_operations, /* default base directory file-ops */
-	NULL,			/* create */
-	NULL,			/* lookup */
-	NULL,			/* link */
-	NULL,			/* unlink */
-	NULL,			/* symlink */
-	NULL,			/* mkdir */
-	NULL,			/* rmdir */
-	NULL,			/* mknod */
-	NULL,			/* rename */
-	NULL,			/* readlink */
-	NULL,			/* follow_link */
-	NULL,			/* get_block */
-	NULL,			/* readpage */
-	NULL,			/* writepage */
-	NULL,			/* flushpage */
-	NULL,			/* truncate */
-	NULL,			/* permission */
-	NULL,			/* smap */
-	NULL			/* revalidate */
 };
 
 #if BITS_PER_LONG == 32
@@ -281,7 +262,7 @@ int pci_proc_attach_device(struct pci_dev *dev)
 
 	if (!(de = bus->procdir)) {
 		sprintf(name, "%02x", bus->number);
-		de = bus->procdir = create_proc_entry(name, S_IFDIR, proc_bus_pci_dir);
+		de = bus->procdir = proc_mkdir(name, proc_bus_pci_dir);
 		if (!de)
 			return -ENOMEM;
 	}
@@ -530,7 +511,7 @@ static int pci_read_proc(char *buf, char **start, off_t off,
 static int __init pci_proc_init(void)
 {
 	if (pci_present()) {
-		proc_bus_pci_dir = create_proc_entry("pci", S_IFDIR, proc_bus);
+		proc_bus_pci_dir = proc_mkdir("pci", proc_bus);
 		create_proc_info_entry("devices",0, proc_bus_pci_dir,
 					get_pci_dev_info);
 		proc_bus_pci_add(pci_root);

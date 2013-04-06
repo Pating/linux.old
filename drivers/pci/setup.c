@@ -16,8 +16,7 @@
 #include <linux/pci.h>
 #include <linux/errno.h>
 #include <linux/ioport.h>
-
-#include <asm/cache.h>
+#include <linux/cache.h>
 
 
 #define DEBUG_CONFIG 0
@@ -84,7 +83,7 @@ pdev_assign_unassigned_resources(struct pci_dev *dev, u32 min_io, u32 min_mem)
 		DBGC(("  for root[%lx:%lx] min[%lx] size[%lx]\n",
 		      root->start, root->end, min, size));
 
-		if (allocate_resource(root, res, size, min, -1, size, dev) < 0) {
+		if (allocate_resource(root, res, size, min, -1, size, pcibios_align_resource, dev) < 0) {
 			printk(KERN_ERR
 			       "PCI: Failed to allocate resource %d for %s\n",
 			       i, dev->name);
@@ -271,7 +270,7 @@ pci_set_bus_ranges(void)
 		pbus_set_ranges(bus, NULL);
 }
 
-static void
+static void __init
 pdev_fixup_irq(struct pci_dev *dev,
 	       u8 (*swizzle)(struct pci_dev *, u8 *),
 	       int (*map_irq)(struct pci_dev *, u8, u8))

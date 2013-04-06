@@ -254,10 +254,11 @@ static inline void reschedule_idle(struct task_struct * p, unsigned long flags)
 	 * wakeup, the frequent rescheduler will likely chose this
 	 * task during it's next schedule():
 	 */
-	tsk = cpu_curr(best_cpu);
- 	if ((p->avg_slice < cacheflush_time) &&
-			(tsk->avg_slice < cacheflush_time))
-		goto out_no_target;
+	if (p->policy == SCHED_OTHER) {
+		tsk = cpu_curr(best_cpu);
+		if (p->avg_slice + tsk->avg_slice < cacheflush_time)
+			goto out_no_target;
+	}
 
 	/*
 	 * We know that the preferred CPU has a cache-affine current
@@ -1006,7 +1007,7 @@ static inline void run_old_timers(void)
 	}
 }
 
-spinlock_t tqueue_lock;
+spinlock_t tqueue_lock = SPIN_LOCK_UNLOCKED;
 
 void tqueue_bh(void)
 {

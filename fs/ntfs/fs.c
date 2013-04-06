@@ -442,10 +442,8 @@ static struct inode_operations ntfs_inode_operations_nobmap = {
 	NULL, /* get_block */
 	NULL, /* readpage */
 	NULL, /* writepage */
-	NULL, /* flushpage */
 	NULL, /* truncate */
 	NULL, /* permission */
-	NULL, /* smap */
 	NULL, /* revalidate */
 };
 
@@ -625,10 +623,8 @@ static struct inode_operations ntfs_inode_operations = {
 	ntfs_bmap, /* get_block */
 	block_read_full_page, /* readpage */
 	NULL, /* writepage */
-	NULL, /* flushpage */
 	NULL, /* truncate */
 	NULL, /* permission */
-	NULL, /* smap */
 	NULL, /* revalidate */
 };
 
@@ -674,10 +670,8 @@ static struct inode_operations ntfs_dir_inode_operations = {
 	NULL, /* get_block */
 	NULL, /* readpage */
 	NULL, /* writepage */
-	NULL, /* flushpage */
 	NULL, /* truncate */
 	NULL, /* permission */
-	NULL, /* smap */
 	NULL, /* revalidate */
 };
 
@@ -835,7 +829,7 @@ static int ntfs_statfs(struct super_block *sb, struct statfs *sf, int bufsize)
 	/* Number of files is limited by free space only, so we lie here */
 	fs.f_ffree=0;
 	mft=iget(sb,FILE_MFT);
-	fs.f_files=mft->i_size/vol->mft_recordsize;
+	fs.f_files=mft->i_size >> vol->mft_recordbits;
 	iput(mft);
 
 	/* should be read from volume */

@@ -107,7 +107,7 @@ extern inline pte_t * pte_alloc_kernel(pmd_t * pmd, unsigned long address)
 		
 		if (!page)
 			return get_pte_kernel_slow(pmd, address);
-		pmd_val(*pmd) = _KERNPG_TABLE + __pa(page);
+		set_pmd(pmd, __pmd(_KERNPG_TABLE + __pa(page)));
 		return page + address;
 	}
 	if (pmd_bad(*pmd)) {
@@ -132,7 +132,7 @@ getnew:
 	
 	if (!page)
 		return get_pte_slow(pmd, address);
-	pmd_val(*pmd) = _PAGE_TABLE + __pa(page);
+	set_pmd(pmd, __pmd(_PAGE_TABLE + __pa(page)));
 	return (pte_t *)page + address;
 }
 fix:
@@ -240,6 +240,23 @@ extern void flush_tlb_page(struct vm_area_struct *, unsigned long);
 static inline void flush_tlb_range(struct mm_struct * mm, unsigned long start, unsigned long end)
 {
 	flush_tlb_mm(mm);
+}
+
+extern volatile unsigned long smp_invalidate_needed;
+extern unsigned int cpu_tlbbad[NR_CPUS];
+
+static inline void do_flush_tlb_local(void)
+{
+	unsigned long cpu = smp_processor_id();
+	struct mm_struct *mm = current->mm;
+
+	clear_bit(cpu, &smp_invalidate_needed);
+	if (mm) {
+		set_bit(cpu, &mm->cpu_vm_mask);
+		local_flush_tlb();
+	} else {
+		cpu_tlbbad[cpu] = 1;
+	}
 }
 
 #endif

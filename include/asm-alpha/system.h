@@ -86,6 +86,30 @@ struct el_common_EV5_uncorrectable_mcheck {
         unsigned long   ld_lock;          /* Contents of EV5 LD_LOCK register*/
 };
 
+struct el_common_EV6_mcheck {
+	unsigned int FrameSize;		/* Bytes, including this field */
+	unsigned int FrameFlags;	/* <31> = Retry, <30> = Second Error */
+	unsigned int CpuOffset;		/* Offset to CPU-specific info */
+	unsigned int SystemOffset;	/* Offset to system-specific info */
+	unsigned int MCHK_Code;
+	unsigned int MCHK_Frame_Rev;
+	unsigned long I_STAT;		/* EV6 Internal Processor Registers */
+	unsigned long DC_STAT;		/* (See the 21264 Spec) */
+	unsigned long C_ADDR;
+	unsigned long DC1_SYNDROME;
+	unsigned long DC0_SYNDROME;
+	unsigned long C_STAT;
+	unsigned long C_STS;
+	unsigned long RESERVED0;
+	unsigned long EXC_ADDR;
+	unsigned long IER_CM;
+	unsigned long ISUM;
+	unsigned long MM_STAT;
+	unsigned long PAL_BASE;
+	unsigned long I_CTL;
+	unsigned long PCTX;
+};
+
 extern void halt(void) __attribute__((noreturn));
 
 #define prepare_to_switch()	do { } while(0)
@@ -362,17 +386,6 @@ __xchg(unsigned long x, volatile void * ptr, int size)
 #define xchg(ptr,x) \
   ((__typeof__(*(ptr)))__xchg((unsigned long)(x),(ptr),sizeof(*(ptr))))
 #define tas(ptr) (xchg((ptr),1))
-
-/* Very dirty but nevertheless very fun hack ;). I recall the aboot printf()
-   that will in turn use the SRM  console to do the debugging of the boot
-   process. As there's no runtime symbol table, the address of printf()
-   is hardwired and is in function of the bootlx binary you have in /boot...
-   1999 Andrea Arcangeli <andrea@suse.de> */
-#if 0
-#define SRM_printf(args...) ({ int (*__SRM_printf)(const char *fmt, ...) = (int (*)(const char *fmt, ...)) 0x20000aa0; __SRM_printf(args); })
-#else
-#define SRM_printf(args...)
-#endif
 
 #endif /* __ASSEMBLY__ */
 

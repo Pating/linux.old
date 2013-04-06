@@ -293,7 +293,6 @@ union TPchipPERRMASK {
 
 /* The IO address space is larger than 0xffff */
 #define TSUNAMI_IO_SPACE	(TSUNAMI_CONF(0) - TSUNAMI_IO(0))
-#define TSUNAMI_MEM_SPACE	(_TSUNAMI_IACK_SC(0) - TSUNAMI_MEM(0))
 
 /*
  * Data structure for handling TSUNAMI machine checks:

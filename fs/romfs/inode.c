@@ -407,9 +407,8 @@ out:	return ERR_PTR(res);
  */
 
 static int
-romfs_readpage(struct file * file, struct page * page)
+romfs_readpage(struct dentry * dentry, struct page * page)
 {
-	struct dentry *dentry = file->f_dentry;
 	struct inode *inode = dentry->d_inode;
 	unsigned long buf;
 	unsigned long offset, avail, readlen;
@@ -537,10 +536,8 @@ static struct inode_operations romfs_file_inode_operations = {
 	NULL,			/* get_block -- not really */
 	romfs_readpage,		/* readpage */
 	NULL,			/* writepage */
-	NULL,			/* flushpage */
 	NULL,			/* truncate */
 	NULL,			/* permission */
-	NULL,			/* smap */
 	NULL			/* revalidate */
 };
 
@@ -581,10 +578,8 @@ static struct inode_operations romfs_dir_inode_operations = {
 	NULL,			/* get_block */
 	NULL,			/* readpage */
 	NULL,			/* writepage */
-	NULL,			/* flushpage */
 	NULL,			/* truncate */
 	NULL,			/* permission */
-	NULL,			/* smap */
 	NULL			/* revalidate */
 };
 
@@ -604,10 +599,8 @@ static struct inode_operations romfs_link_inode_operations = {
 	NULL,			/* get_block */
 	NULL,			/* readpage */
 	NULL,			/* writepage */
-	NULL,			/* flushpage */
 	NULL,			/* truncate */
 	NULL,			/* permission */
-	NULL,			/* smap */
 	NULL			/* revalidate */
 };
 
