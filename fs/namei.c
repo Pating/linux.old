@@ -460,7 +460,6 @@ no_inode:
 			break;
 		if (flags & LOOKUP_SLASHOK)
 			goto return_base;
-		dentry = ERR_PTR(-ENOTDIR);
 		break;
 	}
 	dput(base);
@@ -536,6 +535,28 @@ static inline struct dentry *lock_parent(struct dentry *dentry)
 	return dir;
 }
 
+/* 
+ * Special case: O_CREAT|O_EXCL implies O_NOFOLLOW for security
+ * reasons.
+ *
+ * O_DIRECTORY translates into forcing a directory lookup.
+ */
+static inline int lookup_flags(unsigned int f)
+{
+	unsigned long retval = LOOKUP_FOLLOW;
+
+	if (f & O_NOFOLLOW)
+		retval &= ~LOOKUP_FOLLOW;
+	
+	if ((f & (O_CREAT|O_EXCL)) == (O_CREAT|O_EXCL))
+		retval &= ~LOOKUP_FOLLOW;
+	
+	if (f & O_DIRECTORY)
+		retval |= LOOKUP_DIRECTORY;
+	
+	return retval;
+}
+
 /*
  *	open_namei()
  *
@@ -558,13 +579,7 @@ struct dentry * open_namei(const char * pathname, int flag, int mode)
 	mode &= S_IALLUGO & ~current->fs->umask;
 	mode |= S_IFREG;
 
-	/* 
-	 * Special case: O_CREAT|O_EXCL on a dangling symlink should
-	 * give EEXIST for security reasons.  While inconsistent, this
-	 * is the same scheme used by, for example, Solaris 2.5.1.  --KAB
-	 */
-	dentry = lookup_dentry(pathname, NULL,
-			       (flag & (O_CREAT|O_EXCL)) != (O_CREAT|O_EXCL));
+	dentry = lookup_dentry(pathname, NULL, lookup_flags(flag));
 	if (IS_ERR(dentry))
 		return dentry;
 
@@ -611,6 +626,10 @@ struct dentry * open_namei(const char * pathname, int flag, int mode)
 	if (!inode)
 		goto exit;
 
+	error = -EACCES;
+	if (S_ISLNK(inode->i_mode))
+		goto exit;
+	
 	error = -EISDIR;
 	if (S_ISDIR(inode->i_mode) && (flag & FMODE_WRITE))
 		goto exit;

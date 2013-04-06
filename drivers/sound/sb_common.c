@@ -10,7 +10,10 @@
  * Version 2 (June 1991). See the "COPYING" file distributed with this software
  * for more info.
  */
-
+/*
+ * Daniel J. Rodriksson: Modified sbintr to handle 8 and 16 bit interrupts
+ *                       for full duplex support ( only sb16 by now )
+ */
 #include <linux/config.h>
 #include <linux/delay.h>
 #include <asm/init.h>
@@ -140,7 +143,7 @@ static void sbintr(int irq, void *dev_id, struct pt_regs *dummy)
 		if (!(src & 3))
 			return;	/* Not a DSP interrupt */
 	}
-	if (devc->intr_active)
+	if (devc->intr_active && (!devc->fullduplex || (src & 0x01)))
 	{
 		switch (devc->irq_mode)
 		{
@@ -165,7 +168,17 @@ static void sbintr(int irq, void *dev_id, struct pt_regs *dummy)
 				/* printk(KERN_WARN "Sound Blaster: Unexpected interrupt\n"); */
 				;
 		}
-	}
+    } else if (devc->intr_active_2 && (src & 0x02)) {
+        switch (devc->irq_mode_2)
+        {
+            case IMODE_OUTPUT:
+                DMAbuf_outputintr (devc->dev, 1);
+                break;
+            case IMODE_INPUT:
+                DMAbuf_inputintr (devc->dev);
+                break;
+        }
+    }
 	/*
 	 * Acknowledge interrupts 
 	 */
@@ -954,8 +967,7 @@ void sb_dsp_unload(struct address_info *hw_config, int sbmpu)
 		if (!(devc->caps & SB_NO_AUDIO && devc->caps & SB_NO_MIDI) && devc->irq > 0)
 		{
 			free_irq(devc->irq, devc);
-			if (devc->my_mixerdev)
-				sound_unload_mixerdev(devc->my_mixerdev);
+			sound_unload_mixerdev(devc->my_mixerdev);
 			/* We don't have to do this bit any more the UART401 is its own
 				master  -- Krzysztof Halasa */
 			/* But we have to do it, if UART401 is not detected */

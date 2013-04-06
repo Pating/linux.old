@@ -543,7 +543,7 @@ static ssize_t lp_read(struct file * file, char * buf,
 
 		if (( i & 1) != 0) {
 			Byte= (Byte | z<<4);
-			if (put_user(Byte, (char *)temp))
+			if (__put_user(Byte, (char *)temp))
 				return -EFAULT;
 			temp++;
 		} else Byte=z;
@@ -768,7 +768,7 @@ int lp_register(int nr, struct parport *port)
 	lp_table[nr].dev = parport_register_device(port, "lp", 
 						   lp_preempt, NULL,
 						   lp_interrupt, 
-						   PARPORT_DEV_TRAN,
+						   0,
 						   (void *) &lp_table[nr]);
 	if (lp_table[nr].dev == NULL)
 		return 1;

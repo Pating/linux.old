@@ -53,7 +53,7 @@
 #include <linux/console.h>
 #include <linux/time.h>
 
-extern unsigned char aux_device_present, pckbd_read_mask;
+#include <asm/spinlock.h>
 
 #if defined(CONFIG_PROC_FS)
 #include <linux/proc_fs.h>
@@ -79,6 +79,7 @@ extern void *sys_call_table;
 extern int sys_tz;
 extern int request_dma(unsigned int dmanr, char * deviceID);
 extern void free_dma(unsigned int dmanr);
+extern spinlock_t dma_spin_lock;
 
 #ifdef MODVERSIONS
 const struct module_symbol __export_Using_Versions
@@ -192,6 +193,7 @@ EXPORT_SYMBOL(shrink_dcache_sb);
 EXPORT_SYMBOL(shrink_dcache_parent);
 EXPORT_SYMBOL(find_inode_number);
 EXPORT_SYMBOL(is_subdir);
+EXPORT_SYMBOL(get_unused_fd);
 
 #if !defined(CONFIG_NFSD) && defined(CONFIG_NFSD_MODULE)
 EXPORT_SYMBOL(do_nfsservctl);
@@ -300,6 +302,7 @@ EXPORT_SYMBOL(autoirq_report);
 /* dma handling */
 EXPORT_SYMBOL(request_dma);
 EXPORT_SYMBOL(free_dma);
+EXPORT_SYMBOL(dma_spin_lock);
 #ifdef HAVE_DISABLE_HLT
 EXPORT_SYMBOL(disable_hlt);
 EXPORT_SYMBOL(enable_hlt);
@@ -379,14 +382,6 @@ EXPORT_SYMBOL(__up);
 /* all busmice */
 EXPORT_SYMBOL(add_mouse_randomness);
 EXPORT_SYMBOL(fasync_helper);
-
-#ifdef CONFIG_PSMOUSE_MODULE
-/* psaux mouse */
-EXPORT_SYMBOL(aux_device_present);
-#ifdef CONFIG_VT
-EXPORT_SYMBOL(pckbd_read_mask);
-#endif
-#endif
 
 #ifdef CONFIG_BLK_DEV_MD
 EXPORT_SYMBOL(disk_name);	/* for md.c */

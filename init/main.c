@@ -302,9 +302,8 @@ extern void baycom_ser_hdx_setup(char *str, int *ints);
 #ifdef CONFIG_SOUNDMODEM
 extern void sm_setup(char *str, int *ints);
 #endif
-#ifdef CONFIG_PMAC_CONSOLE
-extern void pmac_cons_setup(char *str, int *ints);
-extern void pmac_vmode_setup(char *str, int *ints);
+#ifdef CONFIG_ADBMOUSE
+extern void adb_mouse_setup(char *str, int *ints);
 #endif
 #ifdef CONFIG_WDT
 extern void wdt_setup(char *str, int *ints);
@@ -1195,6 +1194,8 @@ static void __init no_initrd(char *s,int *ints)
 }
 #endif
 
+struct task_struct *child_reaper = &init_task;
+
 /*
  * Ok, the machine is now initialized. None of the devices
  * have been touched yet, but the CPU subsystem is up and
@@ -1207,6 +1208,16 @@ static void __init do_basic_setup(void)
 #ifdef CONFIG_BLK_DEV_INITRD
 	int real_root_mountflags;
 #endif
+
+	/*
+	 * Tell the world that we're going to be the grim
+	 * reaper of innocent orphaned children.
+	 *
+	 * We don't want people to have to make incorrect
+	 * assumptions about where in the task array this
+	 * can be found.
+	 */
+	child_reaper = current;
 
 #if defined(CONFIG_MTRR)	/* Do this after SMP initialization */
 /*

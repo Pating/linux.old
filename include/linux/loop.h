@@ -85,10 +85,14 @@ struct loop_info {
  * Loop filter types
  */
 
-#define LO_CRYPT_NONE	0
-#define LO_CRYPT_XOR	1
-#define LO_CRYPT_DES	2
-#define LO_CRYPT_DUMMY     9
+#define LO_CRYPT_NONE	  0
+#define LO_CRYPT_XOR	  1
+#define LO_CRYPT_DES	  2
+#define LO_CRYPT_FISH2    3    /* Brand new Twofish encryption */
+#define LO_CRYPT_BLOW     4
+#define LO_CRYPT_CAST128  5
+#define LO_CRYPT_IDEA     6
+#define LO_CRYPT_DUMMY    9
 #define LO_CRYPT_SKIPJACK 10
 #define MAX_LO_CRYPT	20
 
@@ -99,8 +103,12 @@ struct loop_func_table {
 	int (*transfer)(struct loop_device *lo, int cmd, 
 			char *raw_buf, char *loop_buf, int size);
 	int (*init)(struct loop_device *, struct loop_info *); 
-	int (*release)(struct loop_device *);  
+	/* release is called from loop_unregister_transfer or clr_fd */
+	int (*release)(struct loop_device *); 
 	int (*ioctl)(struct loop_device *, int cmd, unsigned long arg);
+	/* lock and unlock manage the module use counts */ 
+	void (*lock)(struct loop_device *);
+	void (*unlock)(struct loop_device *);
 }; 
 
 int  loop_register_transfer(struct loop_func_table *funcs);
