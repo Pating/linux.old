@@ -41,9 +41,9 @@
 
 extern struct svc_program	nfsd_program;
 static void			nfsd(struct svc_rqst *rqstp);
-struct timeval			nfssvc_boot = { 0, 0 };
-static struct svc_serv 		*nfsd_serv = NULL;
-static int			nfsd_busy = 0;
+struct timeval			nfssvc_boot;
+static struct svc_serv 		*nfsd_serv;
+static int			nfsd_busy;
 static unsigned long		nfsd_last_call;
 
 struct nfsd_list {
@@ -129,7 +129,8 @@ update_thread_usage(int busy_threads)
 	decile = busy_threads*10/nfsdstats.th_cnt;
 	if (decile>0 && decile <= 10) {
 		diff = nfsd_last_call - prev_call;
-		nfsdstats.th_usage[decile-1] += diff;
+		if ( (nfsdstats.th_usage[decile-1] += diff) >= NFSD_USAGE_WRAP)
+			nfsdstats.th_usage[decile-1] -= NFSD_USAGE_WRAP;
 		if (decile == 10)
 			nfsdstats.th_fullcnt++;
 	}
@@ -153,6 +154,8 @@ nfsd(struct svc_rqst *rqstp)
 	current->pgrp = 1;
 	sprintf(current->comm, "nfsd");
 	current->fs->umask = 0;
+
+	current->rlim[RLIMIT_FSIZE].rlim_cur = RLIM_INFINITY; 
 
 	nfsdstats.th_cnt++;
 	/* Let svc_process check client's authentication. */
@@ -212,7 +215,7 @@ nfsd(struct svc_rqst *rqstp)
 		unsigned int	signo;
 
 		for (signo = 1; signo <= _NSIG; signo++)
-			if (sigismember(&current->signal, signo) &&
+			if (sigismember(&current->pending.signal, signo) &&
 			    !sigismember(&current->blocked, signo))
 				break;
 		printk(KERN_WARNING "nfsd: terminating on signal %d\n", signo);
@@ -275,7 +278,6 @@ nfsd_dispatch(struct svc_rqst *rqstp, u32 *statp)
 	/* Encode result.
 	 * For NFSv2, additional info is never returned in case of an error.
 	 */
-#ifdef CONFIG_NFSD_V3
 	if (!(nfserr && rqstp->rq_vers == 2)) {
 		xdr = proc->pc_encode;
 		if (xdr && !xdr(rqstp, rqstp->rq_resbuf.buf, rqstp->rq_resp)) {
@@ -286,17 +288,6 @@ nfsd_dispatch(struct svc_rqst *rqstp, u32 *statp)
 			return 1;
 		}
 	}
-#else
-	xdr = proc->pc_encode;
-	if (!nfserr && xdr
-	 && !xdr(rqstp, rqstp->rq_resbuf.buf, rqstp->rq_resp)) {
-		/* Failed to encode result. Release cache entry */
-		dprintk("nfsd: failed to encode result!\n");
-		nfsd_cache_update(rqstp, RC_NOCACHE, NULL);
-		*statp = rpc_system_err;
-		return 1;
-	}
-#endif /* CONFIG_NFSD_V3 */
 
 	/* Store reply in cache. */
 	nfsd_cache_update(rqstp, proc->pc_cachetype, statp + 1);

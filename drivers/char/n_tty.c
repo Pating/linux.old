@@ -18,6 +18,8 @@
  * This file may be redistributed under the terms of the GNU Public
  * License.
  *
+ * Reduced memory usage for older ARM systems  - Russell King.
+ *
  * 2000/01/20   Fixed SMP locking on put_tty_queue using bits of 
  *		the patch by Andrew J. Kroll <ag784@freenet.buffalo.edu>
  *		who actually finally proved there really was a race.
@@ -60,6 +62,29 @@
  */
 #define TTY_THRESHOLD_THROTTLE		128 /* now based on remaining room */
 #define TTY_THRESHOLD_UNTHROTTLE 	128
+
+static inline unsigned char *alloc_buf(void)
+{
+	unsigned char *p;
+	int prio = in_interrupt() ? GFP_ATOMIC : GFP_KERNEL;
+
+	if (PAGE_SIZE != N_TTY_BUF_SIZE) {
+		p = kmalloc(N_TTY_BUF_SIZE, prio);
+		if (p)
+			memset(p, 0, N_TTY_BUF_SIZE);
+	} else
+		p = (unsigned char *)get_zeroed_page(prio);
+
+	return p;
+}
+
+static inline void free_buf(unsigned char *buf)
+{
+	if (PAGE_SIZE != N_TTY_BUF_SIZE)
+		kfree(buf);
+	else
+		free_page((unsigned long) buf);
+}
 
 static inline void put_tty_queue(unsigned char c, struct tty_struct *tty)
 {
@@ -630,8 +655,7 @@ send_signal:
 			put_tty_queue(c, tty);
 			tty->canon_head = tty->read_head;
 			tty->canon_data++;
-			if (tty->fasync)
-				kill_fasync(tty->fasync, SIGIO, POLL_IN);
+			kill_fasync(&tty->fasync, SIGIO, POLL_IN);
 			if (waitqueue_active(&tty->read_wait))
 				wake_up_interruptible(&tty->read_wait);
 			return;
@@ -735,8 +759,7 @@ static void n_tty_receive_buf(struct tty_struct *tty, const unsigned char *cp,
 	}
 
 	if (!tty->icanon && (tty->read_cnt >= tty->minimum_to_wake)) {
-		if (tty->fasync)
-			kill_fasync(tty->fasync, SIGIO, POLL_IN);
+		kill_fasync(&tty->fasync, SIGIO, POLL_IN);
 		if (waitqueue_active(&tty->read_wait))
 			wake_up_interruptible(&tty->read_wait);
 	}
@@ -829,7 +852,7 @@ static void n_tty_close(struct tty_struct *tty)
 {
 	n_tty_flush_buffer(tty);
 	if (tty->read_buf) {
-		free_page((unsigned long) tty->read_buf);
+		free_buf(tty->read_buf);
 		tty->read_buf = 0;
 	}
 }
@@ -840,8 +863,7 @@ static int n_tty_open(struct tty_struct *tty)
 		return -EINVAL;
 
 	if (!tty->read_buf) {
-		tty->read_buf = (unsigned char *)
-			get_zeroed_page(in_interrupt() ? GFP_ATOMIC : GFP_KERNEL);
+		tty->read_buf = alloc_buf();
 		if (!tty->read_buf)
 			return -ENOMEM;
 	}
@@ -1132,9 +1154,7 @@ static ssize_t write_chan(struct tty_struct * tty, struct file * file,
 				nr -= num;
 				if (nr == 0)
 					break;
-				current->state = TASK_RUNNING;
 				get_user(c, b);
-				current->state = TASK_INTERRUPTIBLE;
 				if (opost(c, tty) < 0)
 					break;
 				b++; nr--;
@@ -1142,9 +1162,7 @@ static ssize_t write_chan(struct tty_struct * tty, struct file * file,
 			if (tty->driver.flush_chars)
 				tty->driver.flush_chars(tty);
 		} else {
-			current->state = TASK_RUNNING;
 			c = tty->driver.write(tty, 1, b, nr);
-			current->state = TASK_INTERRUPTIBLE;
 			if (c < 0) {
 				retval = c;
 				goto break_out;

@@ -1,4 +1,4 @@
-/* $Id: bitops.h,v 1.28 2000/03/27 10:38:56 davem Exp $
+/* $Id: bitops.h,v 1.31 2000/09/23 02:09:21 davem Exp $
  * bitops.h: Bit string operations on the V9.
  *
  * Copyright 1996, 1997 David S. Miller (davem@caip.rutgers.edu)
@@ -9,9 +9,9 @@
 
 #include <asm/byteorder.h>
 
-extern long __test_and_set_bit(unsigned long nr, void *addr);
-extern long __test_and_clear_bit(unsigned long nr, void *addr);
-extern long __test_and_change_bit(unsigned long nr, void *addr);
+extern long __test_and_set_bit(unsigned long nr, volatile void *addr);
+extern long __test_and_clear_bit(unsigned long nr, volatile void *addr);
+extern long __test_and_change_bit(unsigned long nr, volatile void *addr);
 
 #define test_and_set_bit(nr,addr)	(__test_and_set_bit(nr,addr)!=0)
 #define test_and_clear_bit(nr,addr)	(__test_and_clear_bit(nr,addr)!=0)
@@ -19,6 +19,9 @@ extern long __test_and_change_bit(unsigned long nr, void *addr);
 #define set_bit(nr,addr)		((void)__test_and_set_bit(nr,addr))
 #define clear_bit(nr,addr)		((void)__test_and_clear_bit(nr,addr))
 #define change_bit(nr,addr)		((void)__test_and_change_bit(nr,addr))
+
+#define smp_mb__before_clear_bit()	do { } while(0)
+#define smp_mb__after_clear_bit()	do { } while(0)
 
 extern __inline__ int test_bit(int nr, __const__ void *addr)
 {
@@ -158,6 +161,8 @@ extern __inline__ unsigned long find_next_zero_bit(void *addr, unsigned long siz
 
 found_first:
 	tmp |= ~0UL << size;
+	if (tmp == ~0UL)        /* Are any bits zero? */
+		return result + size; /* Nope. */
 found_middle:
 	return result + ffz(tmp);
 }
@@ -165,8 +170,8 @@ found_middle:
 #define find_first_zero_bit(addr, size) \
         find_next_zero_bit((addr), (size), 0)
 
-extern long __test_and_set_le_bit(int nr, void *addr);
-extern long __test_and_clear_le_bit(int nr, void *addr);
+extern long __test_and_set_le_bit(int nr, volatile void *addr);
+extern long __test_and_clear_le_bit(int nr, volatile void *addr);
 
 #define test_and_set_le_bit(nr,addr)	(__test_and_set_le_bit(nr,addr)!=0)
 #define test_and_clear_le_bit(nr,addr)	(__test_and_clear_le_bit(nr,addr)!=0)
@@ -217,6 +222,8 @@ extern __inline__ unsigned long find_next_zero_le_bit(void *addr, unsigned long 
 	tmp = __swab64p(p);
 found_first:
 	tmp |= (~0UL << size);
+	if (tmp == ~0UL)        /* Are any bits zero? */
+		return result + size; /* Nope. */
 found_middle:
 	return result + ffz(tmp);
 }
@@ -230,8 +237,9 @@ found_middle:
 #define ext2_find_next_zero_bit		find_next_zero_le_bit
 
 /* Bitmap functions for the minix filesystem.  */
-#define minix_set_bit(nr,addr) test_and_set_bit(nr,addr)
-#define minix_clear_bit(nr,addr) test_and_clear_bit(nr,addr)
+#define minix_test_and_set_bit(nr,addr) test_and_set_bit(nr,addr)
+#define minix_set_bit(nr,addr) set_bit(nr,addr)
+#define minix_test_and_clear_bit(nr,addr) test_and_clear_bit(nr,addr)
 #define minix_test_bit(nr,addr) test_bit(nr,addr)
 #define minix_find_first_zero_bit(addr,size) find_first_zero_bit(addr,size)
 

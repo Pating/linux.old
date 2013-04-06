@@ -1,10 +1,10 @@
 #ifndef __LINUX_DCACHE_H
 #define __LINUX_DCACHE_H
 
+#ifdef __KERNEL__
+
 #include <asm/atomic.h>
 #include <linux/mount.h>
-
-#ifdef __KERNEL__
 
 /*
  * linux/include/linux/dcache.h
@@ -57,7 +57,7 @@ static __inline__ unsigned int full_name_hash(const unsigned char * name, unsign
 #define DNAME_INLINE_LEN 16
 
 struct dentry {
-	int d_count;
+	atomic_t d_count;
 	unsigned int d_flags;
 	struct inode  * d_inode;	/* Where the name belongs to - NULL is negative */
 	struct dentry * d_parent;	/* parent directory */
@@ -92,7 +92,16 @@ struct dentry_operations {
  * might be a negative dentry which has no information associated with
  * it */
 
-
+/*
+locking rules:
+		big lock	dcache_lock	may block
+d_revalidate:	no		no		yes
+d_hash		no		no		yes
+d_compare:	no		yes		no
+d_delete:	no		yes		no
+d_release:	no		no		yes
+d_iput:		no		no		yes
+ */
 
 /* d_flags entries */
 #define DCACHE_AUTOFS_PENDING 0x0001    /* autofs: "under construction" */
@@ -106,6 +115,9 @@ struct dentry_operations {
 					 * If this dentry points to a directory, then
 					 * s_nfsd_free_path semaphore will be down
 					 */
+#define DCACHE_REFERENCED	0x0008  /* Recently used, don't discard. */
+
+extern spinlock_t dcache_lock;
 
 /**
  * d_drop - drop a dentry
@@ -126,8 +138,10 @@ struct dentry_operations {
 
 static __inline__ void d_drop(struct dentry * dentry)
 {
+	spin_lock(&dcache_lock);
 	list_del(&dentry->d_hash);
 	INIT_LIST_HEAD(&dentry->d_hash);
+	spin_unlock(&dcache_lock);
 }
 
 static __inline__ int dname_external(struct dentry *d)
@@ -150,11 +164,11 @@ extern int d_invalidate(struct dentry *);
 #define shrink_dcache() prune_dcache(0)
 struct zone_struct;
 /* dcache memory management */
-extern int shrink_dcache_memory(int, unsigned int);
+extern void shrink_dcache_memory(int, unsigned int);
 extern void prune_dcache(int);
 
 /* icache memory management (defined in linux/fs/inode.c) */
-extern int shrink_icache_memory(int, int);
+extern void shrink_icache_memory(int, int);
 extern void prune_icache(int);
 
 /* only used at mount-time */
@@ -185,8 +199,8 @@ extern void d_rehash(struct dentry *);
  
 static __inline__ void d_add(struct dentry * entry, struct inode * inode)
 {
-	d_rehash(entry);
 	d_instantiate(entry, inode);
+	d_rehash(entry);
 }
 
 /* used for rename() and baskets */
@@ -200,28 +214,33 @@ extern int d_validate(struct dentry *, struct dentry *, unsigned int, unsigned i
 
 extern char * __d_path(struct dentry *, struct vfsmount *, struct dentry *,
 	struct vfsmount *, char *, int);
-/* write full pathname into buffer and return start of pathname */
-#define d_path(dentry, vfsmnt, buffer, buflen) \
-	__d_path(dentry, vfsmnt, current->fs->root, current->fs->rootmnt, \
-	buffer, buflen)
   
 /* Allocation counts.. */
 
 /**
- *	dget	-	get a reference to a dentry
+ *	dget, dget_locked	-	get a reference to a dentry
  *	@dentry: dentry to get a reference to
  *
  *	Given a dentry or %NULL pointer increment the reference count
  *	if appropriate and return the dentry. A dentry will not be 
- *	destroyed when it has references.
+ *	destroyed when it has references. dget() should never be
+ *	called for dentries with zero reference counter. For these cases
+ *	(preferably none, functions in dcache.c are sufficient for normal
+ *	needs and they take necessary precautions) you should hold dcache_lock
+ *	and call dget_locked() instead of dget().
  */
  
 static __inline__ struct dentry * dget(struct dentry *dentry)
 {
-	if (dentry)
-		dentry->d_count++;
+	if (dentry) {
+		if (!atomic_read(&dentry->d_count))
+			BUG();
+		atomic_inc(&dentry->d_count);
+	}
 	return dentry;
 }
+
+extern struct dentry * dget_locked(struct dentry *);
 
 /**
  *	d_unhashed -	is dentry hashed
@@ -241,7 +260,6 @@ static __inline__ int d_mountpoint(struct dentry *dentry)
 {
 	return !list_empty(&dentry->d_vfsmnt);
 }
-
 
 #endif /* __KERNEL__ */
 

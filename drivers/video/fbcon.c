@@ -143,7 +143,7 @@ static int fbcon_set_origin(struct vc_data *);
  * if dispsw->cursor is NULL, use Atari alike software cursor
  */
 
-static int cursor_drawn = 0;
+static int cursor_drawn;
 
 #define CURSOR_DRAW_DELAY		(1)
 
@@ -154,8 +154,8 @@ static int cursor_drawn = 0;
 #define MAC_CURSOR_BLINK_RATE		(32)
 #define DEFAULT_CURSOR_BLINK_RATE	(20)
 
-static int vbl_cursor_cnt = 0;
-static int cursor_on = 0;
+static int vbl_cursor_cnt;
+static int cursor_on;
 static int cursor_blink_rate;
 
 static inline void cursor_undrawn(void)
@@ -218,7 +218,7 @@ static int fbcon_show_logo(void);
 /*
  * On the Macintoy, there may or may not be a working VBL int. We need to probe
  */
-static int vbl_detected = 0;
+static int vbl_detected;
 
 static void fbcon_vbl_detect(int irq, void *dummy, struct pt_regs *fp)
 {
@@ -289,9 +289,17 @@ void set_con2fb_map(int unit, int newidx)
     if (newidx != con2fb_map[unit]) {
        oldfb = registered_fb[oldidx];
        newfb = registered_fb[newidx];
-       if (newfb->fbops->fb_open(newfb,0))
-           return;
-       oldfb->fbops->fb_release(oldfb,0);
+	if (newfb->fbops->owner)
+		__MOD_INC_USE_COUNT(newfb->fbops->owner);
+	if (newfb->fbops->fb_open && newfb->fbops->fb_open(newfb,0)) {
+		if (newfb->fbops->owner)
+			__MOD_DEC_USE_COUNT(newfb->fbops->owner);
+		return;
+	}
+	if (oldfb->fbops->fb_release)
+		oldfb->fbops->fb_release(oldfb,0);
+	if (oldfb->fbops->owner)
+		__MOD_DEC_USE_COUNT(oldfb->fbops->owner);
        conp = fb_display[unit].conp;
        fontdata = fb_display[unit].fontdata;
        fontwidth = fb_display[unit]._fontwidth;
@@ -1116,6 +1124,15 @@ static void fbcon_redraw(struct vc_data *conp, struct display *p,
     }
 }
 
+void fbcon_redraw_clear(struct vc_data *conp, struct display *p, int sy, int sx,
+		     int height, int width)
+{
+    int x, y;
+    for (y=0; y<height; y++)
+	for (x=0; x<width; x++)
+	    fbcon_putc(conp, ' ', sy+y, sx+x);
+}
+
 /* This cannot be used together with ypan or ywrap */
 void fbcon_redraw_bmove(struct display *p, int sy, int sx, int dy, int dx, int h, int w)
 {
@@ -1890,12 +1907,13 @@ static unsigned long fbcon_getxy(struct vc_data *conp, unsigned long pos, int *p
     	    y += softback_lines;
     	ret = pos + (conp->vc_cols - x) * 2;
     } else if (conp->vc_num == fg_console && softback_lines) {
-    	unsigned long offset = (pos - softback_curr) / 2;
+    	unsigned long offset = pos - softback_curr;
     	
+    	if (pos < softback_curr)
+    	    offset += softback_end - softback_buf;
+    	offset /= 2;
     	x = offset % conp->vc_cols;
     	y = offset / conp->vc_cols;
-    	if (pos < softback_curr)
-	    y += (softback_end - softback_buf) / conp->vc_size_row;
 	ret = pos + (conp->vc_cols - x) * 2;
 	if (ret == softback_end)
 	    ret = softback_buf;
@@ -2367,7 +2385,7 @@ static int __init fbcon_show_logo( void )
  *  The console `switch' structure for the frame buffer based console
  */
  
-struct consw fb_con = {
+const struct consw fb_con = {
     con_startup: 	fbcon_startup, 
     con_init: 		fbcon_init,
     con_deinit: 	fbcon_deinit,
@@ -2383,8 +2401,6 @@ struct consw fb_con = {
     con_set_palette: 	fbcon_set_palette,
     con_scrolldelta: 	fbcon_scrolldelta,
     con_set_origin: 	fbcon_set_origin,
-    con_save_screen: 	NULL,
-    con_build_attr:	NULL,
     con_invert_region:	fbcon_invert_region,
     con_screen_pos:	fbcon_screen_pos,
     con_getxy:		fbcon_getxy,
@@ -2397,14 +2413,15 @@ struct consw fb_con = {
 
 static void fbcon_dummy_op(void) {}
 
+#define DUMMY	(void *)fbcon_dummy_op
+
 struct display_switch fbcon_dummy = {
-    (void *)fbcon_dummy_op,	/* fbcon_dummy_setup */
-    (void *)fbcon_dummy_op,	/* fbcon_dummy_bmove */
-    (void *)fbcon_dummy_op,	/* fbcon_dummy_clear */
-    (void *)fbcon_dummy_op,	/* fbcon_dummy_putc */
-    (void *)fbcon_dummy_op,	/* fbcon_dummy_putcs */
-    (void *)fbcon_dummy_op,	/* fbcon_dummy_revc */
-    NULL,			/* fbcon_dummy_cursor */
+    setup:	DUMMY,
+    bmove:	DUMMY,
+    clear:	DUMMY,
+    putc:	DUMMY,
+    putcs:	DUMMY,
+    revc:	DUMMY,
 };
 
 
@@ -2414,5 +2431,6 @@ struct display_switch fbcon_dummy = {
 
 EXPORT_SYMBOL(fb_display);
 EXPORT_SYMBOL(fbcon_redraw_bmove);
+EXPORT_SYMBOL(fbcon_redraw_clear);
 EXPORT_SYMBOL(fbcon_dummy);
 EXPORT_SYMBOL(fb_con);

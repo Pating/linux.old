@@ -96,7 +96,7 @@ struct rpc_rqst {
 	struct rpc_task *	rq_task;	/* RPC task data */
 	__u32			rq_xid;		/* request XID */
 	struct rpc_rqst *	rq_next;	/* free list */
-	unsigned char		rq_damaged;	/* reply being received */
+	volatile unsigned char	rq_received : 1;/* receive completed */
 
 	/*
 	 * For authentication (e.g. auth_des)
@@ -138,9 +138,8 @@ struct rpc_xprt {
 	struct rpc_wait_queue	reconn;		/* waiting for reconnect */
 	struct rpc_rqst *	free;		/* free slots */
 	struct rpc_rqst		slot[RPC_MAXREQS];
-	unsigned int		connected  : 1,	/* TCP: connected */
-				write_space: 1,	/* TCP: can send */
-				shutdown   : 1,	/* being shut down */
+	unsigned int		sockstate;	/* Socket state */
+	unsigned char		shutdown   : 1,	/* being shut down */
 				nocong	   : 1,	/* no congestion control */
 				stream     : 1,	/* TCP */
 				tcp_more   : 1,	/* more record fragments */
@@ -189,6 +188,18 @@ int			xprt_clear_backlog(struct rpc_xprt *);
 void			__rpciod_tcp_dispatcher(void);
 
 extern struct list_head	rpc_xprt_pending;
+
+#define XPRT_WSPACE	0
+#define XPRT_CONNECT	1
+
+#define xprt_wspace(xp)			(test_bit(XPRT_WSPACE, &(xp)->sockstate))
+#define xprt_test_and_set_wspace(xp)	(test_and_set_bit(XPRT_WSPACE, &(xp)->sockstate))
+#define xprt_clear_wspace(xp)		(clear_bit(XPRT_WSPACE, &(xp)->sockstate))
+
+#define xprt_connected(xp)		(!(xp)->stream || test_bit(XPRT_CONNECT, &(xp)->sockstate))
+#define xprt_set_connected(xp)		(set_bit(XPRT_CONNECT, &(xp)->sockstate))
+#define xprt_test_and_set_connected(xp)	(test_and_set_bit(XPRT_CONNECT, &(xp)->sockstate))
+#define xprt_clear_connected(xp)	(clear_bit(XPRT_CONNECT, &(xp)->sockstate))
 
 static inline
 int xprt_tcp_pending(void)

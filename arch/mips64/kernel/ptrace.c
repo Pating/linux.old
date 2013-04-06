@@ -1,12 +1,11 @@
-/* $Id: ptrace.c,v 1.1 1999/12/04 03:59:00 ralf Exp $
- *
+/*
  * This file is subject to the terms and conditions of the GNU General Public
  * License.  See the file "COPYING" in the main directory of this archive
  * for more details.
  *
  * Copyright (C) 1992 Ross Biro
  * Copyright (C) Linus Torvalds
- * Copyright (C) 1994, 1995, 1996, 1997, 1998 Ralf Baechle
+ * Copyright (C) 1994, 95, 96, 97, 98, 2000 Ralf Baechle
  * Copyright (C) 1996 David S. Miller
  * Copyright (C) 2000 Ulf Carlsson
  *
@@ -29,27 +28,23 @@
 #include <asm/system.h>
 #include <asm/uaccess.h>
 
-/* Tracing a 32-bit process with a 64-bit strace and vice verca will not
-   work.  I don't know how to fix this.  */
-
+/*
+ * Tracing a 32-bit process with a 64-bit strace and vice versa will not
+ * work.  I don't know how to fix this.
+ */
 asmlinkage int sys32_ptrace(int request, int pid, int addr, int data)
 {
 	struct task_struct *child;
 	int ret;
 
 	lock_kernel();
-#if 0
-	printk("ptrace(r=%d,pid=%d,addr=%08lx,data=%08lx)\n",
-	       (int) request, (int) pid, (unsigned long) addr,
-	       (unsigned long) data);
-#endif
 	ret = -EPERM;
 	if (request == PTRACE_TRACEME) {
 		/* are we already being traced? */
-		if (current->flags & PF_PTRACED)
+		if (current->ptrace & PT_PTRACED)
 			goto out;
 		/* set the ptrace bit in the process flags. */
-		current->flags |= PF_PTRACED;
+		current->ptrace |= PT_PTRACED;
 		ret = 0;
 		goto out;
 	}
@@ -79,9 +74,9 @@ asmlinkage int sys32_ptrace(int request, int pid, int addr, int data)
 	 	    (current->gid != child->gid)) && !capable(CAP_SYS_PTRACE))
 			goto out_tsk;
 		/* the same process cannot be attached many times */
-		if (child->flags & PF_PTRACED)
+		if (child->ptrace & PT_PTRACED)
 			goto out_tsk;
-		child->flags |= PF_PTRACED;
+		child->ptrace |= PT_PTRACED;
 
 		write_lock_irq(&tasklist_lock);
 		if (child->p_pptr != current) {
@@ -96,7 +91,7 @@ asmlinkage int sys32_ptrace(int request, int pid, int addr, int data)
 		goto out_tsk;
 	}
 	ret = -ESRCH;
-	if (!(child->flags & PF_PTRACED))
+	if (!(child->ptrace & PT_PTRACED))
 		goto out_tsk;
 	if (child->state != TASK_STOPPED) {
 		if (request != PTRACE_KILL)
@@ -104,7 +99,6 @@ asmlinkage int sys32_ptrace(int request, int pid, int addr, int data)
 	}
 	if (child->p_pptr != current)
 		goto out_tsk;
-
 	switch (request) {
 	/* when I and D space are separate, these will need to be fixed. */
 	case PTRACE_PEEKTEXT: /* read word at location addr. */ 
@@ -116,7 +110,7 @@ asmlinkage int sys32_ptrace(int request, int pid, int addr, int data)
 		ret = -EIO;
 		if (copied != sizeof(tmp))
 			break;
-		ret = put_user(tmp, (unsigned int *) data);
+		ret = put_user(tmp, (unsigned int *) (unsigned long) data);
 		break;
 	}
 
@@ -179,7 +173,7 @@ asmlinkage int sys32_ptrace(int request, int pid, int addr, int data)
 			ret = -EIO;
 			goto out_tsk;
 		}
-		ret = put_user(tmp, (unsigned *) data);
+		ret = put_user(tmp, (unsigned *) (unsigned long) data);
 		break;
 		}
 	/* when I and D space are separate, this will have to be fixed. */
@@ -248,9 +242,9 @@ asmlinkage int sys32_ptrace(int request, int pid, int addr, int data)
 		if ((unsigned int) data > _NSIG)
 			break;
 		if (request == PTRACE_SYSCALL)
-			child->flags |= PF_TRACESYS;
+			child->ptrace |= PT_TRACESYS;
 		else
-			child->flags &= ~PF_TRACESYS;
+			child->ptrace &= ~PT_TRACESYS;
 		child->exit_code = data;
 		wake_up_process(child);
 		ret = 0;
@@ -274,7 +268,7 @@ asmlinkage int sys32_ptrace(int request, int pid, int addr, int data)
 		ret = -EIO;
 		if ((unsigned long) data > _NSIG)
 			break;
-		child->flags &= ~(PF_PTRACED|PF_TRACESYS);
+		child->ptrace = 0;
 		child->exit_code = data;
 		write_lock_irq(&tasklist_lock);
 		REMOVE_LINKS(child);
@@ -282,6 +276,15 @@ asmlinkage int sys32_ptrace(int request, int pid, int addr, int data)
 		SET_LINKS(child);
 		write_unlock_irq(&tasklist_lock);
 		wake_up_process(child);
+		ret = 0;
+		break;
+	}
+
+	case PTRACE_SETOPTIONS: {
+		if (data & PTRACE_O_TRACESYSGOOD)
+			child->ptrace |= PT_TRACESYSGOOD;
+		else
+			child->ptrace &= ~PT_TRACESYSGOOD;
 		ret = 0;
 		break;
 	}
@@ -312,10 +315,10 @@ asmlinkage int sys_ptrace(long request, long pid, long addr, long data)
 	ret = -EPERM;
 	if (request == PTRACE_TRACEME) {
 		/* are we already being traced? */
-		if (current->flags & PF_PTRACED)
+		if (current->ptrace & PT_PTRACED)
 			goto out;
 		/* set the ptrace bit in the process flags. */
-		current->flags |= PF_PTRACED;
+		current->ptrace |= PT_PTRACED;
 		ret = 0;
 		goto out;
 	}
@@ -345,9 +348,9 @@ asmlinkage int sys_ptrace(long request, long pid, long addr, long data)
 	 	    (current->gid != child->gid)) && !capable(CAP_SYS_PTRACE))
 			goto out_tsk;
 		/* the same process cannot be attached many times */
-		if (child->flags & PF_PTRACED)
+		if (child->ptrace & PT_PTRACED)
 			goto out_tsk;
-		child->flags |= PF_PTRACED;
+		child->ptrace |= PT_PTRACED;
 
 		write_lock_irq(&tasklist_lock);
 		if (child->p_pptr != current) {
@@ -362,7 +365,7 @@ asmlinkage int sys_ptrace(long request, long pid, long addr, long data)
 		goto out_tsk;
 	}
 	ret = -ESRCH;
-	if (!(child->flags & PF_PTRACED))
+	if (!(child->ptrace & PT_PTRACED))
 		goto out_tsk;
 	if (child->state != TASK_STOPPED) {
 		if (request != PTRACE_KILL)
@@ -514,9 +517,9 @@ asmlinkage int sys_ptrace(long request, long pid, long addr, long data)
 		if ((unsigned long) data > _NSIG)
 			break;
 		if (request == PTRACE_SYSCALL)
-			child->flags |= PF_TRACESYS;
+			child->ptrace |= PT_TRACESYS;
 		else
-			child->flags &= ~PF_TRACESYS;
+			child->ptrace &= ~PT_TRACESYS;
 		child->exit_code = data;
 		wake_up_process(child);
 		ret = 0;
@@ -540,7 +543,7 @@ asmlinkage int sys_ptrace(long request, long pid, long addr, long data)
 		ret = -EIO;
 		if ((unsigned long) data > _NSIG)
 			break;
-		child->flags &= ~(PF_PTRACED|PF_TRACESYS);
+		child->ptrace = 0;
 		child->exit_code = data;
 		write_lock_irq(&tasklist_lock);
 		REMOVE_LINKS(child);
@@ -548,6 +551,15 @@ asmlinkage int sys_ptrace(long request, long pid, long addr, long data)
 		SET_LINKS(child);
 		write_unlock_irq(&tasklist_lock);
 		wake_up_process(child);
+		ret = 0;
+		break;
+	}
+
+	case PTRACE_SETOPTIONS: {
+		if (data & PTRACE_O_TRACESYSGOOD)
+			child->ptrace |= PT_TRACESYSGOOD;
+		else
+			child->ptrace &= ~PT_TRACESYSGOOD;
 		ret = 0;
 		break;
 	}
@@ -566,10 +578,14 @@ out:
 
 asmlinkage void syscall_trace(void)
 {
-	if ((current->flags & (PF_PTRACED|PF_TRACESYS))
-			!= (PF_PTRACED|PF_TRACESYS))
+	if ((current->ptrace & (PT_PTRACED|PT_TRACESYS))
+	    != (PT_PTRACED|PT_TRACESYS))
 		return;
-	current->exit_code = SIGTRAP;
+
+	/* The 0x80 provides a way for the tracing parent to distinguish
+	   between a syscall stop and SIGTRAP delivery */
+	current->exit_code = SIGTRAP | ((current->ptrace & PT_TRACESYSGOOD)
+	                                ? 0x80 : 0);
 	current->state = TASK_STOPPED;
 	notify_parent(current, SIGCHLD);
 	schedule();

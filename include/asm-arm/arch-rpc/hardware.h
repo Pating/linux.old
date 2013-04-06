@@ -1,9 +1,13 @@
 /*
- * linux/include/asm-arm/arch-rpc/hardware.h
+ *  linux/include/asm-arm/arch-rpc/hardware.h
  *
- * Copyright (C) 1996-1999 Russell King.
+ *  Copyright (C) 1996-1999 Russell King.
  *
- * This file contains the hardware definitions of the RiscPC series machines.
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ *  This file contains the hardware definitions of the RiscPC series machines.
  */
 #ifndef __ASM_ARCH_HARDWARE_H
 #define __ASM_ARCH_HARDWARE_H
@@ -78,7 +82,6 @@
 						 p->u1.s.pages_in_bank[2] + \
 						 p->u1.s.pages_in_bank[3]))
 
-#define PARAMS_BASE		(PAGE_OFFSET + PARAMS_OFFSET)
 #define Z_PARAMS_BASE		(RAM_START + PARAMS_OFFSET)
 #define FLUSH_BASE_PHYS		0x00000000	/* ROM */
 
@@ -93,7 +96,6 @@
 
 #endif
 
-#ifdef HAS_EXPMASK
 #ifndef __ASSEMBLY__
 #define __EXPMASK(offset)	(((volatile unsigned char *)EXPMASK_BASE)[offset])
 #else
@@ -102,7 +104,5 @@
 
 #define	EXPMASK_STATUS	__EXPMASK(0x00)
 #define EXPMASK_ENABLE	__EXPMASK(0x04)
-
-#endif
 
 #endif

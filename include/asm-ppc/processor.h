@@ -1,3 +1,4 @@
+#ifdef __KERNEL__
 #ifndef __ASM_PPC_PROCESSOR_H
 #define __ASM_PPC_PROCESSOR_H
 
@@ -10,15 +11,14 @@
 #include <linux/config.h>
 
 #include <asm/ptrace.h>
-#include <asm/residual.h>
 #include <asm/types.h>
 
 /* Machine State Register (MSR) Fields */
 
-#ifdef CONFIG_PPC64
+#ifdef CONFIG_PPC64BRIDGE
 #define MSR_SF		(1<<63)
 #define MSR_ISF		(1<<61)
-#endif /* CONFIG_PPC64 */   
+#endif /* CONFIG_PPC64BRIDGE */
 #define MSR_VEC		(1<<25)		/* Enable AltiVec */
 #define MSR_POW		(1<<18)		/* Enable Power Management */
 #define MSR_WE		(1<<18)		/* Wait State Enable */
@@ -288,6 +288,7 @@
 #define	SPRN_UPMC3	0x3AD	/* User Performance Counter Register 3 */
 #define	SPRN_UPMC4	0x3AE	/* User Performance Counter Register 4 */
 #define	SPRN_USIA	0x3AB	/* User Sampled Instruction Address Register */
+#define SPRN_VRSAVE	0x100	/* Vector Register Save Register */
 #define	SPRN_XER	0x001	/* Fixed Point Exception Register */
 #define	SPRN_ZPR	0x3B0	/* Zone Protection Register */
 
@@ -505,6 +506,8 @@
 #define _MACH_oak	0x00000800	/* IBM "Oak" 403 eval. board */
 #define _MACH_walnut	0x00001000	/* IBM "Walnut" 405GP eval. board */
 #define _MACH_8260	0x00002000	/* Generic 8260 */
+#define _MACH_tqm860	0x00004000	/* TQM860/L */
+#define _MACH_tqm8xxL	0x00008000	/* TQM8xxL */
 
 
 /* see residual.h for these */
@@ -672,7 +675,6 @@ static inline unsigned long thread_saved_pc(struct thread_struct *t)
 
 #define copy_segments(tsk, mm)		do { } while (0)
 #define release_segments(mm)		do { } while (0)
-#define forget_segments()		do { } while (0)
 
 unsigned long get_wchan(struct task_struct *p);
 
@@ -686,7 +688,7 @@ unsigned long get_wchan(struct task_struct *p);
 #define alloc_task_struct() \
 	((struct task_struct *) __get_free_pages(GFP_KERNEL,1))
 #define free_task_struct(p)	free_pages((unsigned long)(p),1)
-#define get_task_struct(tsk)      atomic_inc(&mem_map[MAP_NR(tsk)].count)
+#define get_task_struct(tsk)      atomic_inc(&virt_to_page(tsk)->count)
 
 /* in process.c - for early bootup debug -- Cort */
 int ll_printk(const char *, ...);
@@ -725,3 +727,4 @@ void _nmask_and_or_msr(unsigned long nmask, unsigned long or_val);
 #endif /* CONFIG_MACH_SPECIFIC */
 
 #endif /* __ASM_PPC_PROCESSOR_H */
+#endif /* __KERNEL__ */

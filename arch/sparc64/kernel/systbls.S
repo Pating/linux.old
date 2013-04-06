@@ -1,4 +1,4 @@
-/* $Id: systbls.S,v 1.73 2000/05/10 14:23:39 jj Exp $
+/* $Id: systbls.S,v 1.77 2000/08/22 10:09:10 jj Exp $
  * systbls.S: System call entry point tables for OS compatibility.
  *            The native Linux system call table lives here also.
  *
@@ -38,7 +38,7 @@ sys_call_table32:
 /*80*/	.word sys32_setgroups16, sys_getpgrp, sys_setgroups, sys32_setitimer, sys32_ftruncate64
 	.word sys_swapon, sys32_getitimer, sys_setuid, sys_sethostname, sys_setgid
 /*90*/	.word sys_dup2, sys_setfsuid, sys32_fcntl, sys32_select, sys_setfsgid
-	.word sys_fsync, sys_setpriority, sys_nis_syscall, sys_nis_syscall, sys_nis_syscall
+	.word sys_fsync, sys_setpriority32, sys_nis_syscall, sys_nis_syscall, sys_nis_syscall
 /*100*/ .word sys_getpriority, sys32_rt_sigreturn, sys32_rt_sigaction, sys32_rt_sigprocmask, sys32_rt_sigpending
 	.word sys32_rt_sigtimedwait, sys32_rt_sigqueueinfo, sys32_rt_sigsuspend, sys_setresuid, sys_getresuid
 /*110*/	.word sys_setresgid, sys_getresgid, sys_setregid, sys_nis_syscall, sys_nis_syscall
@@ -49,8 +49,8 @@ sys_call_table32:
 	.word sys_nis_syscall, sys_mkdir, sys_rmdir, sys32_utimes, sys_stat64
 /*140*/	.word sys_nis_syscall, sys_nis_syscall, sys_nis_syscall, sys_nis_syscall, sys32_getrlimit
 	.word sys32_setrlimit, sys_pivot_root, sys32_prctl, sys32_pciconfig_read, sys32_pciconfig_write
-/*150*/	.word sys_nis_syscall, sys_nis_syscall, sys_nis_syscall, sys_poll, sys_nis_syscall
-	.word sys_nis_syscall, sys_nis_syscall, sys32_statfs, sys32_fstatfs, sys_oldumount
+/*150*/	.word sys_nis_syscall, sys_nis_syscall, sys_nis_syscall, sys_poll, sys_getdents64
+	.word sys32_fcntl64, sys_nis_syscall, sys32_statfs, sys32_fstatfs, sys_oldumount
 /*160*/	.word sys_nis_syscall, sys_nis_syscall, sys_getdomainname, sys_setdomainname, sys_nis_syscall
 	.word sys32_quotactl, sys_nis_syscall, sys32_mount, sys_ustat, sys_nis_syscall
 /*170*/	.word sys_nis_syscall, sys_nis_syscall, sys_nis_syscall, sys_nis_syscall, sys32_getdents
@@ -69,7 +69,7 @@ sys_call_table32:
 	.word sys_nis_syscall, sys_llseek, sys_mlock, sys_munlock, sys_mlockall
 /*240*/	.word sys_munlockall, sys_sched_setparam, sys_sched_getparam, sys_sched_setscheduler, sys_sched_getscheduler
 	.word sys_sched_yield, sys_sched_get_priority_max, sys_sched_get_priority_min, sys32_sched_rr_get_interval, sys32_nanosleep
-/*250*/	.word sys32_mremap, sys_sysctl, sys_getsid, sys_fdatasync, sys32_nfsservctl
+/*250*/	.word sys32_mremap, sys32_sysctl, sys_getsid, sys_fdatasync, sys32_nfsservctl
 	.word sys_aplib
 
 	/* Now the 64-bit native Linux syscall table. */
@@ -108,7 +108,7 @@ sys_call_table:
 	.word sys_socketpair, sys_mkdir, sys_rmdir, sys_utimes, sys_nis_syscall
 /*140*/	.word sys_nis_syscall, sys_getpeername, sys_nis_syscall, sys_nis_syscall, sys_getrlimit
 	.word sys_setrlimit, sys_pivot_root, sys_prctl, sys_pciconfig_read, sys_pciconfig_write
-/*150*/	.word sys_getsockname, sys_nis_syscall, sys_nis_syscall, sys_poll, sys_nis_syscall
+/*150*/	.word sys_getsockname, sys_nis_syscall, sys_nis_syscall, sys_poll, sys_getdents64
 	.word sys_nis_syscall, sys_nis_syscall, sys_statfs, sys_fstatfs, sys_oldumount
 /*160*/	.word sys_nis_syscall, sys_nis_syscall, sys_getdomainname, sys_setdomainname, sys_utrap_install
 	.word sys_quotactl, sys_nis_syscall, sys_mount, sys_ustat, sys_nis_syscall
@@ -170,7 +170,7 @@ sunos_sys_table:
 	.word sys32_getitimer, sys_gethostname, sys_sethostname
 	.word sunos_getdtablesize, sys_dup2, sunos_nop
 	.word sys32_fcntl, sunos_select, sunos_nop
-	.word sys_fsync, sys_setpriority, sunos_socket
+	.word sys_fsync, sys_setpriority32, sunos_socket
 	.word sys_connect, sunos_accept
 /*100*/	.word sys_getpriority, sunos_send, sunos_recv
 	.word sunos_nosys, sys_bind, sunos_setsockopt

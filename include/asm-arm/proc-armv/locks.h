@@ -1,9 +1,13 @@
 /*
- * linux/include/asm-arm/proc-armv/locks.h
+ *  linux/include/asm-arm/proc-armv/locks.h
  *
- * Copyright (C) 2000 Russell King
+ *  Copyright (C) 2000 Russell King
  *
- * Interrupt safe locking assembler. 
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ *  Interrupt safe locking assembler. 
  */
 #ifndef __ASM_PROC_LOCKS_H
 #define __ASM_PROC_LOCKS_H
@@ -72,7 +76,8 @@
  * BIAS once per CPU will result in the long remaining
  * negative.
  */
-#define RW_LOCK_BIAS	0x01000000
+#define RW_LOCK_BIAS      0x01000000
+#define RW_LOCK_BIAS_STR "0x01000000"
 
 #define __down_op_write(ptr,fail)		\
 	({					\

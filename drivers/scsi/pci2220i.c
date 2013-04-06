@@ -370,7 +370,7 @@ static int AtapiWaitDrq (PADAPTER2220I padapter, int msec)
 static int HardReset (PADAPTER2220I padapter, POUR_DEVICE pdev, UCHAR spigot)
 	{
 	DEB (printk ("\npci2220i:RESET  spigot = %X  devices = %d, %d", spigot, pdev->deviceID[0], pdev->deviceID[1]));
-	udelay (100000);										// just wait 100 mSec to let drives flush	
+	mdelay (100);										// just wait 100 mSec to let drives flush	
 	SelectSpigot (padapter, spigot | SEL_IRQ_OFF);
 	
 	outb_p (0x0E, padapter->regAltStat);					// reset the suvivor
@@ -1602,7 +1602,7 @@ static void Irq_Handler (int irq, void *dev_id, struct pt_regs *regs)
      */
     spin_lock_irqsave (&io_request_lock, flags);
 
-//	DEB (printk ("\npci2220i recieved interrupt\n"));
+//	DEB (printk ("\npci2220i received interrupt\n"));
 
 	for ( z = 0; z < NumAdapters;  z++ )								// scan for interrupt to process
 		{
@@ -2386,8 +2386,8 @@ static USHORT GetRegs (struct Scsi_Host *pshost, BOOL bigd, struct pci_dev *pcid
 	memset (&DaleSetup, 0, sizeof (DaleSetup));
 	memset (DiskMirror, 0, sizeof (DiskMirror));
 
-	zr = pcidev->resource[1].start & PCI_BASE_ADDRESS_IO_MASK;
-	zl = pcidev->resource[2].start & PCI_BASE_ADDRESS_IO_MASK;
+	zr = pci_resource_start (pcidev, 1);
+	zl = pci_resource_start (pcidev, 2);
 
 	padapter->basePort = zr;
 	padapter->regRemap		= zr + RTR_LOCAL_REMAP;					// 32 bit local space remap
@@ -2509,7 +2509,7 @@ VOID SetupFinish (PADAPTER2220I padapter, char *str, int irq)
 	init_timer (&padapter->reconTimer);
 	padapter->reconTimer.function = ReconTimerExpiry;
 	padapter->reconTimer.data = (unsigned long)padapter;
-	printk("\nPCI-%sI EIDE CONTROLLER: at I/O = %lX/%lX  IRQ = %ld\n", str, padapter->basePort, padapter->regBase, irq);
+	printk("\nPCI-%sI EIDE CONTROLLER: at I/O = %lX/%lX  IRQ = %d\n", str, padapter->basePort, padapter->regBase, irq);
 	printk("Version %s, Compiled %s %s\n\n", PCI2220I_VERSION, __DATE__, __TIME__);
 	}	
 /****************************************************************
@@ -2542,7 +2542,12 @@ int Pci2220i_Detect (Scsi_Host_Template *tpnt)
 
 	while ( (pcidev = pci_find_device (VENDOR_PSI, DEVICE_DALE_1, pcidev)) != NULL )
 		{
+		if (pci_enable_device(pcidev))
+			continue;
 		pshost = scsi_register (tpnt, sizeof(ADAPTER2220I));
+		if(pshost==NULL)
+			continue;
+			
 		padapter = HOSTDATA(pshost);
 
 		if ( GetRegs (pshost, FALSE, pcidev) )
@@ -2850,7 +2855,7 @@ int Pci2220i_Release (struct Scsi_Host *pshost)
 		{
 		padapter->reconOn = FALSE;						// shut down the hot reconstruct
 		if ( padapter->reconPhase )
-			udelay (300000);
+			mdelay (300);
 		if ( padapter->reconTimer.data )				// is the timer running?
 			{
 			del_timer (&padapter->reconTimer);
@@ -2918,9 +2923,7 @@ int Pci2220i_BiosParam (Scsi_Disk *disk, kdev_t dev, int geom[])
 	}
 
 
-#ifdef MODULE
 /* Eventually this will go into an include file, but this will be later */
-Scsi_Host_Template driver_template = PCI2220I;
+static Scsi_Host_Template driver_template = PCI2220I;
 
 #include "scsi_module.c"
-#endif

@@ -42,6 +42,17 @@
  *
  * 06-05-2000 added another card. Daniel M. Newman <dmnewman@pobox.com>
  *
+ * 25-05-2000 Added Creative SB AWE64 Gold (CTL00B2). 
+ * 	Pål-Kristian Engstad <engstad@att.net>
+ *
+ * 12-08-2000 Added Creative SB32 PnP (CTL009F).
+ * 	Kasatenko Ivan Alex. <skywriter@rnc.ru>
+ *
+ * 21-09-2000 Got rid of attach_sbmpu
+ * 	Arnaldo Carvalho de Melo <acme@conectiva.com.br>
+ *
+ * 28-10-2000 Added pnplegacy support
+ * 	Daniel Church <dchurch@mbhs.edu>
  */
 
 #include <linux/config.h>
@@ -51,13 +62,12 @@
 #include <linux/isapnp.h>
 
 #include "sound_config.h"
-#include "soundmodule.h"
 
 #include "sb_mixer.h"
 #include "sb.h"
 
 #if defined CONFIG_ISAPNP || defined CONFIG_ISAPNP_MODULE
-#define SB_CARDS_MAX 4
+#define SB_CARDS_MAX 5
 #else
 #define SB_CARDS_MAX 1
 #endif
@@ -85,7 +95,7 @@ static int __initdata sm_games 	= 0;	/* Logitech soundman games? */
 
 static void __init attach_sb_card(struct address_info *hw_config)
 {
-	if(!sb_dsp_init(hw_config))
+	if(!sb_dsp_init(hw_config, THIS_MODULE))
 		hw_config->slots[0] = -1;
 }
 
@@ -186,7 +196,8 @@ struct pci_dev 	*sb_dev[SB_CARDS_MAX] 	= {NULL},
 #if defined CONFIG_ISAPNP || defined CONFIG_ISAPNP_MODULE
 static int isapnp	= 1;
 static int isapnpjump	= 0;
-static int multiple	= 0;
+static int multiple	= 1;
+static int pnplegacy	= 0;
 static int reverse	= 0;
 static int uart401	= 0;
 
@@ -195,7 +206,8 @@ static int mpu_activated[SB_CARDS_MAX]   = {0};
 static int opl_activated[SB_CARDS_MAX]   = {0};
 #else
 static int isapnp	= 0;
-static int multiple	= 1;
+static int multiple	= 0;
+static int pnplegacy	= 0;
 #endif
 
 MODULE_DESCRIPTION("Soundblaster driver");
@@ -214,11 +226,13 @@ MODULE_PARM(acer,	"i");
 MODULE_PARM(isapnp,	"i");
 MODULE_PARM(isapnpjump,	"i");
 MODULE_PARM(multiple,	"i");
+MODULE_PARM(pnplegacy,	"i");
 MODULE_PARM(reverse,	"i");
 MODULE_PARM(uart401,	"i");
 MODULE_PARM_DESC(isapnp,	"When set to 0, Plug & Play support will be disabled");
 MODULE_PARM_DESC(isapnpjump,	"Jumps to a specific slot in the driver's PnP table. Use the source, Luke.");
 MODULE_PARM_DESC(multiple,	"When set to 0, will not search for multiple cards");
+MODULE_PARM_DESC(pnplegacy,	"When set to 1, will search for a legacy SB card along with any PnP cards.");
 MODULE_PARM_DESC(reverse,	"When set to 1, will reverse ISAPnP search order");
 MODULE_PARM_DESC(uart401,	"When set to 1, will attempt to detect and enable the mpu on some clones");
 #endif
@@ -265,11 +279,16 @@ static struct {
 		0,0,0,0,
 		0,1,1,-1},
 	{"Sound Blaster 16", 
+		ISAPNP_VENDOR('C','T','L'), ISAPNP_DEVICE(0x0028), 
+		ISAPNP_VENDOR('C','T','L'), ISAPNP_FUNCTION(0x0031),
+		0,0,0,0,
+		0,1,1,-1},
+	{"Sound Blaster 16", 
 		ISAPNP_VENDOR('C','T','L'), ISAPNP_DEVICE(0x0029), 
 		ISAPNP_VENDOR('C','T','L'), ISAPNP_FUNCTION(0x0031),
 		0,0,0,0,
 		0,1,1,-1},
-       {"Sound Blaster 16",
+	{"Sound Blaster 16",
 		ISAPNP_VENDOR('C','T','L'), ISAPNP_DEVICE(0x002a),
 		ISAPNP_VENDOR('C','T','L'), ISAPNP_FUNCTION(0x0031),
 		0,0,0,0,
@@ -334,6 +353,11 @@ static struct {
 		ISAPNP_VENDOR('C','T','L'), ISAPNP_FUNCTION(0x0041),
 		0,0,0,0,
 		0,1,1,-1},
+	{"Creative SB32 PnP",
+		ISAPNP_VENDOR('C','T','L'), ISAPNP_DEVICE(0x009F),
+		ISAPNP_VENDOR('C','T','L'), ISAPNP_FUNCTION(0x0041),
+		0,0,0,0,
+		0,1,1,-1},
 	{"Sound Blaster AWE 64",
 		ISAPNP_VENDOR('C','T','L'), ISAPNP_DEVICE(0x009D), 
 		ISAPNP_VENDOR('C','T','L'), ISAPNP_FUNCTION(0x0042),
@@ -341,6 +365,11 @@ static struct {
 		0,1,1,-1},
 	{"Sound Blaster AWE 64 Gold",
 		ISAPNP_VENDOR('C','T','L'), ISAPNP_DEVICE(0x009E), 
+		ISAPNP_VENDOR('C','T','L'), ISAPNP_FUNCTION(0x0044),
+		0,0,0,0,
+		0,1,1,-1},
+	{"Sound Blaster AWE 64 Gold",
+		ISAPNP_VENDOR('C','T','L'), ISAPNP_DEVICE(0x00B2),
 		ISAPNP_VENDOR('C','T','L'), ISAPNP_FUNCTION(0x0044),
 		0,0,0,0,
 		0,1,1,-1},
@@ -423,7 +452,7 @@ static struct {
 		ISAPNP_VENDOR('@','H','@'), ISAPNP_FUNCTION(0x0001),
 		0,-1,0,0},
 	{"ALS100",
-	       	ISAPNP_VENDOR('A','L','S'), ISAPNP_DEVICE(0x0001), 
+		ISAPNP_VENDOR('A','L','S'), ISAPNP_DEVICE(0x0001), 
 		ISAPNP_VENDOR('@','@','@'), ISAPNP_FUNCTION(0x0001),
 		ISAPNP_VENDOR('@','X','@'), ISAPNP_FUNCTION(0x0001),
 		ISAPNP_VENDOR('@','H','@'), ISAPNP_FUNCTION(0x0001),
@@ -454,10 +483,6 @@ static struct {
 		1,0,0,0},
 	{0}
 };
-
-/* That's useful. */
-
-#define show_base(devname, resname, resptr) printk(KERN_INFO "sb: %s %s base located at %#lx\n", devname, resname, (resptr)->start)
 
 static struct pci_dev *activate_dev(char *devname, char *resname, struct pci_dev *dev)
 {
@@ -509,7 +534,7 @@ static struct pci_dev *sb_init(struct pci_bus *bus, struct address_info *hw_conf
 		return(NULL);
 
 	/* Cards with separate OPL3 device (ALS, CMI, etc.)
-	 * This is just to activate the device... */
+	 * This is just to activate the device so the OPL module can use it */
 	if(sb_isapnp_list[slot].opl_vendor || sb_isapnp_list[slot].opl_function) {
 		if((opl_dev[card] = isapnp_find_dev(bus, sb_isapnp_list[slot].opl_vendor, sb_isapnp_list[slot].opl_function, NULL))) {
 			int ret = opl_dev[card]->prepare(opl_dev[card]);
@@ -592,7 +617,7 @@ static int __init sb_isapnp_init(struct address_info *hw_config, struct address_
 	return 0;
 }
 
-int __init sb_isapnp_probe(struct address_info *hw_config, struct address_info *mpu_config, int card) 
+static int __init sb_isapnp_probe(struct address_info *hw_config, struct address_info *mpu_config, int card)
 {
 	static int first = 1;
 	int i;
@@ -623,7 +648,7 @@ int __init sb_isapnp_probe(struct address_info *hw_config, struct address_info *
 				return 0;
 			}
 		}
-		i += reverse ? -1 : 1;		
+		i += reverse ? -1 : 1;
 	}
 
 	return -ENODEV;
@@ -632,7 +657,7 @@ int __init sb_isapnp_probe(struct address_info *hw_config, struct address_info *
 
 static int __init init_sb(void)
 {
-	int card, max = multiple ? SB_CARDS_MAX : 1;
+	int card, max = (multiple && isapnp) ? SB_CARDS_MAX : 1;
 
 	printk(KERN_INFO "Soundblaster audio driver Copyright (C) by Hannu Savolainen 1993-1996\n");
 	
@@ -641,16 +666,22 @@ static int __init init_sb(void)
 		/* Please remember that even with CONFIG_ISAPNP defined one
 		 * should still be able to disable PNP support for this 
 		 * single driver! */
-		if(isapnp && (sb_isapnp_probe(&cfg[card], &cfg_mpu[card], card) < 0) ) {
+		if((!pnplegacy||card>0) && isapnp && (sb_isapnp_probe(&cfg[card], &cfg_mpu[card], card) < 0) ) {
 			if(!sb_cards_num) {
+				/* Found no ISAPnP cards, so check for a non-pnp
+				 * card and set the detection loop for 1 cycle
+				 */
 				printk(KERN_NOTICE "sb: No ISAPnP cards found, trying standard ones...\n");
 				isapnp = 0;
+				max = 1;
 			} else
+				/* found all the ISAPnP cards so exit the
+				 * detection loop. */
 				break;
 		}
 #endif
 
-		if(!isapnp) {
+		if(!isapnp || (pnplegacy&&card==0)) {
 			cfg[card].io_base	= io;
 			cfg[card].irq		= irq;
 			cfg[card].dma		= dma;
@@ -659,22 +690,45 @@ static int __init init_sb(void)
 
 		cfg[card].card_subtype = type;
 
-		if (!probe_sb(&cfg[card]))
-			return -ENODEV;
+		if (!probe_sb(&cfg[card])) {
+			/* if one or more cards already registered, don't
+			 * return an error but print a warning. Note, this
+			 * should never really happen unless the hardware
+			 * or ISAPnP screwed up. */
+			if (sb_cards_num) {
+				printk(KERN_WARNING "sb.c: There was a " \
+				  "problem probing one of your SoundBlaster " \
+				  "ISAPnP soundcards. Continuing.\n");
+				card--;
+				sb_cards_num--;
+				continue;
+			} else if(pnplegacy && isapnp) {
+				printk(KERN_NOTICE "sb: No legacy SoundBlaster cards " \
+				  "found.  Continuing with PnP detection.\n");
+				pnplegacy=0;
+				card--;
+				continue;
+			} else
+				return -ENODEV;
+		}
 		attach_sb_card(&cfg[card]);
 
-		if(cfg[card].slots[0]==-1)
-			return -ENODEV;
+		if(cfg[card].slots[0]==-1) {
+			if(card==0 && pnplegacy && isapnp) {
+				printk(KERN_NOTICE "sb: No legacy SoundBlaster cards " \
+				  "found.  Continuing with PnP detection.\n");
+				pnplegacy=0;
+				card--;
+				continue;
+			} else
+				return -ENODEV;
+		}
 		
-		if (!isapnp) 
+		if (!isapnp||(pnplegacy&&card==0))
 			cfg_mpu[card].io_base = mpu_io;
-		if (probe_sbmpu(&cfg_mpu[card]))
+		if (probe_sbmpu(&cfg_mpu[card], THIS_MODULE))
 			sbmpu[card] = 1;
-		if (sbmpu[card])
-			attach_sbmpu(&cfg_mpu[card]);
 	}
-
-	SOUND_LOCK;
 
 	if(isapnp)
 		printk(KERN_NOTICE "sb: %d Soundblaster PnP card(s) found.\n", sb_cards_num);
@@ -705,7 +759,6 @@ static void __exit cleanup_sb(void)
 			opl_dev[i]->deactivate(opl_dev[i]);
 #endif
 	}
-	SOUND_LOCK_END;	
 }
 
 module_init(init_sb);

@@ -1,4 +1,4 @@
-/* $Id: semaphore.c,v 1.3 2000/03/27 10:38:46 davem Exp $
+/* $Id: semaphore.c,v 1.5 2000/11/10 04:02:03 davem Exp $
  *  Generic semaphore code. Buyer beware. Do your own
  * specific changes in <asm/semaphore-helper.h>
  */
@@ -223,7 +223,7 @@ void down_write_failed_biased(struct rw_semaphore *sem)
 	for (;;) {
 		if (test_and_clear_le_bit(1, &sem->granted))
 			break;
-		set_task_state(tsk, TASK_UNINTERRUPTIBLE | TASK_EXCLUSIVE);
+		set_task_state(tsk, TASK_UNINTERRUPTIBLE);
 		if (!test_le_bit(1, &sem->granted))
 			schedule();
 	}
@@ -273,9 +273,9 @@ void down_write_failed(struct rw_semaphore *sem)
 	add_wait_queue_exclusive(&sem->wait, &wait);
 
 	while (sem->count < 0) {
-		set_task_state(tsk, TASK_UNINTERRUPTIBLE | TASK_EXCLUSIVE);
+		set_task_state(tsk, TASK_UNINTERRUPTIBLE);
 		if (sem->count >= 0)
-			break;  /* we must attempt to aquire or bias the lock */
+			break;  /* we must attempt to acquire or bias the lock */
 		schedule();
 	}
 

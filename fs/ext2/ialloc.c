@@ -14,6 +14,7 @@
 
 #include <linux/config.h>
 #include <linux/fs.h>
+#include <linux/ext2_fs.h>
 #include <linux/locks.h>
 #include <linux/quotaops.h>
 
@@ -186,24 +187,6 @@ void ext2_free_inode (struct inode * inode)
 	struct ext2_group_desc * gdp;
 	struct ext2_super_block * es;
 
-	if (!inode->i_dev) {
-		printk ("ext2_free_inode: inode has no device\n");
-		return;
-	}
-	if (inode->i_count > 1) {
-		printk ("ext2_free_inode: inode has count=%d\n", inode->i_count);
-		return;
-	}
-	if (inode->i_nlink) {
-		printk ("ext2_free_inode: inode has nlink=%d\n",
-			inode->i_nlink);
-		return;
-	}
-	if (!sb) {
-		printk("ext2_free_inode: inode on nonexistent device\n");
-		return;
-	}
-
 	ino = inode->i_ino;
 	ext2_debug ("freeing inode %lu\n", ino);
 
@@ -248,12 +231,12 @@ void ext2_free_inode (struct inode * inode)
 				gdp->bg_used_dirs_count =
 					cpu_to_le16(le16_to_cpu(gdp->bg_used_dirs_count) - 1);
 		}
-		mark_buffer_dirty(bh2, 1);
+		mark_buffer_dirty(bh2);
 		es->s_free_inodes_count =
 			cpu_to_le32(le32_to_cpu(es->s_free_inodes_count) + 1);
-		mark_buffer_dirty(sb->u.ext2_sb.s_sbh, 1);
+		mark_buffer_dirty(sb->u.ext2_sb.s_sbh);
 	}
-	mark_buffer_dirty(bh, 1);
+	mark_buffer_dirty(bh);
 	if (sb->s_flags & MS_SYNCHRONOUS) {
 		ll_rw_block (WRITE, 1, &bh);
 		wait_on_buffer (bh);
@@ -273,7 +256,7 @@ error_return:
  * For other inodes, search forward from the parent directory\'s block
  * group to find a free inode.
  */
-struct inode * ext2_new_inode (const struct inode * dir, int mode, int * err)
+struct inode * ext2_new_inode (const struct inode * dir, int mode)
 {
 	struct super_block * sb;
 	struct buffer_head * bh;
@@ -284,28 +267,22 @@ struct inode * ext2_new_inode (const struct inode * dir, int mode, int * err)
 	struct ext2_group_desc * gdp;
 	struct ext2_group_desc * tmp;
 	struct ext2_super_block * es;
+	int err;
 
 	/* Cannot create files in a deleted directory */
-	if (!dir || !dir->i_nlink) {
-		*err = -EPERM;
-		return NULL;
-	}
-
-	inode = get_empty_inode ();
-	if (!inode) {
-		*err = -ENOMEM;
-		return NULL;
-	}
+	if (!dir || !dir->i_nlink)
+		return ERR_PTR(-EPERM);
 
 	sb = dir->i_sb;
-	inode->i_sb = sb;
-	inode->i_flags = 0;
+	inode = new_inode(sb);
+	if (!inode)
+		return ERR_PTR(-ENOMEM);
+
 	lock_super (sb);
 	es = sb->u.ext2_sb.s_es;
 repeat:
 	gdp = NULL; i=0;
 	
-	*err = -ENOSPC;
 	if (S_ISDIR(mode)) {
 		avefreei = le32_to_cpu(es->s_free_inodes_count) /
 			sb->u.ext2_sb.s_groups_count;
@@ -384,18 +361,14 @@ repeat:
 		}
 	}
 
-	if (!gdp) {
-		unlock_super (sb);
-		iput(inode);
-		return NULL;
-	}
+	err = -ENOSPC;
+	if (!gdp)
+		goto fail;
+
+	err = -EIO;
 	bitmap_nr = load_inode_bitmap (sb, i);
-	if (bitmap_nr < 0) {
-		unlock_super (sb);
-		iput(inode);
-		*err = -EIO;
-		return NULL;
-	}
+	if (bitmap_nr < 0)
+		goto fail;
 
 	bh = sb->u.ext2_sb.s_inode_bitmap[bitmap_nr];
 	if ((j = ext2_find_first_zero_bit ((unsigned long *) bh->b_data,
@@ -406,7 +379,7 @@ repeat:
 				      "bit already set for inode %d", j);
 			goto repeat;
 		}
-		mark_buffer_dirty(bh, 1);
+		mark_buffer_dirty(bh);
 		if (sb->s_flags & MS_SYNCHRONOUS) {
 			ll_rw_block (WRITE, 1, &bh);
 			wait_on_buffer (bh);
@@ -416,9 +389,13 @@ repeat:
 			ext2_error (sb, "ext2_new_inode",
 				    "Free inodes count corrupted in group %d",
 				    i);
-			unlock_super (sb);
-			iput (inode);
-			return NULL;
+			/* Is it really ENOSPC? */
+			err = -ENOSPC;
+			if (sb->s_flags & MS_RDONLY)
+				goto fail;
+
+			gdp->bg_free_inodes_count = 0;
+			mark_buffer_dirty(bh2);
 		}
 		goto repeat;
 	}
@@ -427,24 +404,20 @@ repeat:
 		ext2_error (sb, "ext2_new_inode",
 			    "reserved inode or inode > inodes count - "
 			    "block_group = %d,inode=%d", i, j);
-		unlock_super (sb);
-		iput (inode);
-		return NULL;
+		err = -EIO;
+		goto fail;
 	}
 	gdp->bg_free_inodes_count =
 		cpu_to_le16(le16_to_cpu(gdp->bg_free_inodes_count) - 1);
 	if (S_ISDIR(mode))
 		gdp->bg_used_dirs_count =
 			cpu_to_le16(le16_to_cpu(gdp->bg_used_dirs_count) + 1);
-	mark_buffer_dirty(bh2, 1);
+	mark_buffer_dirty(bh2);
 	es->s_free_inodes_count =
 		cpu_to_le32(le32_to_cpu(es->s_free_inodes_count) - 1);
-	mark_buffer_dirty(sb->u.ext2_sb.s_sbh, 1);
+	mark_buffer_dirty(sb->u.ext2_sb.s_sbh);
 	sb->s_dirt = 1;
 	inode->i_mode = mode;
-	inode->i_sb = sb;
-	inode->i_nlink = 1;
-	inode->i_dev = sb->s_dev;
 	inode->i_uid = current->fsuid;
 	if (test_opt (sb, GRPID))
 		inode->i_gid = dir->i_gid;
@@ -471,7 +444,7 @@ repeat:
 	inode->u.ext2_i.i_dtime = 0;
 	inode->u.ext2_i.i_block_group = i;
 	if (inode->u.ext2_i.i_flags & EXT2_SYNC_FL)
-		inode->i_flags |= MS_SYNCHRONOUS;
+		inode->i_flags |= S_SYNC;
 	insert_inode_hash(inode);
 	inode->i_generation = event++;
 	mark_inode_dirty(inode);
@@ -481,13 +454,15 @@ repeat:
 		sb->dq_op->drop(inode);
 		inode->i_nlink = 0;
 		iput(inode);
-		*err = -EDQUOT;
-		return NULL;
+		return ERR_PTR(-EDQUOT);
 	}
 	ext2_debug ("allocating inode %lu\n", inode->i_ino);
-
-	*err = 0;
 	return inode;
+
+fail:
+	unlock_super(sb);
+	iput(inode);
+	return ERR_PTR(err);
 }
 
 unsigned long ext2_count_free_inodes (struct super_block * sb)

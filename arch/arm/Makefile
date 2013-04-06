@@ -10,7 +10,7 @@
 # License.  See the file "COPYING" in the main directory of this archive
 # for more details.
 #
-# Copyright (C) 1995-1999 by Russell King
+# Copyright (C) 1995-2000 by Russell King
 
 OBJCOPY		:= $(CROSS_COMPILE)objcopy -O binary -R .note -R .comment -S
 CPP		:= $(CC) -E
@@ -19,7 +19,7 @@ ARCHCC		:= $(word 1,$(CC))
 
 AFLAGS		+= -mno-fpu
 CFLAGS_PIPE	:= -pipe
-CFLAGS		:= $(CFLAGS) $(CFLAGS_PIPE)
+CFLAGS		:= $(CFLAGS) $(CFLAGS_PIPE) -msoft-float
 
 ifdef CONFIG_FRAME_POINTER
 CFLAGS		:= $(CFLAGS:-fomit-frame-pointer=)
@@ -29,39 +29,33 @@ ifdef CONFIG_DEBUG_INFO
 CFLAGS		+= -g
 endif
 
-# Ensure this is ld "2.9.4" or later
-NEW_LINKER	:= $(shell if $(LD) --gc-sections --version >/dev/null 2>&1; then echo y; else echo n; fi)
+GZFLAGS		= -9
 
-ifneq ($(NEW_LINKER),y)
-dummy:;		@echo '*** 2.3 kernels no longer build correctly with old versions of binutils.'
+# Ensure this is ld "2.9.4" or later
+NEW_LINKER	:= $(shell $(LD) --gc-sections --version >/dev/null 2>&1; echo $$?)
+
+ifneq ($(NEW_LINKER),0)
+dummy:;		@echo '*** ${VERSION}.${PATCHLEVEL} kernels no longer build correctly with old versions of binutils.'
 		@echo '*** Please upgrade your binutils to 2.9.5.'
 		@false
 endif
 
 # GCC 2.7 uses different options to later compilers; sort out which we have
-NEW_GCC		:= $(shell if $(CC) --version 2>&1 | grep '^2\.7' > /dev/null; then echo n; else echo y; fi)
+NEW_GCC		:= $(shell $(CC) --version 2>&1 | grep '^2\.7' > /dev/null; echo $$?)
 
 #
 # select flags depending on the compiler
 #
-ifeq ($(NEW_GCC),y)
-CFLAGS			+= -mshort-load-bytes -msoft-float
-CFLAGS_PROC_CPU_26	:= -mcpu=arm3 -Os
+ifneq ($(NEW_GCC),0)
+CFLAGS			+= -mshort-load-bytes
+CFLAGS_PROC_CPU_26	:= -mcpu=arm3 -mapcs-26 -Os
 CFLAGS_PROC_CPU_32v3	:= -march=armv3
 CFLAGS_PROC_CPU_32v4	:= -march=armv4
-CFLAGS_ARM6		:= -mtune=arm6
-CFLAGS_ARM7		:= -mtune=arm7
-CFLAGS_ARM720		:= -mtune=arm7tdmi
-CFLAGS_SA110		:= -mtune=strongarm110
 else
 CFLAGS			+= -DNO_TEXT_SECTIONS
 CFLAGS_PROC_CPU_26	:= -m3
-CFLAGS_PROC_CPU_32v3	:=
-CFLAGS_PROC_CPU_32v4	:=
-CFLAGS_ARM6		:= -m6
-CFLAGS_ARM7		:= -m6
-CFLAGS_ARM720		:= -m6
-CFLAGS_SA110		:= -m6
+CFLAGS_PROC_CPU_32v3	:= -m6
+CFLAGS_PROC_CPU_32v4	:= -m6
 endif
 
 #
@@ -84,95 +78,90 @@ ifeq ($(CONFIG_CPU_32),y)
   CFLAGS	+= $(CFLAGS_PROC_CPU_32v3)
   AFLAGS	+= -mapcs-32 -marmv3m
  endif
- #
- # Exactly one of the following must be selected
- #
- ifeq ($(CONFIG_CPU_ARM6),y)
-  CFLAGS	+= $(CFLAGS_ARM6)
- else
- ifeq ($(CONFIG_CPU_ARM7),y)
-  CFLAGS	+= $(CFLAGS_ARM7)
- else
- ifeq ($(CONFIG_CPU_ARM720),y)
-  CFLAGS	+= $(CFLAGS_ARM720)
- else
- ifeq ($(CONFIG_CPU_SA110),y)
-  CFLAGS	+= $(CFLAGS_SA110)
- else
- ifeq ($(CONFIG_CPU_SA1100),y)
-  CFLAGS	+= $(CFLAGS_SA110)
- endif
- endif
- endif
- endif
+
+ opt-$(CONFIG_CPU_ARM6)		:= -mtune=arm6
+ opt-$(CONFIG_CPU_ARM7)		:= -mtune=arm7
+ opt-$(CONFIG_CPU_ARM720)	:= -mtune=arm7tdmi
+ opt-$(CONFIG_CPU_ARM920)	:= -mtune=arm9tdmi
+ opt-$(CONFIG_CPU_SA110)	:= -mtune=strongarm110
+ opt-$(CONFIG_CPU_SA1100)	:= -mtune=strongarm110
+
+ ifneq ($(NEW_GCC),0)
+ CFLAGS	+= $(opt-y)
  endif
 endif
 
 LIBGCC		:= $(shell $(CC) $(CFLAGS) --print-libgcc-file-name)
 
-export	LIBGCC MACHINE PROCESSOR TEXTADDR
+export	LIBGCC MACHINE PROCESSOR TEXTADDR GZFLAGS
 
-ifeq ($(CONFIG_ARCH_A5K),y)
-MACHINE		 = a5k
-ARCHDIR		 = arc
-endif
-
-ifeq ($(CONFIG_ARCH_ARC),y)
+ifeq ($(CONFIG_ARCH_ARCA5K),y)
 MACHINE		 = arc
-ARCHDIR		 = arc
 endif
 
 ifeq ($(CONFIG_ARCH_RPC),y)
 MACHINE		 = rpc
-ARCHDIR		 = rpc
 endif
 
 ifeq ($(CONFIG_ARCH_EBSA110),y)
 MACHINE		 = ebsa110
-ARCHDIR		 = ebsa110
 endif
 
 ifeq ($(CONFIG_ARCH_CLPS7500),y)
 MACHINE		 = clps7500
-ARCHDIR		 = cl7500
+INCDIR		 = cl7500
 endif
 
 ifeq ($(CONFIG_FOOTBRIDGE),y)
 MACHINE		 = footbridge
-ARCHDIR		 = ebsa285
+INCDIR		 = ebsa285
 endif
 
 ifeq ($(CONFIG_ARCH_CO285),y)
 TEXTADDR	 = 0x60008000
+MACHINE		 = footbridge
+INCDIR		 = ebsa285
 endif
 
 ifeq ($(CONFIG_ARCH_NEXUSPCI),y)
 MACHINE		 = nexuspci
-ARCHDIR		 = nexuspci
 endif
 
 ifeq ($(CONFIG_ARCH_SHARK),y)
 MACHINE		 = shark
-ARCHDIR		 = shark
 endif
 
 ifeq ($(CONFIG_ARCH_SA1100),y)
 MACHINE		 = sa1100
-ARCHDIR		 = sa1100
 endif
 
 ifeq ($(CONFIG_ARCH_L7200),y)
 MACHINE		 = l7200
-ARCHDIR		 = l7200
+endif
+
+ifeq ($(CONFIG_ARCH_INTEGRATOR),y)
+MACHINE		 = integrator
+endif
+
+# Only set INCDIR if its not already defined above
+# Grr, ?= doesn't work as all the other assignment operators do.  Make bug?
+ifeq ($(origin INCDIR), undefined)
+INCDIR		:= $(MACHINE)
+endif
+
+# If we have a machine-specific directory, then include it in the build.
+MACHDIR		:= arch/arm/mach-$(MACHINE)
+ifeq ($(MACHDIR),$(wildcard $(MACHDIR)))
+SUBDIRS		+= $(MACHDIR)
+CORE_FILES	:= $(MACHDIR)/$(MACHINE).o $(CORE_FILES)
 endif
 
 HEAD		:= arch/arm/kernel/head-$(PROCESSOR).o \
 		   arch/arm/kernel/init_task.o
 SUBDIRS		+= arch/arm/kernel arch/arm/mm arch/arm/lib \
-		   arch/arm/special arch/arm/nwfpe
+		   arch/arm/nwfpe
 CORE_FILES	:= arch/arm/kernel/kernel.o arch/arm/mm/mm.o $(CORE_FILES)
 LIBS		:= arch/arm/lib/lib.o arch/arm/lib/lib.a $(LIBS) $(LIBGCC)
-DRIVERS		+= arch/arm/special/special.a
 
 ifeq ($(CONFIG_NWFPE),y)
 LIBS		:= arch/arm/nwfpe/math-emu.o $(LIBS)
@@ -195,43 +184,45 @@ MAKEBOOT	 = $(MAKE) -C arch/$(ARCH)/boot
 
 # The following is a hack to get 'constants.h' up
 # to date before starting compilation
-CONSTANTS	:= constants
 
-constants: $(TOPDIR)/include/asm-arm/proc-fns.h dummy
+$(patsubst %, _dir_%, $(SUBDIRS)) init/main.o init/version.o : \
+	include/asm-arm/mach-types.h
+
+$(patsubst %, _dir_%, $(SUBDIRS)) : constants
+
+include/asm-arm/mach-types.h: arch/arm/tools/mach-types  \
+			      arch/arm/tools/gen-mach-types
+	@awk -f arch/arm/tools/gen-mach-types arch/arm/tools/mach-types > $@
+
+constants: dummy
 	@$(MAKE) -C arch/arm/lib constants.h
 
 symlinks: archsymlinks
 
 archsymlinks:
 	$(RM) include/asm-arm/arch include/asm-arm/proc
-	(cd include/asm-arm; ln -sf arch-$(ARCHDIR) arch; ln -sf proc-$(PROCESSOR) proc)
+	(cd include/asm-arm; ln -sf arch-$(INCDIR) arch; ln -sf proc-$(PROCESSOR) proc)
 
 vmlinux: arch/arm/vmlinux.lds
 
 arch/arm/vmlinux.lds: arch/arm/vmlinux-$(PROCESSOR).lds.in dummy
 	@sed 's/TEXTADDR/$(TEXTADDR)/' <$< >$@
 
-arch/arm/kernel: dummy
-	$(MAKE) linuxsubdirs SUBDIRS=arch/arm/kernel
+arch/arm/kernel arch/arm/mm arch/arm/lib: dummy
+	$(MAKE) CFLAGS="$(CFLAGS) $(CFLAGS_KERNEL)" $(subst $@, _dir_$@, $@)
 
-arch/arm/mm: dummy
-	$(MAKE) linuxsubdirs SUBDIRS=arch/arm/mm
-
-arch/arm/lib: dummy
-	$(MAKE) linuxsubdirs SUBDIRS=arch/arm/lib
-
-zImage zinstall Image install: vmlinux
+bzImage zImage zinstall Image bootpImage install: vmlinux
 	@$(MAKEBOOT) $@
 
 archmrproper:
-	@$(MAKE) -C arch/$(ARCH)/special mrproper
 	$(RM) include/asm-arm/arch include/asm-arm/proc
 
 archclean:
 	@$(MAKEBOOT) clean
 	$(RM) arch/arm/lib/constants.h arch/arm/vmlinux.lds
+	$(RM) include/asm-arm/mach-types.h
 
-archdep: symlinks
+archdep: archsymlinks
 	@$(MAKEBOOT) dep
 
 # My testing targets (that short circuit a few dependencies)
@@ -243,47 +234,22 @@ zi:;	@$(MAKEBOOT) zinstall
 #
 # Configuration targets.  Use these to select a
 # configuration for your architecture
-#
-a5k_config:
-	$(RM) arch/arm/defconfig
-	cp arch/arm/def-configs/a5k arch/arm/defconfig
+CFGS=	a5k_config		ebsa110_config		\
+	footbridge_config	rpc_config		\
+	brutus_config		victor_config		\
+	empeg_config		thinclient_config	\
+	assabet_config		lart_config		\
+	cerf_config		lusl7200_config 
 
-ebsa110_config:
-	$(RM) arch/arm/defconfig
-	cp arch/arm/def-configs/ebsa110 arch/arm/defconfig
-
-footbridge_config:
-	$(RM) arch/arm/defconfig
-	cp arch/arm/def-configs/footbridge arch/arm/defconfig
-
-rpc_config:
-	$(RM) arch/arm/defconfig
-	cp arch/arm/def-configs/rpc arch/arm/defconfig
-
-brutus_config:
-	$(RM) arch/arm/defconfig
-	cp arch/arm/def-configs/brutus arch/arm/defconfig
-
-victor_config:
-	$(RM) arch/arm/defconfig
-	cp arch/arm/def-configs/victor arch/arm/defconfig
-
-empeg_config:
-	$(RM) arch/arm/defconfig
-	cp arch/arm/def-configs/empeg arch/arm/defconfig
-
-thinclient_config:
-	$(RM) arch/arm/defconfig
-	cp arch/arm/def-configs/thinclient arch/arm/defconfig
-
-assabet_config:
-	$(RM) arch/arm/defconfig
-	cp arch/arm/def-configs/assabet arch/arm/defconfig
-
-lart_config:
-	$(RM) arch/arm/defconfig
-	cp arch/arm/def-configs/lart arch/arm/defconfig
-
-l7200_config:
-	$(RM) arch/arm/defconfig
-	cp arch/arm/def-configs/lusl7200 arch/arm/defconfig
+$(CFGS):
+	@( \
+	CFG=$(@:_config=); \
+	if [ -f arch/arm/def-configs/$$CFG ]; then \
+	  $(RM) arch/arm/defconfig; \
+	  cp arch/arm/def-configs/$$CFG arch/arm/defconfig; \
+	  echo "*** Default configuration for $$CFG installed"; \
+	  echo "*** Next, you may run 'make oldconfig'"; \
+	else \
+	  echo "$$CFG does not exist"; \
+	fi; \
+	)

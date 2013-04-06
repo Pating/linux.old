@@ -115,6 +115,10 @@
  *	themselves, but we'll see.  
  *	
  * History
+ *  (still kind of v0.14) Nov 23 - Alan Cox <alan@redhat.com>
+ *	Add clocking= for people with seriously warped hardware
+ *  (still v0.14) Nov 10 2000 - Bartlomiej Zolnierkiewicz <bkz@linux-ide.org>
+ *	add __init to maestro_ac97_init() and maestro_install()
  *  (still based on v0.14) Mar 29 2000 - Zach Brown <zab@redhat.com>
  *	move to 2.3 power management interface, which
  *		required hacking some suspend/resume/check paths 
@@ -197,6 +201,9 @@
 
 #include <linux/version.h>
 #include <linux/module.h>
+#include <linux/sched.h>
+#include <linux/smp_lock.h>
+#include <linux/wrapper.h>
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(2,3,0)
 
@@ -222,7 +229,6 @@
 #include <linux/string.h>
 #include <linux/ctype.h>
 #include <linux/ioport.h>
-#include <linux/sched.h>
 #include <linux/delay.h>
 #include <linux/sound.h>
 #include <linux/malloc.h>
@@ -236,6 +242,7 @@
 #include <linux/reboot.h>
 #include <asm/uaccess.h>
 #include <asm/hardirq.h>
+#include <linux/bitops.h>
 
 #include <linux/pm.h>
 static int maestro_pm_callback(struct pm_dev *dev, pm_request_t rqst, void *d);
@@ -257,6 +264,10 @@ static int debug=0;
 static int dsps_order=0;
 /* wether or not we mess around with power management */
 static int use_pm=2; /* set to 1 for force */
+/* clocking for broken hardware - a few laptops seem to use a 50Khz clock
+	ie insmod with clocking=50000 or so */
+	
+static int clocking=48000;
 
 /* --------------------------------------------------------------------- */
 #define DRIVER_VERSION "0.14"
@@ -297,8 +308,6 @@ static int use_pm=2; /* set to 1 for force */
 #define MAX_DSPS	(1<<MAX_DSP_ORDER)
 #define NR_DSPS		(1<<dsps_order)
 #define NR_IDRS		32
-
-#define SND_DEV_DSP16   5 
 
 #define NR_APUS		64
 #define NR_APU_REGS	16
@@ -811,7 +820,7 @@ ac97_recmask_io(struct ess_card *card, int read, int mask)
  *	The PT101 setup is untested.
  */
  
-static u16 maestro_ac97_init(struct ess_card *card)
+static u16 __init maestro_ac97_init(struct ess_card *card)
 {
 	u16 vend1, vend2, caps;
 
@@ -1197,7 +1206,10 @@ static u32 compute_rate(struct ess_state *s, u32 freq)
 {
 	u32 clock = clock_freq[s->card->card_type];     
 
-	if (freq == 48000) return 0x10000;
+	freq = (freq * clocking)/48000;
+	
+	if (freq == 48000) 
+		return 0x10000;
 
 	return ((freq / clock) <<16 )+  
 		(((freq % clock) << 16) / clock);
@@ -1955,6 +1967,7 @@ mixer_push_state(struct ess_card *card)
 static int mixer_ioctl(struct ess_card *card, unsigned int cmd, unsigned long arg)
 {
 	int i, val=0;
+       unsigned long flags;
 
 	VALIDATE_CARD(card);
         if (cmd == SOUND_MIXER_INFO) {
@@ -1987,9 +2000,9 @@ static int mixer_ioctl(struct ess_card *card, unsigned int cmd, unsigned long ar
 			if(!card->mix.recmask_io) {
 				val = 0;
 			} else {
-				spin_lock(&card->lock);
+                               spin_lock_irqsave(&card->lock, flags);
 				val = card->mix.recmask_io(card,1,0);
-				spin_unlock(&card->lock);
+                               spin_unlock_irqrestore(&card->lock, flags);
 			}
 			break;
 			
@@ -2016,9 +2029,9 @@ static int mixer_ioctl(struct ess_card *card, unsigned int cmd, unsigned long ar
 				return -EINVAL;
 
 			/* do we ever want to touch the hardware? */
-/*			spin_lock(&card->lock);
+/*                     spin_lock_irqsave(&card->lock, flags);
 			val = card->mix.read_mixer(card,i);
-			spin_unlock(&card->lock);*/
+                       spin_unlock_irqrestore(&card->lock, flags);*/
 
 			val = card->mix.mixer_state[i];
 /*			M_printk("returned 0x%x for mixer %d\n",val,i);*/
@@ -2033,7 +2046,8 @@ static int mixer_ioctl(struct ess_card *card, unsigned int cmd, unsigned long ar
 	
 	card->mix.modcnt++;
 
-	get_user_ret(val, (int *)arg, -EFAULT);
+	if (get_user(val, (int *)arg))
+		return -EFAULT;
 
 	switch (_IOC_NR(cmd)) {
 	case SOUND_MIXER_RECSRC: /* Arg contains a bit for each recording source */
@@ -2042,9 +2056,9 @@ static int mixer_ioctl(struct ess_card *card, unsigned int cmd, unsigned long ar
 		if(!val) return 0;
 		if(! (val &= card->mix.record_sources)) return -EINVAL;
 
-		spin_lock(&card->lock);
+               spin_lock_irqsave(&card->lock, flags);
 		card->mix.recmask_io(card,0,val);
-		spin_unlock(&card->lock);
+               spin_unlock_irqrestore(&card->lock, flags);
 		return 0;
 
 	default:
@@ -2053,9 +2067,9 @@ static int mixer_ioctl(struct ess_card *card, unsigned int cmd, unsigned long ar
 		if ( ! supported_mixer(card,i)) 
 			return -EINVAL;
 
-		spin_lock(&card->lock);
+               spin_lock_irqsave(&card->lock, flags);
 		set_mixer(card,i,val);
-		spin_unlock(&card->lock);
+               spin_unlock_irqrestore(&card->lock, flags);
 
 		return 0;
 	}
@@ -2081,7 +2095,6 @@ static int ess_open_mixdev(struct inode *inode, struct file *file)
 		return -ENODEV;
 
 	file->private_data = card;
-	MOD_INC_USE_COUNT;
 	return 0;
 }
 
@@ -2091,7 +2104,6 @@ static int ess_release_mixdev(struct inode *inode, struct file *file)
 
 	VALIDATE_CARD(card);
 	
-	MOD_DEC_USE_COUNT;
 	return 0;
 }
 
@@ -2105,6 +2117,7 @@ static int ess_ioctl_mixdev(struct inode *inode, struct file *file, unsigned int
 }
 
 static /*const*/ struct file_operations ess_mixer_fops = {
+	owner:		THIS_MODULE,
 	llseek:         ess_llseek,
 	ioctl:          ess_ioctl_mixdev,
 	open:           ess_open_mixdev,
@@ -2381,18 +2394,17 @@ static unsigned int ess_poll(struct file *file, struct poll_table_struct *wait)
 	struct ess_state *s = (struct ess_state *)file->private_data;
 	unsigned long flags;
 	unsigned int mask = 0;
-	int ret;
 
 	VALIDATE_STATE(s);
 
 /* In 0.14 prog_dmabuf always returns success anyway ... */
 	if (file->f_mode & FMODE_WRITE) {
-		if (!s->dma_dac.ready && (ret = prog_dmabuf(s, 0))) 
-			return POLLERR;
+		if (!s->dma_dac.ready && prog_dmabuf(s, 0)) 
+			return 0;
 	}
 	if (file->f_mode & FMODE_READ) {
-	  	if (!s->dma_adc.ready && (ret = prog_dmabuf(s, 1)))
-			return POLLERR;
+	  	if (!s->dma_adc.ready && prog_dmabuf(s, 1))
+			return 0;
 	}
 
 	if (file->f_mode & FMODE_WRITE)
@@ -2422,13 +2434,14 @@ static int ess_mmap(struct file *file, struct vm_area_struct *vma)
 {
 	struct ess_state *s = (struct ess_state *)file->private_data;
 	struct dmabuf *db;
-	int ret;
+	int ret = -EINVAL;
 	unsigned long size;
 
 	VALIDATE_STATE(s);
+	lock_kernel();
 	if (vma->vm_flags & VM_WRITE) {
 		if ((ret = prog_dmabuf(s, 1)) != 0)
-			return ret;
+			goto out;
 		db = &s->dma_dac;
 	} else 
 #if 0
@@ -2436,20 +2449,25 @@ static int ess_mmap(struct file *file, struct vm_area_struct *vma)
 		we can turn this back on.  */
 	      if (vma->vm_flags & VM_READ) {
 		if ((ret = prog_dmabuf(s, 0)) != 0)
-			return ret;
+			goto out;
 		db = &s->dma_adc;
 	} else  
 #endif
-		return -EINVAL;
+		goto out;
+	ret = -EINVAL;
 	if (SILLY_OFFSET(vma) != 0)
-		return -EINVAL;
+		goto out;
 	size = vma->vm_end - vma->vm_start;
 	if (size > (PAGE_SIZE << db->buforder))
-		return -EINVAL;
+		goto out;
+	ret = -EAGAIN;
 	if (remap_page_range(vma->vm_start, virt_to_phys(db->rawbuf), size, vma->vm_page_prot))
-		return -EAGAIN;
+		goto out;
 	db->mapped = 1;
-	return 0;
+	ret = 0;
+out:
+	unlock_kernel();
+	return ret;
 }
 
 static int ess_ioctl(struct inode *inode, struct file *file, unsigned int cmd, unsigned long arg)
@@ -2496,7 +2514,8 @@ static int ess_ioctl(struct inode *inode, struct file *file, unsigned int cmd, u
 		return 0;
 
         case SNDCTL_DSP_SPEED:
-                get_user_ret(val, (int *)arg, -EFAULT);
+                if (get_user(val, (int *)arg))
+			return -EFAULT;
 		if (val >= 0) {
 			if (file->f_mode & FMODE_READ) {
 				stop_adc(s);
@@ -2512,7 +2531,8 @@ static int ess_ioctl(struct inode *inode, struct file *file, unsigned int cmd, u
 		return put_user((file->f_mode & FMODE_READ) ? s->rateadc : s->ratedac, (int *)arg);
 		
         case SNDCTL_DSP_STEREO:
-		get_user_ret(val, (int *)arg, -EFAULT);
+		if (get_user(val, (int *)arg))
+			return -EFAULT;
 		fmtd = 0;
 		fmtm = ~0;
 		if (file->f_mode & FMODE_READ) {
@@ -2535,7 +2555,8 @@ static int ess_ioctl(struct inode *inode, struct file *file, unsigned int cmd, u
 		return 0;
 
         case SNDCTL_DSP_CHANNELS:
-                get_user_ret(val, (int *)arg, -EFAULT);
+                if (get_user(val, (int *)arg))
+			return -EFAULT;
 		if (val != 0) {
 			fmtd = 0;
 			fmtm = ~0;
@@ -2564,7 +2585,8 @@ static int ess_ioctl(struct inode *inode, struct file *file, unsigned int cmd, u
                 return put_user(AFMT_U8|AFMT_S16_LE, (int *)arg);
 		
 	case SNDCTL_DSP_SETFMT: /* Selects ONE fmt*/
-		get_user_ret(val, (int *)arg, -EFAULT);
+		if (get_user(val, (int *)arg))
+			return -EFAULT;
 		if (val != AFMT_QUERY) {
 			fmtd = 0;
 			fmtm = ~0;
@@ -2609,7 +2631,8 @@ static int ess_ioctl(struct inode *inode, struct file *file, unsigned int cmd, u
 		return put_user(val, (int *)arg);
 		
 	case SNDCTL_DSP_SETTRIGGER:
-		get_user_ret(val, (int *)arg, -EFAULT);
+		if (get_user(val, (int *)arg))
+			return -EFAULT;
 		if (file->f_mode & FMODE_READ) {
 			if (val & PCM_ENABLE_INPUT) {
 				if (!s->dma_adc.ready && (ret =  prog_dmabuf(s, 1)))
@@ -2631,8 +2654,8 @@ static int ess_ioctl(struct inode *inode, struct file *file, unsigned int cmd, u
 	case SNDCTL_DSP_GETOSPACE:
 		if (!(file->f_mode & FMODE_WRITE))
 			return -EINVAL;
-		if (!(s->enable & DAC_RUNNING) && (val = prog_dmabuf(s, 0)) != 0)
-			return val;
+		if (!s->dma_dac.ready && (ret = prog_dmabuf(s, 0)))
+			return ret;
 		spin_lock_irqsave(&s->lock, flags);
 		ess_update_ptr(s);
 		abinfo.fragsize = s->dma_dac.fragsize;
@@ -2645,8 +2668,8 @@ static int ess_ioctl(struct inode *inode, struct file *file, unsigned int cmd, u
 	case SNDCTL_DSP_GETISPACE:
 		if (!(file->f_mode & FMODE_READ))
 			return -EINVAL;
-		if (!(s->enable & ADC_RUNNING) && (val = prog_dmabuf(s, 1)) != 0)
-			return val;
+		if (!s->dma_adc.ready && (ret =  prog_dmabuf(s, 1)))
+			return ret;
 		spin_lock_irqsave(&s->lock, flags);
 		ess_update_ptr(s);
 		abinfo.fragsize = s->dma_adc.fragsize;
@@ -2663,6 +2686,8 @@ static int ess_ioctl(struct inode *inode, struct file *file, unsigned int cmd, u
         case SNDCTL_DSP_GETODELAY:
 		if (!(file->f_mode & FMODE_WRITE))
 			return -EINVAL;
+		if (!s->dma_dac.ready && (ret = prog_dmabuf(s, 0)))
+			return ret;
 		spin_lock_irqsave(&s->lock, flags);
 		ess_update_ptr(s);
                 val = s->dma_dac.count;
@@ -2672,6 +2697,8 @@ static int ess_ioctl(struct inode *inode, struct file *file, unsigned int cmd, u
         case SNDCTL_DSP_GETIPTR:
 		if (!(file->f_mode & FMODE_READ))
 			return -EINVAL;
+		if (!s->dma_adc.ready && (ret =  prog_dmabuf(s, 1)))
+			return ret;
 		spin_lock_irqsave(&s->lock, flags);
 		ess_update_ptr(s);
                 cinfo.bytes = s->dma_adc.total_bytes;
@@ -2685,6 +2712,8 @@ static int ess_ioctl(struct inode *inode, struct file *file, unsigned int cmd, u
         case SNDCTL_DSP_GETOPTR:
 		if (!(file->f_mode & FMODE_WRITE))
 			return -EINVAL;
+		if (!s->dma_dac.ready && (ret = prog_dmabuf(s, 0)))
+			return ret;
 		spin_lock_irqsave(&s->lock, flags);
 		ess_update_ptr(s);
                 cinfo.bytes = s->dma_dac.total_bytes;
@@ -2706,7 +2735,8 @@ static int ess_ioctl(struct inode *inode, struct file *file, unsigned int cmd, u
 		return put_user(s->dma_adc.fragsize, (int *)arg);
 
         case SNDCTL_DSP_SETFRAGMENT:
-                get_user_ret(val, (int *)arg, -EFAULT);
+                if (get_user(val, (int *)arg))
+			return -EFAULT;
 		M_printk("maestro: SETFRAGMENT: %0x\n",val);
 		if (file->f_mode & FMODE_READ) {
 			s->dma_adc.ossfragshift = val & 0xffff;
@@ -2734,7 +2764,8 @@ static int ess_ioctl(struct inode *inode, struct file *file, unsigned int cmd, u
 		if ((file->f_mode & FMODE_READ && s->dma_adc.subdivision) ||
 		    (file->f_mode & FMODE_WRITE && s->dma_dac.subdivision))
 			return -EINVAL;
-                get_user_ret(val, (int *)arg, -EFAULT);
+                if (get_user(val, (int *)arg))
+			return -EFAULT;
 		if (val != 1 && val != 2 && val != 4)
 			return -EINVAL;
 		if (file->f_mode & FMODE_READ)
@@ -2812,7 +2843,7 @@ allocate_buffers(struct ess_state *s)
 {
 	void *rawbuf=NULL;
 	int order,i;
-	unsigned long mapend,map;
+	struct page *page, *pend;
 
 	/* alloc as big a chunk as we can */
 	for (order = (dsps_order + (16-PAGE_SHIFT) + 1); order >= (dsps_order + 2 + 1); order--)
@@ -2858,17 +2889,16 @@ allocate_buffers(struct ess_state *s)
 	}
 
 	/* now mark the pages as reserved; otherwise remap_page_range doesn't do what we want */
-	mapend = MAP_NR(rawbuf + (PAGE_SIZE << order) - 1);
-	for (map = MAP_NR(rawbuf); map <= mapend; map++) {
-		set_bit(PG_reserved, &mem_map[map].flags);
-	}
+	pend = virt_to_page(rawbuf + (PAGE_SIZE << order) - 1);
+	for (page = virt_to_page(rawbuf); page <= pend; page++)
+		mem_map_reserve(page);
 
 	return 0;
 } 
 static void
 free_buffers(struct ess_state *s)
 {
-	unsigned long map, mapend;
+	struct page *page, *pend;
 
 	s->dma_dac.rawbuf = s->dma_adc.rawbuf = NULL;
 	s->dma_dac.mapped = s->dma_adc.mapped = 0;
@@ -2877,9 +2907,9 @@ free_buffers(struct ess_state *s)
 	M_printk("maestro: freeing %p\n",s->card->dmapages);
 	/* undo marking the pages as reserved */
 
-	mapend = MAP_NR(s->card->dmapages + (PAGE_SIZE << s->card->dmaorder) - 1);
-	for (map = MAP_NR(s->card->dmapages); map <= mapend; map++)
-		clear_bit(PG_reserved, &mem_map[map].flags);    
+	pend = virt_to_page(s->card->dmapages + (PAGE_SIZE << s->card->dmaorder) - 1);
+	for (page = virt_to_page(s->card->dmapages); page <= pend; page++)
+		mem_map_unreserve(page);
 
 	free_pages((unsigned long)s->card->dmapages,s->card->dmaorder);
 	s->card->dmapages = NULL;
@@ -2976,7 +3006,6 @@ ess_open(struct inode *inode, struct file *file)
 	s->open_mode |= file->f_mode & (FMODE_READ | FMODE_WRITE);
 
 	up(&s->open_sem);
-	MOD_INC_USE_COUNT;
 	return 0;
 }
 
@@ -2986,6 +3015,7 @@ ess_release(struct inode *inode, struct file *file)
 	struct ess_state *s = (struct ess_state *)file->private_data;
 
 	VALIDATE_STATE(s);
+	lock_kernel();
 	if (file->f_mode & FMODE_WRITE)
 		drain_dac(s, file->f_flags & O_NONBLOCK);
 	down(&s->open_sem);
@@ -3007,11 +3037,12 @@ ess_release(struct inode *inode, struct file *file)
 	}
 	up(&s->open_sem);
 	wake_up(&s->open_wait);
-	MOD_DEC_USE_COUNT;
+	unlock_kernel();
 	return 0;
 }
 
 static struct file_operations ess_audio_fops = {
+	owner:		THIS_MODULE,
 	llseek:         ess_llseek,
 	read:           ess_read,
 	write:          ess_write,
@@ -3276,7 +3307,7 @@ parse_power(struct ess_card *card, struct pci_dev *pcidev)
 	return card->power_regs ? 1 : 0;
 }
 
-static int 
+static int __init
 maestro_install(struct pci_dev *pcidev, int card_type)
 {
 	u32 n;
@@ -3376,6 +3407,19 @@ maestro_install(struct pci_dev *pcidev, int card_type)
 	
 	ess = &card->channels[0];
 
+	if (pci_enable_device(pcidev)) {
+		printk (KERN_ERR "maestro: pci_enable_device() failed\n");
+		for (i = 0; i < NR_DSPS; i++) {
+			struct ess_state *s = &card->channels[i];
+			if (s->dev_audio != -1)
+				unregister_sound_dsp(s->dev_audio);
+		}
+		release_region(card->iobase, 256);
+		unregister_reboot_notifier(&maestro_nb);
+		kfree(card);
+		return 0;
+	}
+
 	/*
 	 *	Ok card ready. Begin setup proper
 	 */
@@ -3447,11 +3491,7 @@ maestro_install(struct pci_dev *pcidev, int card_type)
 	return 1; 
 }
 
-#ifdef MODULE
-int init_module(void)
-#else
-int SILLY_MAKE_INIT(init_maestro(void))
-#endif
+int __init init_maestro(void)
 {
 	struct pci_dev *pcidev = NULL;
 	int foundone = 0;
@@ -3552,14 +3592,13 @@ MODULE_PARM(debug,"i");
 #endif
 MODULE_PARM(dsps_order,"i");
 MODULE_PARM(use_pm,"i");
+MODULE_PARM(clocking, "i");
 
 void cleanup_module(void) {
 	M_printk("maestro: unloading\n");
 	nuke_maestros();
 }
 
-#else /* MODULE */
-__initcall(init_maestro);
 #endif
 
 /* --------------------------------------------------------------------- */
@@ -3718,3 +3757,5 @@ maestro_pm_callback(struct pm_dev *dev, pm_request_t rqst, void *data)
 out:
 	return 0;
 }
+
+module_init(init_maestro);

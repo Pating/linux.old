@@ -3,10 +3,11 @@
 //
 // Mods by cfleck to integrate into kernel build
 // 00/03/15 davidm Added various stop bits to get a clean compile
-// 00/03/29 cfleck Added code to save INIT handoff state in pt_regs format, switch to temp kstack,
-//		   switch modes, jump to C INIT handler
 //
-#include <asm/offsets.h>
+// 00/03/29 cfleck Added code to save INIT handoff state in pt_regs format, switch to temp
+//		   kstack, switch modes, jump to C INIT handler
+//
+#include <linux/config.h>
 #include <asm/pgtable.h>
 #include <asm/processor.h>
 #include <asm/mca_asm.h>
@@ -16,14 +17,7 @@
  * When we get an machine check, the kernel stack pointer is no longer
  * valid, so we need to set a new stack pointer.
  */
-#define MINSTATE_START_SAVE_MIN							\
-(pKern) movl sp=ia64_init_stack+IA64_STK_OFFSET-IA64_PT_REGS_SIZE;		\
-	;;
-
-#define MINSTATE_END_SAVE_MIN							\
-	or r12=r12,r14;		/* make sp a kernel virtual address */		\
-	or r13=r13,r14;		/* make `current' a kernel virtual address */	\
-	;;
+#define	MINSTATE_PHYS	/* Make sure stack access is physical for MINSTATE */ 
 
 #include "minstate.h"
 	
@@ -137,8 +131,7 @@ ia64_os_mca_virtual_begin:
         movl		r2=ia64_mca_ucmc_handler;;
         mov		b6=r2;;
         br.call.sptk.few	b0=b6
-        ;;
-
+.ret0:
 	// Revert back to physical mode before going back to SAL
 	PHYSICAL_MODE_ENTER(r2, r3, ia64_os_mca_virtual_end, r4)
 ia64_os_mca_virtual_end:
@@ -682,32 +675,22 @@ end_os_mca_restore:
 .proc ia64_monarch_init_handler       
 ia64_monarch_init_handler:
 
-#if defined(SAL_MPINIT_WORKAROUND)
+#if defined(CONFIG_SMP) && defined(SAL_MPINIT_WORKAROUND)
 	//
 	// work around SAL bug that sends all processors to monarch entry
 	//
-	.global bootstrap_processor
-
-	movl	r21=24
-	movl	r20=16
 	mov	r17=cr.lid
-	movl	r18=bootstrap_processor
+	movl	r18=__cpu_physical_id
 	;;
-	dep	r18=0,r18,61,3		// convert bsp to physical address
+	dep	r18=0,r18,61,3		// convert to physical address
 	;;
-	shr	r19=r17,r20
-	shr	r22=r17,r21
+	shr.u	r17=r17,16
 	ld4	r18=[r18]		// get the BSP ID
 	;;
-	and	r19=0xf, r19
-	and	r22=0xf, r22
+	dep	r17=0,r17,16,48
 	;;
-	shl	r19=r19,8		// get them in the right order
-	;;
-	or	r22=r22,r19		// combine EID and LID
-	;;
-	cmp.eq	p6,p7=r22,r18		// Am I the BSP ?
-(p7)	br.cond.spnt slave_init_spin_me
+	cmp4.ne	p6,p0=r17,r18		// Am I the BSP ?
+(p6)	br.cond.spnt slave_init_spin_me
 	;;
 #endif
 
@@ -767,7 +750,7 @@ IVirtual_Switch:
 	;;
 
 	br.call.sptk.few rp=ia64_init_handler
-	;;
+.ret1:
 
 return_from_init:
 	br.sptk return_from_init

@@ -1,5 +1,5 @@
 /*
- *  linux/drivers/ide/ide.c		Version 6.30	Dec 28, 1999
+ *  linux/drivers/ide/ide.c		Version 6.31	June 9, 2000
  *
  *  Copyright (C) 1994-1998  Linus Torvalds & authors (see below)
  */
@@ -7,6 +7,7 @@
 /*
  *  Mostly written by Mark Lord  <mlord@pobox.com>
  *                and Gadi Oxman <gadio@netvision.net.il>
+ *                and Andre Hedrick <andre@linux-ide.org>
  *
  *  See linux/MAINTAINERS for address of current maintainer.
  *
@@ -109,6 +110,9 @@
  * Version 6.21		Fixing/Fixed SMP spinlock issue with insight from an old
  *			  hat that clarified original low level driver design.
  * Version 6.30		Added SMP support; fixed multmode issues.  -ml
+ * Version 6.31		Debug Share INTR's and request queue streaming
+ *			Native ATA-100 support
+ *			Prep for Cascades Project
  *
  *  Some additional driver compile-time options are in ./include/linux/ide.h
  *
@@ -117,8 +121,8 @@
  *
  */
 
-#define	REVISION	"Revision: 6.30"
-#define	VERSION		"Id: ide.c 6.30 1999/12/28"
+#define	REVISION	"Revision: 6.31"
+#define	VERSION		"Id: ide.c 6.31 2000/06/09"
 
 #undef REALLY_SLOW_IO		/* most systems can safely undef this */
 
@@ -157,18 +161,14 @@
 #include <linux/kmod.h>
 #endif /* CONFIG_KMOD */
 
-#ifdef CONFIG_BLK_DEV_VIA82CXXX
-extern byte fifoconfig;		/* defined in via82cxxx.c used by ide_setup() */
-#endif /* CONFIG_BLK_DEV_VIA82CXXX */
-
 static const byte ide_hwif_to_major[] = { IDE0_MAJOR, IDE1_MAJOR, IDE2_MAJOR, IDE3_MAJOR, IDE4_MAJOR, IDE5_MAJOR, IDE6_MAJOR, IDE7_MAJOR, IDE8_MAJOR, IDE9_MAJOR };
 
-static int	idebus_parameter = 0; /* holds the "idebus=" parameter */
-static int	system_bus_speed = 0; /* holds what we think is VESA/PCI bus speed */
+static int	idebus_parameter; /* holds the "idebus=" parameter */
+static int	system_bus_speed; /* holds what we think is VESA/PCI bus speed */
 static int	initializing;     /* set while initializing built-in drivers */
 
 #ifdef CONFIG_BLK_DEV_IDEPCI
-static int	ide_scan_direction = 0;	/* THIS was formerly 2.2.x pci=reverse */
+static int	ide_scan_direction;	/* THIS was formerly 2.2.x pci=reverse */
 #endif /* CONFIG_BLK_DEV_IDEPCI */
 
 #if defined(__mc68000__) || defined(CONFIG_APUS)
@@ -176,14 +176,14 @@ static int	ide_scan_direction = 0;	/* THIS was formerly 2.2.x pci=reverse */
  * ide_lock is used by the Atari code to obtain access to the IDE interrupt,
  * which is shared between several drivers.
  */
-static int	ide_lock = 0;
+static int	ide_lock;
 #endif /* __mc68000__ || CONFIG_APUS */
 
 /*
  * ide_modules keeps track of the available IDE chipset/probe/driver modules.
  */
-ide_module_t *ide_modules	= NULL;
-ide_module_t *ide_probe		= NULL;
+ide_module_t *ide_modules;
+ide_module_t *ide_probe;
 
 /*
  * This is declared extern in ide.h, for access by other IDE modules:
@@ -477,12 +477,27 @@ void atapi_output_bytes (ide_drive_t *drive, void *buffer, unsigned int bytecoun
  */
 static inline int drive_is_ready (ide_drive_t *drive)
 {
+	byte stat = 0;
 	if (drive->waiting_for_dma)
 		return HWIF(drive)->dmaproc(ide_dma_test_irq, drive);
 #if 0
 	udelay(1);	/* need to guarantee 400ns since last command was issued */
 #endif
-	if (GET_STAT() & BUSY_STAT)	/* Note: this may clear a pending IRQ!! */
+
+#ifdef CONFIG_IDEPCI_SHARE_IRQ
+	/*
+	 * We do a passive status test under shared PCI interrupts on
+	 * cards that truly share the ATA side interrupt, but may also share
+	 * an interrupt with another pci card/device.  We make no assumptions
+	 * about possible isa-pnp and pci-pnp issues yet.
+	 */
+	if (IDE_CONTROL_REG)
+		stat = GET_ALTSTAT();
+	else
+#endif /* CONFIG_IDEPCI_SHARE_IRQ */
+	stat = GET_STAT();	/* Note: this may clear a pending IRQ!! */
+
+	if (stat & BUSY_STAT)
 		return 0;	/* drive busy:  definitely not interrupting */
 	return 1;		/* drive ready: *might* be interrupting */
 }
@@ -651,6 +666,19 @@ static ide_startstop_t reset_pollfunc (ide_drive_t *drive)
 	return ide_stopped;
 }
 
+static void check_dma_crc (ide_drive_t *drive)
+{
+	if (drive->crc_count) {
+		(void) HWIF(drive)->dmaproc(ide_dma_off_quietly, drive);
+		if ((HWIF(drive)->speedproc) != NULL)
+			HWIF(drive)->speedproc(drive, ide_auto_reduce_xfer(drive));
+		if (drive->current_speed >= XFER_SW_DMA_0)
+			(void) HWIF(drive)->dmaproc(ide_dma_on, drive);
+	} else {
+		(void) HWIF(drive)->dmaproc(ide_dma_off, drive);
+	}
+}
+
 static void pre_reset (ide_drive_t *drive)
 {
 	if (drive->driver != NULL)
@@ -658,12 +686,15 @@ static void pre_reset (ide_drive_t *drive)
 
 	if (!drive->keep_settings) {
 		if (drive->using_dma) {
-			(void) HWIF(drive)->dmaproc(ide_dma_off, drive);
+			check_dma_crc(drive);
 		} else {
 			drive->unmask = 0;
 			drive->io_32bit = 0;
 		}
+		return;
 	}
+	if (drive->using_dma)
+		check_dma_crc(drive);
 }
 
 /*
@@ -784,7 +815,7 @@ void ide_end_drive_cmd (ide_drive_t *drive, byte stat, byte err)
 	spin_lock_irqsave(&io_request_lock, flags);
 	blkdev_dequeue_request(rq);
 	HWGROUP(drive)->rq = NULL;
-	rq->rq_status = RQ_INACTIVE;
+	blkdev_release_request(rq);
 	spin_unlock_irqrestore(&io_request_lock, flags);
 	if (rq->sem != NULL)
 		up(rq->sem);	/* inform originator that rq has been serviced */
@@ -824,7 +855,7 @@ byte ide_dump_status (ide_drive_t *drive, const char *msg, byte stat)
 		if (drive->media == ide_disk) {
 			printk(" { ");
 			if (err & ABRT_ERR)	printk("DriveStatusError ");
-			if (err & ICRC_ERR)	printk((err & ABRT_ERR) ? "BadCRC " : "BadSector ");
+			if (err & ICRC_ERR)	printk("%s", (err & ABRT_ERR) ? "BadCRC " : "BadSector ");
 			if (err & ECC_ERR)	printk("UncorrectableError ");
 			if (err & ID_ERR)	printk("SectorIdNotFound ");
 			if (err & TRK0_ERR)	printk("TrackZeroNotFound ");
@@ -902,9 +933,9 @@ ide_startstop_t ide_error (ide_drive_t *drive, const char *msg, byte stat)
 			if (err == ABRT_ERR) {
 				if (drive->select.b.lba && IN_BYTE(IDE_COMMAND_REG) == WIN_SPECIFY)
 					return ide_stopped; /* some newer drives don't support WIN_SPECIFY */
-			} else if ((err & (ABRT_ERR | ICRC_ERR)) == (ABRT_ERR | ICRC_ERR))
-				; /* UDMA crc error -- just retry the operation */
-			else if (err & (BBD_ERR | ECC_ERR))	/* retries won't help these */
+			} else if ((err & (ABRT_ERR | ICRC_ERR)) == (ABRT_ERR | ICRC_ERR)) {
+				drive->crc_count++; /* UDMA crc error -- just retry the operation */
+			} else if (err & (BBD_ERR | ECC_ERR))	/* retries won't help these */
 				rq->errors = ERROR_MAX;
 			else if (err & TRK0_ERR)	/* help it find track zero */
 				rq->errors |= ERROR_RECAL;
@@ -941,6 +972,7 @@ void ide_cmd (ide_drive_t *drive, byte cmd, byte nsect, ide_handler_t *handler)
 	ide_set_handler (drive, handler, WAIT_CMD, NULL);
 	if (IDE_CONTROL_REG)
 		OUT_BYTE(drive->ctl,IDE_CONTROL_REG);	/* clear nIEN */
+	SELECT_MASK(HWIF(drive),drive,0);
 	OUT_BYTE(nsect,IDE_NSECTOR_REG);
 	OUT_BYTE(cmd,IDE_COMMAND_REG);
 }
@@ -1050,7 +1082,7 @@ static ide_startstop_t execute_drive_cmd (ide_drive_t *drive, struct request *rq
 {
 	byte *args = rq->buffer;
 	if (args && rq->cmd == IDE_DRIVE_TASK) {
-
+		byte sel;
 #ifdef DEBUG
 		printk("%s: DRIVE_TASK_CMD data=x%02x cmd=0x%02x fr=0x%02x ns=0x%02x sc=0x%02x lcyl=0x%02x hcyl=0x%02x sel=0x%02x\n",
 			drive->name, args[0], args[1], args[2], args[3], args[4], args[5], args[6]);
@@ -1059,7 +1091,10 @@ static ide_startstop_t execute_drive_cmd (ide_drive_t *drive, struct request *rq
 		OUT_BYTE(args[3], IDE_SECTOR_REG);
 		OUT_BYTE(args[4], IDE_LCYL_REG);
 		OUT_BYTE(args[5], IDE_HCYL_REG);
-		OUT_BYTE(args[6], IDE_SELECT_REG);
+		sel = (args[6] & ~0x10);
+		if (drive->select.b.unit)
+			sel |= 0x10;
+		OUT_BYTE(sel, IDE_SELECT_REG);
 		ide_cmd(drive, args[0], args[2], &drive_cmd_intr);
 		return ide_started;
 	} else if (args) {
@@ -1289,7 +1324,7 @@ static void ide_do_request(ide_hwgroup_t *hwgroup, int masked_irq)
 				mod_timer(&hwgroup->timer, sleep);
 				/* we purposely leave hwgroup->busy==1 while sleeping */
 			} else {
-				/* Ugly, but how can we sleep for the lock otherwise? perhaps from tq_scheduler? */
+				/* Ugly, but how can we sleep for the lock otherwise? perhaps from tq_disk? */
 				ide_release_lock(&ide_lock);	/* for atari only */
 				hwgroup->busy = 0;
 			}
@@ -1298,7 +1333,7 @@ static void ide_do_request(ide_hwgroup_t *hwgroup, int masked_irq)
 		hwif = HWIF(drive);
 		if (hwgroup->hwif->sharing_irq && hwif != hwgroup->hwif && hwif->io_ports[IDE_CONTROL_OFFSET]) {
 			/* set nIEN for previous hwif */
-			OUT_BYTE(hwgroup->drive->ctl|2, hwgroup->hwif->io_ports[IDE_CONTROL_OFFSET]);
+			SELECT_INTERRUPT(hwif, drive);
 		}
 		hwgroup->hwif = hwif;
 		hwgroup->drive = drive;
@@ -1316,13 +1351,13 @@ static void ide_do_request(ide_hwgroup_t *hwgroup, int masked_irq)
 		 * happens anyway when any interrupt comes in, IDE or otherwise
 		 *  -- the kernel masks the IRQ while it is being handled.
 		 */
-		if (hwif->irq != masked_irq)
+		if (masked_irq && hwif->irq != masked_irq)
 			disable_irq_nosync(hwif->irq);
 		spin_unlock(&io_request_lock);
 		ide__sti();	/* allow other IRQs while we start this request */
 		startstop = start_request(drive);
 		spin_lock_irq(&io_request_lock);
-		if (hwif->irq != masked_irq)
+		if (masked_irq && hwif->irq != masked_irq)
 			enable_irq(hwif->irq);
 		if (startstop == ide_stopped)
 			hwgroup->busy = 0;
@@ -1404,7 +1439,11 @@ void ide_timer_expiry (unsigned long data)
 			 */
 			spin_unlock(&io_request_lock);
 			hwif  = HWIF(drive);
+#if DISABLE_IRQ_NOSYNC
+			disable_irq_nosync(hwif->irq);
+#else
 			disable_irq(hwif->irq);	/* disable_irq_nosync ?? */
+#endif /* DISABLE_IRQ_NOSYNC */
 			__cli();	/* local CPU only, as if we were handling an interrupt */
 			if (hwgroup->poll_timeout != 0) {
 				startstop = handler(drive);
@@ -1470,7 +1509,7 @@ static void unexpected_intr (int irq, ide_hwgroup_t *hwgroup)
 			stat = IN_BYTE(hwif->io_ports[IDE_STATUS_OFFSET]);
 			if (!OK_STAT(stat, READY_STAT, BAD_STAT)) {
 				/* Try to not flood the console with msgs */
-				static unsigned long last_msgtime = 0, count = 0;
+				static unsigned long last_msgtime, count;
 				++count;
 				if (0 < (signed long)(jiffies - (last_msgtime + HZ))) {
 					last_msgtime = jiffies;
@@ -1896,8 +1935,10 @@ void hwif_unregister (ide_hwif_t *hwif)
 jump_eight:
 	if (hwif->io_ports[IDE_CONTROL_OFFSET])
 		ide_release_region(hwif->io_ports[IDE_CONTROL_OFFSET], 1);
+#if defined(CONFIG_AMIGA) || defined(CONFIG_MAC)
 	if (hwif->io_ports[IDE_IRQ_OFFSET])
 		ide_release_region(hwif->io_ports[IDE_IRQ_OFFSET], 1);
+#endif /* (CONFIG_AMIGA) || (CONFIG_MAC) */
 }
 
 void ide_unregister (unsigned int index)
@@ -1995,6 +2036,7 @@ void ide_unregister (unsigned int index)
 			drive->id = NULL;
 		}
 		drive->present = 0;
+		blk_cleanup_queue(&drive->queue);
 	}
 	if (d->present)
 		hwgroup->drive = d;
@@ -2006,12 +2048,12 @@ void ide_unregister (unsigned int index)
 	else
 		hwgroup->hwif = HWIF(hwgroup->drive);
 
-#ifdef CONFIG_BLK_DEV_IDEDMA
+#if defined(CONFIG_BLK_DEV_IDEDMA) && !defined(CONFIG_DMA_NONPCI)
 	if (hwif->dma_base) {
 		(void) ide_release_dma(hwif);
 		hwif->dma_base = 0;
 	}
-#endif /* CONFIG_BLK_DEV_IDEDMA */
+#endif /* (CONFIG_BLK_DEV_IDEDMA) && !(CONFIG_DMA_NONPCI) */
 
 	/*
 	 * Remove us from the kernel's knowledge
@@ -2020,7 +2062,6 @@ void ide_unregister (unsigned int index)
 	kfree(blksize_size[hwif->major]);
 	kfree(max_sectors[hwif->major]);
 	kfree(max_readahead[hwif->major]);
-	blk_cleanup_queue(BLK_DEFAULT_QUEUE(hwif->major));
 	blk_dev[hwif->major].data = NULL;
 	blk_dev[hwif->major].queue = NULL;
 	blksize_size[hwif->major] = NULL;
@@ -2046,6 +2087,10 @@ void ide_unregister (unsigned int index)
 	hwif->speedproc		= old_hwif.speedproc;
 	hwif->selectproc	= old_hwif.selectproc;
 	hwif->resetproc		= old_hwif.resetproc;
+	hwif->intrproc		= old_hwif.intrproc;
+	hwif->maskproc		= old_hwif.maskproc;
+	hwif->quirkproc		= old_hwif.quirkproc;
+	hwif->rwproc		= old_hwif.rwproc;
 	hwif->dmaproc		= old_hwif.dmaproc;
 	hwif->dma_base		= old_hwif.dma_base;
 	hwif->dma_extra		= old_hwif.dma_extra;
@@ -2087,9 +2132,11 @@ void ide_setup_ports (	hw_regs_t *hw,
 				case IDE_CONTROL_OFFSET:
 					hw->io_ports[i] = ctrl;
 					break;
+#if defined(CONFIG_AMIGA) || defined(CONFIG_MAC)
 				case IDE_IRQ_OFFSET:
 					hw->io_ports[i] = intr;
 					break;
+#endif /* (CONFIG_AMIGA) || (CONFIG_MAC) */
 				default:
 					hw->io_ports[i] = 0;
 					break;
@@ -2271,17 +2318,18 @@ int ide_spin_wait_hwgroup (ide_drive_t *drive)
 	unsigned long timeout = jiffies + (3 * HZ);
 
 	spin_lock_irq(&io_request_lock);
+
 	while (hwgroup->busy) {
-		unsigned long flags;
+		unsigned long lflags;
 		spin_unlock_irq(&io_request_lock);
-		__save_flags(flags);	/* local CPU only */
+		__save_flags(lflags);	/* local CPU only */
 		__sti();		/* local CPU only; needed for jiffies */
 		if (0 < (signed long)(jiffies - timeout)) {
-			__restore_flags(flags);
+			__restore_flags(lflags);	/* local CPU only */
 			printk("%s: channel busy\n", drive->name);
 			return -EBUSY;
 		}
-		__restore_flags(flags);	/* local CPU only */
+		__restore_flags(lflags);	/* local CPU only */
 		spin_lock_irq(&io_request_lock);
 	}
 	return 0;
@@ -2418,13 +2466,13 @@ int ide_wait_cmd_task (ide_drive_t *drive, byte *buf)
  */
 void ide_delay_50ms (void)
 {
-#if 0
+#ifndef CONFIG_BLK_DEV_IDECS
 	unsigned long timeout = jiffies + ((HZ + 19)/20) + 1;
 	while (0 < (signed long)(timeout - jiffies));
 #else
 	__set_current_state(TASK_UNINTERRUPTIBLE);
 	schedule_timeout(HZ/20);
-#endif
+#endif /* CONFIG_BLK_DEV_IDECS */
 }
 
 int system_bus_clock (void)
@@ -2526,7 +2574,7 @@ static int ide_ioctl (struct inode *inode, struct file *file,
 			byte args[4], *argbuf = args;
 			byte xfer_rate = 0;
 			int argsize = 4;
-			if (!capable(CAP_SYS_ADMIN)) return -EACCES;
+			if (!capable(CAP_SYS_ADMIN) || !capable(CAP_SYS_RAWIO)) return -EACCES;
 			if (NULL == (void *) arg)
 				return ide_do_drive_cmd(drive, &rq, ide_wait);
 			if (copy_from_user(args, (void *)arg, 4))
@@ -2552,8 +2600,6 @@ static int ide_ioctl (struct inode *inode, struct file *file,
 				if ((HWIF(drive)->speedproc) != NULL)
 					HWIF(drive)->speedproc(drive, xfer_rate);
 				ide_driveid_update(drive);
-			} else {
-				printk("%s: \n", drive->name);
 			}
 		abort:
 			if (copy_to_user((void *)arg, argbuf, argsize))
@@ -2566,7 +2612,7 @@ static int ide_ioctl (struct inode *inode, struct file *file,
 		{
 			byte args[7], *argbuf = args;
 			int argsize = 7;
-			if (!capable(CAP_SYS_ADMIN)) return -EACCES;
+			if (!capable(CAP_SYS_ADMIN) || !capable(CAP_SYS_RAWIO)) return -EACCES;
 			if (copy_from_user(args, (void *)arg, 7))
 				return -EFAULT;
 			err = ide_wait_cmd_task(drive, argbuf);
@@ -2574,7 +2620,6 @@ static int ide_ioctl (struct inode *inode, struct file *file,
 				err = -EFAULT;
 			return err;
 		}
-
 		case HDIO_SCAN_HWIF:
 		{
 			int args[3];
@@ -2602,6 +2647,22 @@ static int ide_ioctl (struct inode *inode, struct file *file,
 				return -EPERM;
 			}
 			drive->nice1 = (arg >> IDE_NICE_1) & 1;
+			return 0;
+		case HDIO_DRIVE_RESET:
+			if (!capable(CAP_SYS_ADMIN)) return -EACCES;
+			(void) ide_do_reset(drive);
+			if (drive->suspend_reset) {
+/*
+ *				APM WAKE UP todo !!
+ *				int nogoodpower = 1;
+ *				while(nogoodpower) {
+ *					check_power1() or check_power2()
+ *					nogoodpower = 0;
+ *				} 
+ *				HWIF(drive)->multiproc(drive);
+ */
+				return ide_revalidate_disk(inode->i_rdev);
+			}
 			return 0;
 
 		case BLKROSET:
@@ -2789,21 +2850,6 @@ static int __init match_parm (char *s, const char *keywords[], int vals[], int m
  *				currently unknown.
  * "ide=reverse"	: Formerly called to pci sub-system, but now local.
  *
- * "splitfifo=betweenChan"
- *			: FIFO Configuration of VIA 82c586(<nothing>,"A"or"B").
- *                                 --see what follows...
- * "splitfifo=betweenChan,thresholdprim,thresholdsec"
- *			: FIFO Configuration of VIA 82c586(<nothing>,"A" or "B").
- *				betweenChan = 1(all FIFO's to primary channel)
- *                                          , 2(all FIFO's to secondary channel)
- *                                          , 3 or 4(evenly shared between them).
- *				note: without FIFO, a channel is (u)dma disabled!
- *				thresholdprim = 4, 3, 2 or 1
- *						(standing for 1, 3/4, 1/2, 1/4).
- *                                    Sets the threshold of FIFO to begin dma
- *                                    transfer on the primary channel.
- *				thresholdsec = cf upper, but for secondary channel.
- *
  * The following are valid ONLY on ide0, (except dc4030)
  * and the defaults for the base,ctl ports must not be altered.
  *
@@ -2826,6 +2872,15 @@ int __init ide_setup (char *s)
 	const char max_drive = 'a' + ((MAX_HWIFS * MAX_DRIVES) - 1);
 	const char max_hwif  = '0' + (MAX_HWIFS - 1);
 
+	
+	if (strncmp(s,"hd",2) == 0 && s[2] == '=')	/* hd= is for hd.c   */
+		return 0;				/* driver and not us */
+
+	if (strncmp(s,"ide",3) &&
+	    strncmp(s,"idebus",6) &&
+	    strncmp(s,"hd",2))		/* hdx= & hdxlun= */
+		return 0;
+
 	printk("ide_setup: %s", s);
 	init_ide_data ();
 
@@ -2835,7 +2890,7 @@ int __init ide_setup (char *s)
 
 		printk(" : Enabled support for IDE doublers\n");
 		ide_doubler = 1;
-		return 0;
+		return 1;
 	}
 #endif /* CONFIG_BLK_DEV_IDEDOUBLER */
 
@@ -2843,7 +2898,7 @@ int __init ide_setup (char *s)
 	if (!strcmp(s, "ide=reverse")) {
 		ide_scan_direction = 1;
 		printk(" : Enabled support for IDE inverse scan order.\n");
-		return 0;
+		return 1;
 	}
 #endif /* CONFIG_BLK_DEV_IDEPCI */
 
@@ -2938,58 +2993,6 @@ int __init ide_setup (char *s)
 				goto bad_option;
 		}
 	}
-
-#if defined(CONFIG_BLK_DEV_VIA82CXXX)
-	/*
-	 *  Look for drive option "splitfifo=..."
-	 */
-
-	if (s[0] == 's' && s[1] == 'p' && s[2] == 'l' &&
-	    s[3] == 'i' && s[4] == 't' && s[5] == 'f' &&
-	    s[6] == 'i' && s[7] == 'f' && s[8] == 'o') {
-		byte tmp = 0x3a;		/* default config byte */
-
-		i = match_parm(&s[9], NULL, vals, 3);
-		switch(i) {
-		case 3:	
-			tmp &= 0xf0;
-			if ((vals[1] > 0) && (vals[1] < 5)) {
-				/* sets threshold for primary Channel: */
-				byte x = 4 - vals[1];
-				tmp |= (x << 2);
-			}
-			else
-				goto bad_option;
-			if ((vals[2] > 0) && (vals[2] < 5)) {
-				/* sets threshold for secondary Channel: */
-				byte x = 4 - vals[2];
-				tmp |= x;
-			}
-			else
-				goto bad_option;
-		case 1:
-			/* set the FIFO config between channels to 0: */
-			tmp &= 0x9f;
-			/* set the needed FIFO config between channels: */
-			if (vals[0] == 1)	/* primary fifo only */
-				tmp |= 0x10;
-			else if (vals[0] == 2)	/* secondary fifo only */
-				tmp |= 0x70;
-			else if (vals[0] == 4)	/* other shared fifo config */
-				tmp |= 0x50;
-			else if (vals[0] == 3)	/* default config */
-				tmp |= 0x30;
-			else
-				goto bad_option;
-			break;
-		default:
-			goto bad_option;
-		}
-		/* set the found option in fifoconfig */
-		fifoconfig = tmp;		
-		goto done;
-	}
-#endif  /* defined(CONFIG_BLK_DEV_VIA82CXXX) */
 
 	if (s[0] != 'i' || s[1] != 'd' || s[2] != 'e')
 		goto bad_option;
@@ -3156,17 +3159,17 @@ int __init ide_setup (char *s)
 			case 0: goto bad_option;
 			default:
 				printk(" -- SUPPORT NOT CONFIGURED IN THIS KERNEL\n");
-				return 0;
+				return 1;
 		}
 	}
 bad_option:
 	printk(" -- BAD OPTION\n");
-	return 0;
+	return 1;
 bad_hwif:
 	printk("-- NOT SUPPORTED ON ide%d", hw);
 done:
 	printk("\n");
-	return 0;
+	return 1;
 }
 
 /*
@@ -3238,6 +3241,12 @@ static void __init probe_for_hwifs (void)
 		macide_init();
 	}
 #endif /* CONFIG_BLK_DEV_MAC_IDE */
+#ifdef CONFIG_BLK_DEV_Q40IDE
+	{
+		extern void q40ide_init(void);
+		q40ide_init();
+	}
+#endif /* CONFIG_BLK_DEV_Q40IDE */
 #ifdef CONFIG_BLK_DEV_BUDDHA
 	{
 		extern void buddha_init(void);
@@ -3264,6 +3273,7 @@ void __init ide_init_builtin_drivers (void)
 	if (ide_hwifs[0].io_ports[IDE_DATA_OFFSET]) {
 		ide_get_lock(&ide_lock, NULL, NULL);	/* for atari only */
 		disable_irq(ide_hwifs[0].irq);	/* disable_irq_nosync ?? */
+//		disable_irq_nosync(ide_hwifs[0].irq);
 	}
 #endif /* __mc68000__ || CONFIG_APUS */
 
@@ -3424,6 +3434,7 @@ int ide_register_subdriver (ide_drive_t *drive, ide_driver_t *driver, int versio
 		drive->nice1 = 1;
 	}
 	drive->revalidate = 1;
+	drive->suspend_reset = 0;
 #ifdef CONFIG_PROC_FS
 	ide_add_proc_entries(drive->proc, generic_subdriver_entries, drive);
 	ide_add_proc_entries(drive->proc, driver->proc, drive);
@@ -3494,7 +3505,7 @@ EXPORT_SYMBOL(ide_spin_wait_hwgroup);
 /*
  * Probe module
  */
-devfs_handle_t ide_devfs_handle = NULL;
+devfs_handle_t ide_devfs_handle;
 
 EXPORT_SYMBOL(ide_probe);
 EXPORT_SYMBOL(drive_is_flashcard);
@@ -3556,12 +3567,12 @@ EXPORT_SYMBOL(system_bus_clock);
  */
 int __init ide_init (void)
 {
-	static char banner_printed = 0;
+	static char banner_printed;
 	int i;
 
 	if (!banner_printed) {
 		printk(KERN_INFO "Uniform Multi-Platform E-IDE driver " REVISION "\n");
-		ide_devfs_handle = devfs_mk_dir (NULL, "ide", 3, NULL);
+		ide_devfs_handle = devfs_mk_dir (NULL, "ide", NULL);
 		system_bus_speed = ide_system_bus_speed();
 		banner_printed = 1;
 	}
@@ -3581,6 +3592,10 @@ int __init ide_init (void)
 	return 0;
 }
 
+#ifdef MODULE
+char *options = NULL;
+MODULE_PARM(options,"s");
+
 static void __init parse_options (char *line)
 {
 	char *next = line;
@@ -3590,20 +3605,10 @@ static void __init parse_options (char *line)
 	while ((line = next) != NULL) {
  		if ((next = strchr(line,' ')) != NULL)
 			*next++ = 0;
-		if (!strncmp(line,"ide",3) ||
-		    !strncmp(line,"idebus",6) ||
-#ifdef CONFIG_BLK_DEV_VIA82CXXX
-		    !strncmp(line,"splitfifo",9) ||
-#endif /* CONFIG_BLK_DEV_VIA82CXXX */
-		    !strncmp(line,"hdxlun",6) ||
-		    (!strncmp(line,"hd",2) && line[2] != '='))
-			(void) ide_setup(line);
+		if (!ide_setup(line))
+			printk ("Unknown option '%s'\n", line);
 	}
 }
-
-#ifdef MODULE
-char *options = NULL;
-MODULE_PARM(options,"s");
 
 int init_module (void)
 {
@@ -3617,10 +3622,10 @@ void cleanup_module (void)
 
 	for (index = 0; index < MAX_HWIFS; ++index) {
 		ide_unregister(index);
-#ifdef CONFIG_BLK_DEV_IDEDMA
+#if defined(CONFIG_BLK_DEV_IDEDMA) && !defined(CONFIG_DMA_NONPCI)
 		if (ide_hwifs[index].dma_base)
 			(void) ide_release_dma(&ide_hwifs[index]);
-#endif /* CONFIG_BLK_DEV_IDEDMA */
+#endif /* (CONFIG_BLK_DEV_IDEDMA) && !(CONFIG_DMA_NONPCI) */
 	}
 
 #ifdef CONFIG_PROC_FS
@@ -3631,11 +3636,6 @@ void cleanup_module (void)
 
 #else /* !MODULE */
 
-static int parse_ide_setup (char *line)
-{
-	parse_options(line);
-	return 0;
-}
-__setup("", parse_ide_setup);
+__setup("", ide_setup);
 
 #endif /* MODULE */

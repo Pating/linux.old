@@ -166,7 +166,7 @@ static int hostess_ioctl(struct net_device *d, struct ifreq *ifr, int cmd)
 	return sppp_do_ioctl(d, ifr,cmd);
 }
 
-static struct enet_statistics *hostess_get_stats(struct net_device *d)
+static struct net_device_stats *hostess_get_stats(struct net_device *d)
 {
 	struct sv11_device *sv11=d->priv;
 	if(sv11)
@@ -222,19 +222,17 @@ static struct sv11_device *sv11_init(int iobase, int irq)
 {
 	struct z8530_dev *dev;
 	struct sv11_device *sv;
-	int i;
 	unsigned long flags;
 	
 	/*
 	 *	Get the needed I/O space
 	 */
 	 
-	if(check_region(iobase, 8))
+	if(!request_region(iobase, 8, "Comtrol SV11"))
 	{	
 		printk(KERN_WARNING "hostess: I/O 0x%X already in use.\n", iobase);
 		return NULL;
 	}
-	request_region(iobase, 8, "Comtrol SV11");
 	
 	sv=(struct sv11_device *)kmalloc(sizeof(struct sv11_device), GFP_KERNEL);
 	if(!sv)
@@ -307,6 +305,7 @@ static struct sv11_device *sv11_init(int iobase, int irq)
 	if(z8530_init(dev)!=0)
 	{
 		printk(KERN_ERR "Z8530 series device not found.\n");
+		restore_flags(flags);
 		goto dmafail2;
 	}
 	z8530_channel_load(&dev->chanB, z8530_dead_port);

@@ -45,7 +45,7 @@ int default_console_loglevel = DEFAULT_CONSOLE_LOGLEVEL;
 
 spinlock_t console_lock = SPIN_LOCK_UNLOCKED;
 
-struct console *console_drivers = NULL;
+struct console *console_drivers;
 static char log_buf[LOG_BUF_LEN];
 static unsigned long log_start;
 static unsigned long logged_chars;
@@ -113,8 +113,8 @@ __setup("console=", console_setup);
  * 	0 -- Close the log.  Currently a NOP.
  * 	1 -- Open the log. Currently a NOP.
  * 	2 -- Read from the log.
- * 	3 -- Read up to the last 4k of messages in the ring buffer.
- * 	4 -- Read and clear last 4k of messages in the ring buffer
+ * 	3 -- Read all messages remaining in the ring buffer.
+ * 	4 -- Read and clear all messages remaining in the ring buffer
  * 	5 -- Clear ring buffer.
  * 	6 -- Disable printk's to console
  * 	7 -- Enable printk's to console
@@ -471,6 +471,14 @@ int unregister_console(struct console * console)
 		}
 	}
 	
+	/* If last console is removed, we re-enable picking the first
+	 * one that gets registered. Without that, pmac early boot console
+	 * would prevent fbcon from taking over.
+	 */
+	if (console_drivers == NULL)
+		preferred_console = -1;
+		
+
 	spin_unlock_irqrestore(&console_lock, flags);
 	return res;
 }

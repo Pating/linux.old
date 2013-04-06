@@ -7,23 +7,30 @@
  */
 
 #include <linux/string.h>
+#include <linux/sched.h>
+#include <linux/smp_lock.h>
 #include "hpfs_fn.h"
 
+/* HUH? */
 int hpfs_open(struct inode *i, struct file *f)
 {
+	lock_kernel();
 	hpfs_lock_inode(i);
 	hpfs_unlock_inode(i); /* make sure nobody is deleting the file */
+	unlock_kernel();
 	if (!i->i_nlink) return -ENOENT;
 	return 0;
 }
 
 int hpfs_file_release(struct inode *inode, struct file *file)
 {
+	lock_kernel();
 	hpfs_write_if_changed(inode);
+	unlock_kernel();
 	return 0;
 }
 
-int hpfs_file_fsync(struct file *file, struct dentry *dentry)
+int hpfs_file_fsync(struct file *file, struct dentry *dentry, int datasync)
 {
 	/*return file_fsync(file, dentry);*/
 	return 0; /* Don't fsync :-) */
@@ -86,7 +93,7 @@ int hpfs_get_block(struct inode *inode, long iblock, struct buffer_head *bh_resu
 	return 0;
 }
 
-static int hpfs_writepage(struct file *file, struct page *page)
+static int hpfs_writepage(struct page *page)
 {
 	return block_write_full_page(page,hpfs_get_block);
 }
@@ -97,7 +104,7 @@ static int hpfs_readpage(struct file *file, struct page *page)
 static int hpfs_prepare_write(struct file *file, struct page *page, unsigned from, unsigned to)
 {
 	return cont_prepare_write(page,from,to,hpfs_get_block,
-		&((struct inode*)page->mapping->host)->u.hpfs_i.mmu_private);
+		&page->mapping->host->u.hpfs_i.mmu_private);
 }
 static int _hpfs_bmap(struct address_space *mapping, long block)
 {

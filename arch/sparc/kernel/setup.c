@@ -1,7 +1,8 @@
-/*  $Id: setup.c,v 1.118 2000/05/09 17:40:13 davem Exp $
+/*  $Id: setup.c,v 1.122 2001/01/01 01:46:15 davem Exp $
  *  linux/arch/sparc/kernel/setup.c
  *
  *  Copyright (C) 1995  David S. Miller (davem@caip.rutgers.edu)
+ *  Copyright (C) 2000  Anton Blanchard (anton@linuxcare.com)
  */
 
 #include <linux/errno.h>
@@ -59,8 +60,6 @@ struct screen_info screen_info = {
 	16                      /* orig-video-points */
 };
 
-unsigned int phys_bytes_of_ram, end_of_phys_memory;
-
 /* Typing sync at the prom prompt calls the function pointed to by
  * romvec->pv_synchook which I set to the following function.
  * This should sync all filesystems and return, for now it just
@@ -80,12 +79,8 @@ void prom_sync_me(void)
 {
 	unsigned long prom_tbr, flags;
 
-#ifdef CONFIG_SMP
-	global_irq_holder = NO_PROC_ID;
-	*((unsigned char *)&global_irq_lock) = 0;
-	*((unsigned char *)&global_bh_lock) = 0;
-#endif
-	__save_and_cli(flags);
+	/* XXX Badly broken. FIX! - Anton */
+	save_and_cli(flags);
 	__asm__ __volatile__("rd %%tbr, %0\n\t" : "=r" (prom_tbr));
 	__asm__ __volatile__("wr %0, 0x0, %%tbr\n\t"
 			     "nop\n\t"
@@ -99,9 +94,9 @@ void prom_sync_me(void)
 	prom_printf("PROM SYNC COMMAND...\n");
 	show_free_areas();
 	if(current->pid != 0) {
-		__sti();
+		sti();
 		sys_sync();
-		__cli();
+		cli();
 	}
 	prom_printf("Returning to prom\n");
 
@@ -109,14 +104,14 @@ void prom_sync_me(void)
 			     "nop\n\t"
 			     "nop\n\t"
 			     "nop\n\t" : : "r" (prom_tbr));
-	__restore_flags(flags);
+	restore_flags(flags);
 
 	return;
 }
 
 extern void rs_kgdb_hook(int tty_num); /* sparc/serial.c */
 
-unsigned int boot_flags;
+unsigned int boot_flags __initdata = 0;
 #define BOOTME_DEBUG  0x1
 #define BOOTME_SINGLE 0x2
 #define BOOTME_KGDBA  0x4
@@ -124,7 +119,7 @@ unsigned int boot_flags;
 #define BOOTME_KGDB   0xc
 
 #ifdef CONFIG_SUN_CONSOLE
-static int console_fb = 0;
+static int console_fb __initdata = 0;
 #endif
 
 /* Exported for mm/init.c:paging_init. */
@@ -168,7 +163,7 @@ static void __init process_switch(char c)
 		break;
 	case 'h':
 		prom_printf("boot_flags_init: Halt!\n");
-		halt();
+		prom_halt();
 		break;
 	default:
 		printk("Unknown boot switch (-%c)\n", c);
@@ -282,17 +277,20 @@ enum sparc_cpu sparc_cpu_model;
 
 struct tt_entry *sparc_ttable;
 
-struct pt_regs fake_swapper_regs = { 0, 0, 0, 0, { 0, } };
+struct pt_regs fake_swapper_regs;
 
 #ifdef PROM_DEBUG_CONSOLE
-static void prom_cons_write(struct console *con, const char *str, unsigned count)
+static void
+prom_console_write(struct console *con, const char *s, unsigned n)
 {
-	while (count--)
-		prom_printf("%c", *str++);
+	prom_printf("%s", s);
 }
 
 static struct console prom_console = {
-	"PROM", prom_cons_write, 0, 0, 0, 0, 0, CON_PRINTBUFFER, 0, 0, 0
+	name:		"debug",
+	write:		prom_console_write,
+	flags:		CON_PRINTBUFFER,
+	index:		-1,
 };
 #endif
 
@@ -488,7 +486,7 @@ int get_cpuinfo(char *buffer)
             &cputypval,
 	    linux_num_cpus, smp_num_cpus
 #ifndef CONFIG_SMP
-	    , loops_per_sec/500000, (loops_per_sec/5000) % 100
+	    , loops_per_jiffy/(500000/HZ), (loops_per_jiffy/(5000/HZ)) % 100
 #endif
 	    );
 #ifdef CONFIG_SMP

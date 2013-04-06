@@ -17,6 +17,9 @@
 
 #ifdef __KERNEL__
 
+#define smp_mb__before_clear_bit()	do { } while (0)
+#define smp_mb__after_clear_bit()	do { } while (0)
+
 /*
  * Function prototypes to keep gcc -Wall happy.
  */
@@ -80,8 +83,9 @@ extern __inline__ unsigned long ffz(unsigned long word)
 #define ext2_find_next_zero_bit		find_next_zero_bit
 
 /* Bitmap functions for the minix filesystem. */
-#define minix_set_bit(nr,addr)		test_and_set_bit(nr,addr)
-#define minix_clear_bit(nr,addr)	test_and_clear_bit(nr,addr)
+#define minix_test_and_set_bit(nr,addr)	test_and_set_bit(nr,addr)
+#define minix_set_bit(nr,addr)		set_bit(nr,addr)
+#define minix_test_and_clear_bit(nr,addr)	test_and_clear_bit(nr,addr)
 #define minix_test_bit(nr,addr)		test_bit(nr,addr)
 #define minix_find_first_zero_bit(addr,size)	find_first_zero_bit(addr,size)
 

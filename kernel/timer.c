@@ -39,7 +39,6 @@ int tickadj = 500/HZ ? : 1;		/* microsecs */
 
 DECLARE_TASK_QUEUE(tq_timer);
 DECLARE_TASK_QUEUE(tq_immediate);
-DECLARE_TASK_QUEUE(tq_scheduler);
 
 /*
  * phase-lock loop variables
@@ -160,24 +159,34 @@ static inline void internal_add_timer(struct timer_list *timer)
 	list_add(&timer->list, vec->prev);
 }
 
+/* Initialize both explicitly - let's try to have them in the same cache line */
 spinlock_t timerlist_lock = SPIN_LOCK_UNLOCKED;
+
+#ifdef CONFIG_SMP
+volatile struct timer_list * volatile running_timer;
+#define timer_enter(t) do { running_timer = t; mb(); } while (0)
+#define timer_exit() do { running_timer = NULL; } while (0)
+#define timer_is_running(t) (running_timer == t)
+#define timer_synchronize(t) while (timer_is_running(t)) barrier()
+#else
+#define timer_enter(t)		do { } while (0)
+#define timer_exit()		do { } while (0)
+#endif
 
 void add_timer(struct timer_list *timer)
 {
 	unsigned long flags;
 
 	spin_lock_irqsave(&timerlist_lock, flags);
-	if (timer->list.next)
+	if (timer_pending(timer))
 		goto bug;
 	internal_add_timer(timer);
-out:
 	spin_unlock_irqrestore(&timerlist_lock, flags);
 	return;
-
 bug:
+	spin_unlock_irqrestore(&timerlist_lock, flags);
 	printk("bug: kernel timer added twice at %p.\n",
 			__builtin_return_address(0));
-	goto out;
 }
 
 static inline int detach_timer (struct timer_list *timer)
@@ -214,6 +223,11 @@ int del_timer(struct timer_list * timer)
 }
 
 #ifdef CONFIG_SMP
+void sync_timers(void)
+{
+	spin_unlock_wait(&global_bh_lock);
+}
+
 /*
  * SMP specific function to delete periodic timer.
  * Caller must disable by some means restarting the timer
@@ -233,11 +247,12 @@ int del_timer_sync(struct timer_list * timer)
 		spin_lock_irqsave(&timerlist_lock, flags);
 		ret += detach_timer(timer);
 		timer->list.next = timer->list.prev = 0;
-		running = timer->running;
+		running = timer_is_running(timer);
 		spin_unlock_irqrestore(&timerlist_lock, flags);
 
 		if (!running)
-			return ret;
+			break;
+
 		timer_synchronize(timer);
 	}
 
@@ -295,35 +310,17 @@ repeat:
 
 			detach_timer(timer);
 			timer->list.next = timer->list.prev = NULL;
-			timer_set_running(timer);
+			timer_enter(timer);
 			spin_unlock_irq(&timerlist_lock);
 			fn(data);
 			spin_lock_irq(&timerlist_lock);
+			timer_exit();
 			goto repeat;
 		}
 		++timer_jiffies; 
 		tv1.index = (tv1.index + 1) & TVR_MASK;
 	}
 	spin_unlock_irq(&timerlist_lock);
-}
-
-
-static inline void run_old_timers(void)
-{
-	struct timer_struct *tp;
-	unsigned long mask;
-
-	for (mask = 1, tp = timer_table+0 ; mask ; tp++,mask += mask) {
-		if (mask > timer_active)
-			break;
-		if (!(mask & timer_active))
-			continue;
-		if (time_after(tp->expires, jiffies))
-			continue;
-		timer_active &= ~mask;
-		tp->fn();
-		sti();
-	}
 }
 
 spinlock_t tqueue_lock = SPIN_LOCK_UNLOCKED;
@@ -337,9 +334,6 @@ void immediate_bh(void)
 {
 	run_task_queue(&tq_immediate);
 }
-
-unsigned long timer_active;
-struct timer_struct timer_table[32];
 
 /*
  * this routine handles the overflow of the microsecond field
@@ -546,59 +540,60 @@ static inline void do_it_virt(struct task_struct * p, unsigned long ticks)
 	unsigned long it_virt = p->it_virt_value;
 
 	if (it_virt) {
-		if (it_virt <= ticks) {
-			it_virt = ticks + p->it_virt_incr;
+		it_virt -= ticks;
+		if (!it_virt) {
+			it_virt = p->it_virt_incr;
 			send_sig(SIGVTALRM, p, 1);
 		}
-		p->it_virt_value = it_virt - ticks;
+		p->it_virt_value = it_virt;
 	}
 }
 
-static inline void do_it_prof(struct task_struct * p, unsigned long ticks)
+static inline void do_it_prof(struct task_struct *p)
 {
 	unsigned long it_prof = p->it_prof_value;
 
 	if (it_prof) {
-		if (it_prof <= ticks) {
-			it_prof = ticks + p->it_prof_incr;
+		if (--it_prof == 0) {
+			it_prof = p->it_prof_incr;
 			send_sig(SIGPROF, p, 1);
 		}
-		p->it_prof_value = it_prof - ticks;
+		p->it_prof_value = it_prof;
 	}
 }
 
-void update_one_process(struct task_struct *p,
-	unsigned long ticks, unsigned long user, unsigned long system, int cpu)
+void update_one_process(struct task_struct *p, unsigned long user,
+			unsigned long system, int cpu)
 {
 	p->per_cpu_utime[cpu] += user;
 	p->per_cpu_stime[cpu] += system;
 	do_process_times(p, user, system);
 	do_it_virt(p, user);
-	do_it_prof(p, ticks);
+	do_it_prof(p);
 }	
 
-static void update_process_times(unsigned long ticks, unsigned long system)
-{
 /*
- * SMP does this on a per-CPU basis elsewhere
+ * Called from the timer interrupt handler to charge one tick to the current 
+ * process.  user_tick is 1 if the tick is user time, 0 for system.
  */
-#ifndef  CONFIG_SMP
-	struct task_struct * p = current;
-	unsigned long user = ticks - system;
+void update_process_times(int user_tick)
+{
+	struct task_struct *p = current;
+	int cpu = smp_processor_id(), system = user_tick ^ 1;
+
+	update_one_process(p, user_tick, system, cpu);
 	if (p->pid) {
-		p->counter -= ticks;
-		if (p->counter <= 0) {
+		if (--p->counter <= 0) {
 			p->counter = 0;
 			p->need_resched = 1;
 		}
-		if (p->priority < DEF_PRIORITY)
-			kstat.cpu_nice += user;
+		if (p->nice > 0)
+			kstat.per_cpu_nice[cpu] += user_tick;
 		else
-			kstat.cpu_user += user;
-		kstat.cpu_system += system;
-	}
-	update_one_process(p, ticks, user, system, 0);
-#endif
+			kstat.per_cpu_user[cpu] += user_tick;
+		kstat.per_cpu_system[cpu] += system;
+	} else if (local_bh_count(cpu) || local_irq_count(cpu) > 1)
+		kstat.per_cpu_system[cpu] += system;
 }
 
 /*
@@ -642,8 +637,8 @@ static inline void calc_load(unsigned long ticks)
 	}
 }
 
-volatile unsigned long lost_ticks;
-static unsigned long lost_ticks_system;
+/* jiffies at the most recent update of wall time */
+unsigned long wall_jiffies;
 
 /*
  * This spinlock protect us from races in SMP while playing with xtime. -arca
@@ -661,38 +656,31 @@ static inline void update_times(void)
 	 */
 	write_lock_irq(&xtime_lock);
 
-	ticks = lost_ticks;
-	lost_ticks = 0;
-
+	ticks = jiffies - wall_jiffies;
 	if (ticks) {
-		unsigned long system;
-		system = xchg(&lost_ticks_system, 0);
-
-		calc_load(ticks);
+		wall_jiffies += ticks;
 		update_wall_time(ticks);
-		write_unlock_irq(&xtime_lock);
-		
-		update_process_times(ticks, system);
-
-	} else
-		write_unlock_irq(&xtime_lock);
+	}
+	write_unlock_irq(&xtime_lock);
+	calc_load(ticks);
 }
 
 void timer_bh(void)
 {
 	update_times();
-	run_old_timers();
 	run_timer_list();
 }
 
-void do_timer(struct pt_regs * regs)
+void do_timer(struct pt_regs *regs)
 {
 	(*(unsigned long *)&jiffies)++;
-	lost_ticks++;
+#ifndef CONFIG_SMP
+	/* SMP process accounting uses the local APIC timer */
+
+	update_process_times(user_mode(regs));
+#endif
 	mark_bh(TIMER_BH);
-	if (!user_mode(regs))
-		lost_ticks_system++;
-	if (tq_timer)
+	if (TQ_ACTIVE(tq_timer))
 		mark_bh(TQUEUE_BH);
 }
 
@@ -731,7 +719,7 @@ asmlinkage unsigned long sys_alarm(unsigned int seconds)
 asmlinkage long sys_getpid(void)
 {
 	/* This is SMP safe - current->pid doesn't change */
-	return current->pid;
+	return current->tgid;
 }
 
 /*

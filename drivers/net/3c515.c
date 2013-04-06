@@ -90,7 +90,7 @@ MODULE_PARM(max_interrupt_work, "i");
 #define DRIVER_DEBUG 1
 /* Some values here only for performance evaluation and path-coverage
    debugging. */
-static int rx_nocopy = 0, rx_copy = 0, queued_packet = 0;
+static int rx_nocopy, rx_copy, queued_packet;
 
 /* Number of times to check to see if the Tx FIFO has space, used in some
    limited cases. */
@@ -310,7 +310,7 @@ struct corkscrew_private {
 	struct sk_buff *tx_skbuff[TX_RING_SIZE];
 	unsigned int cur_rx, cur_tx;	/* The next free ring entry */
 	unsigned int dirty_rx, dirty_tx;/* The ring entries to be free()ed. */
-	struct enet_statistics stats;
+	struct net_device_stats stats;
 	struct sk_buff *tx_skb;	/* Packet being eaten by bus master ctrl.  */
 	struct timer_list timer;	/* Media selection timer. */
 	int capabilities	;	/* Adapter capabilities word. */
@@ -363,8 +363,9 @@ struct corkscrew_isapnp_adapters_struct corkscrew_isapnp_adapters[] = {
 int corkscrew_isapnp_phys_addr[3] = {
 	0, 0, 0
 };
+
+static int nopnp;
 #endif
-static int nopnp = 0;
 
 static int corkscrew_scan(struct net_device *dev);
 static struct net_device *corkscrew_found_device(struct net_device *dev,
@@ -383,7 +384,7 @@ static void corkscrew_interrupt(int irq, void *dev_id,
 				    struct pt_regs *regs);
 static int corkscrew_close(struct net_device *dev);
 static void update_stats(int addr, struct net_device *dev);
-static struct enet_statistics *corkscrew_get_stats(struct net_device *dev);
+static struct net_device_stats *corkscrew_get_stats(struct net_device *dev);
 static void set_rx_mode(struct net_device *dev);
 
 
@@ -427,6 +428,8 @@ int tc515_probe(struct net_device *dev)
 {
 	int cards_found = 0;
 
+	SET_MODULE_OWNER(dev);
+
 	cards_found = corkscrew_scan(dev);
 
 	if (corkscrew_debug > 0 && cards_found)
@@ -439,16 +442,18 @@ int tc515_probe(struct net_device *dev)
 static int corkscrew_scan(struct net_device *dev)
 {
 	int cards_found = 0;
-	short i;
 	static int ioaddr;
+#ifdef __ISAPNP__
+	short i;
 	static int pnp_cards = 0;
+#endif
 
 #ifdef __ISAPNP__
 	if(nopnp == 1)
 		goto no_pnp;
 	for(i=0; corkscrew_isapnp_adapters[i].vendor != 0; i++) {
 		struct pci_dev *idev = NULL;
-		int irq, j;
+		int irq;
 		while((idev = isapnp_find_dev(NULL,
 						corkscrew_isapnp_adapters[i].vendor,
 						corkscrew_isapnp_adapters[i].function,
@@ -558,6 +563,8 @@ static struct net_device *corkscrew_found_device(struct net_device *dev,
 	    sizeof(struct corkscrew_private) + 15;	/* Pad for alignment */
 
 	dev = (struct net_device *) kmalloc(dev_size, GFP_KERNEL);
+	if (!dev)
+		return NULL;
 	memset(dev, 0, dev_size);
 	/* Align the Rx and Tx ring entries.  */
 	dev->priv =
@@ -583,15 +590,16 @@ static struct net_device *corkscrew_found_device(struct net_device *dev,
 	ether_setup(dev);
 	vp->next_module = root_corkscrew_dev;
 	root_corkscrew_dev = dev;
-	if (register_netdev(dev) != 0)
-		return 0;
-#else				/* not a MODULE */
-	if (dev) {
-		/* Caution: quad-word alignment required for rings! */
-		dev->priv =
-		    kmalloc(sizeof(struct corkscrew_private), GFP_KERNEL);
-		memset(dev->priv, 0, sizeof(struct corkscrew_private));
+	if (register_netdev(dev) != 0) {
+		kfree(dev);
+		return NULL;
 	}
+	SET_MODULE_OWNER(dev);
+#else				/* not a MODULE */
+	/* Caution: quad-word alignment required for rings! */
+	dev->priv =
+	    kmalloc(sizeof(struct corkscrew_private), GFP_KERNEL);
+	memset(dev->priv, 0, sizeof(struct corkscrew_private));
 	dev = init_etherdev(dev, sizeof(struct corkscrew_private));
 	dev->base_addr = ioaddr;
 	dev->irq = irq;
@@ -870,8 +878,6 @@ static int corkscrew_open(struct net_device *dev)
 	outw(SetIntrEnb | IntLatch | TxAvailable | RxComplete | StatsFull
 	     | (vp->bus_master ? DMADone : 0) | UpComplete | DownComplete,
 	     ioaddr + EL3_CMD);
-
-	MOD_INC_USE_COUNT;
 
 	return 0;
 }
@@ -1427,7 +1433,7 @@ static int boomerang_rx(struct net_device *dev)
 		entry = (++vp->cur_rx) % RX_RING_SIZE;
 	}
 	/* Refill the Rx ring buffers. */
-	for (; vp->dirty_rx < vp->cur_rx; vp->dirty_rx++) {
+	for (; vp->cur_rx - vp->dirty_rx > 0; vp->dirty_rx++) {
 		struct sk_buff *skb;
 		entry = vp->dirty_rx % RX_RING_SIZE;
 		if (vp->rx_skbuff[entry] == NULL) {
@@ -1497,12 +1503,10 @@ static int corkscrew_close(struct net_device *dev)
 			}
 	}
 
-	MOD_DEC_USE_COUNT;
-
 	return 0;
 }
 
-static struct enet_statistics *corkscrew_get_stats(struct net_device *dev)
+static struct net_device_stats *corkscrew_get_stats(struct net_device *dev)
 {
 	struct corkscrew_private *vp =
 	    (struct corkscrew_private *) dev->priv;

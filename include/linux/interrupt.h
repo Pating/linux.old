@@ -61,20 +61,9 @@ enum
 	TASKLET_SOFTIRQ
 };
 
-#if SMP_CACHE_BYTES <= 32
-/* It is trick to make assembly easier. */
-#define SOFTIRQ_STATE_PAD 32
-#else
-#define SOFTIRQ_STATE_PAD SMP_CACHE_BYTES
-#endif
-
-struct softirq_state
-{
-	__u32	active;
-	__u32	mask;
-} __attribute__ ((__aligned__(SOFTIRQ_STATE_PAD)));
-
-extern struct softirq_state softirq_state[NR_CPUS];
+/* softirq mask and active fields moved to irq_cpustat_t in
+ * asm/hardirq.h to get better cache usage.  KAO
+ */
 
 struct softirq_action
 {
@@ -85,14 +74,14 @@ struct softirq_action
 asmlinkage void do_softirq(void);
 extern void open_softirq(int nr, void (*action)(struct softirq_action*), void *data);
 
-extern __inline__ void __cpu_raise_softirq(int cpu, int nr)
+static inline void __cpu_raise_softirq(int cpu, int nr)
 {
-	softirq_state[cpu].active |= (1<<nr);
+	softirq_active(cpu) |= (1<<nr);
 }
 
 
 /* I do not want to use atomic variables now, so that cli/sti */
-extern __inline__ void raise_softirq(int nr)
+static inline void raise_softirq(int nr)
 {
 	unsigned long flags;
 
@@ -165,7 +154,7 @@ extern struct tasklet_head tasklet_hi_vec[NR_CPUS];
 #define tasklet_unlock(t) do { } while (0)
 #endif
 
-extern __inline__ void tasklet_schedule(struct tasklet_struct *t)
+static inline void tasklet_schedule(struct tasklet_struct *t)
 {
 	if (!test_and_set_bit(TASKLET_STATE_SCHED, &t->state)) {
 		int cpu = smp_processor_id();
@@ -179,7 +168,7 @@ extern __inline__ void tasklet_schedule(struct tasklet_struct *t)
 	}
 }
 
-extern __inline__ void tasklet_hi_schedule(struct tasklet_struct *t)
+static inline void tasklet_hi_schedule(struct tasklet_struct *t)
 {
 	if (!test_and_set_bit(TASKLET_STATE_SCHED, &t->state)) {
 		int cpu = smp_processor_id();
@@ -194,18 +183,18 @@ extern __inline__ void tasklet_hi_schedule(struct tasklet_struct *t)
 }
 
 
-extern __inline__ void tasklet_disable_nosync(struct tasklet_struct *t)
+static inline void tasklet_disable_nosync(struct tasklet_struct *t)
 {
 	atomic_inc(&t->count);
 }
 
-extern __inline__ void tasklet_disable(struct tasklet_struct *t)
+static inline void tasklet_disable(struct tasklet_struct *t)
 {
 	tasklet_disable_nosync(t);
 	tasklet_unlock_wait(t);
 }
 
-extern __inline__ void tasklet_enable(struct tasklet_struct *t)
+static inline void tasklet_enable(struct tasklet_struct *t)
 {
 	atomic_dec(&t->count);
 }
@@ -240,7 +229,7 @@ extern struct tasklet_struct bh_task_vec[];
 /* It is exported _ONLY_ for wait_on_irq(). */
 extern spinlock_t global_bh_lock;
 
-extern __inline__ void mark_bh(int nr)
+static inline void mark_bh(int nr)
 {
 	tasklet_hi_schedule(bh_task_vec+nr);
 }

@@ -74,8 +74,6 @@ volatile unsigned char *chrp_int_ack_special;
 
 irq_desc_t irq_desc[NR_IRQS];
 int ppc_spurious_interrupts = 0;
-unsigned int local_bh_count[NR_CPUS];
-unsigned int local_irq_count[NR_CPUS];
 struct irqaction *ppc_irq_action[NR_IRQS];
 unsigned int ppc_cached_irq_mask[NR_MASK_WORDS];
 unsigned int ppc_lost_interrupts[NR_MASK_WORDS];
@@ -139,17 +137,21 @@ int request_irq(unsigned int irq, void (*handler)(int, void *, struct pt_regs *)
 	if (!handler)
 	{
 		/* Free */
-		for (p = &irq_desc[irq].action; (action = *p) != NULL; p = &action->next)
-		{
-			/* Found it - now free it */
-			save_flags(flags);
-			cli();
-			*p = action->next;
-			restore_flags(flags);
-			irq_kfree(action);
-			return 0;
-		}
-		return -ENOENT;
+		p = &irq_desc[irq].action;
+		while ((action = *p) != NULL && action->dev_id != dev_id)
+			p = &action->next;
+		if (action == NULL)
+			return -ENOENT;
+
+		/* Found it - now free it */
+		save_flags(flags);
+		cli();
+		*p = action->next;
+		if (irq_desc[irq].action == NULL)
+			disable_irq(irq);
+		restore_flags(flags);
+		irq_kfree(action);
+		return 0;
 	}
 	
 	action = (struct irqaction *)
@@ -248,6 +250,7 @@ int get_irq_list(char *buf)
 			len += sprintf(buf+len, " %s ", irq_desc[i].handler->typename );
 		else
 			len += sprintf(buf+len, "  None      ");
+		len += sprintf(buf+len, "%s", (irq_desc[i].status & IRQ_LEVEL) ? "Level " : "Edge  ");
 		len += sprintf(buf+len, "    %s",action->name);
 		for (action=action->next; action; action = action->next) {
 			len += sprintf(buf+len, ", %s", action->name);
@@ -286,14 +289,22 @@ void ppc_irq_dispatch_handler(struct pt_regs *regs, int irq)
 			action = action->next;
 		} while ( action );
 		__cli();
-		unmask_irq(irq);
+		if (irq_desc[irq].handler) {
+			if (irq_desc[irq].handler->end)
+				irq_desc[irq].handler->end(irq);
+			else if (irq_desc[irq].handler->enable)
+				irq_desc[irq].handler->enable(irq);
+		}
 	} else {
 		ppc_spurious_interrupts++;
-		disable_irq( irq );
+		printk(KERN_DEBUG "Unhandled interrupt %x, disabled\n", irq);
+		disable_irq(irq);
+		if (irq_desc[irq].handler->end)
+			irq_desc[irq].handler->end(irq);
 	}
 }
 
-asmlinkage int do_IRQ(struct pt_regs *regs, int isfake)
+int do_IRQ(struct pt_regs *regs, int isfake)
 {
 	int cpu = smp_processor_id();
 	int irq;
@@ -301,6 +312,7 @@ asmlinkage int do_IRQ(struct pt_regs *regs, int isfake)
 
 	/* every arch is required to have a get_irq -- Cort */
 	irq = ppc_md.get_irq( regs );
+
 	if ( irq < 0 )
 	{
 		/* -2 means ignore, already handled */
@@ -313,7 +325,7 @@ asmlinkage int do_IRQ(struct pt_regs *regs, int isfake)
 		goto out;
 	}
 	ppc_irq_dispatch_handler( regs, irq );
-	if ( ppc_md.post_irq )
+	if (ppc_md.post_irq)
 		ppc_md.post_irq( regs, irq );
 
  out:	
@@ -327,6 +339,11 @@ unsigned long probe_irq_on (void)
 }
 
 int probe_irq_off (unsigned long irqs)
+{
+	return 0;
+}
+
+unsigned int probe_irq_mask(unsigned long irqs)
 {
 	return 0;
 }
@@ -359,12 +376,12 @@ static void show(char * str)
 	printk("\n%s, CPU %d:\n", str, cpu);
 	printk("irq:  %d [%d %d]\n",
 	       atomic_read(&global_irq_count),
-	       local_irq_count[0],
-	       local_irq_count[1]);
+	       local_irq_count(0),
+	       local_irq_count(1));
 	printk("bh:   %d [%d %d]\n",
 	       atomic_read(&global_bh_count),
-	       local_bh_count[0],
-	       local_bh_count[1]);
+	       local_bh_count(0),
+	       local_bh_count(1));
 	stack = (unsigned long *) &str;
 	for (i = 40; i ; i--) {
 		unsigned long x = *++stack;
@@ -399,7 +416,7 @@ static inline void wait_on_irq(int cpu)
 		 * already executing in one..
 		 */
 		if (!atomic_read(&global_irq_count)) {
-			if (local_bh_count[cpu]
+			if (local_bh_count(cpu)
 			    || !atomic_read(&global_bh_count))
 				break;
 		}
@@ -421,7 +438,7 @@ static inline void wait_on_irq(int cpu)
 				continue;
 			if (global_irq_lock)
 				continue;
-			if (!local_bh_count[cpu]
+			if (!local_bh_count(cpu)
 			    && atomic_read(&global_bh_count))
 				continue;
 			if (!test_and_set_bit(0,&global_irq_lock))
@@ -512,7 +529,7 @@ void __global_cli(void)
 	if (flags & (1 << 15)) {
 		int cpu = smp_processor_id();
 		__cli();
-		if (!local_irq_count[cpu])
+		if (!local_irq_count(cpu))
 			get_irqlock(cpu);
 	}
 }
@@ -521,7 +538,7 @@ void __global_sti(void)
 {
 	int cpu = smp_processor_id();
 
-	if (!local_irq_count[cpu])
+	if (!local_irq_count(cpu))
 		release_irqlock(cpu);
 	__sti();
 }
@@ -545,7 +562,7 @@ unsigned long __global_save_flags(void)
 	retval = 2 + local_enabled;
 
 	/* check for global flags if we're not in an interrupt */
-	if (!local_irq_count[smp_processor_id()]) {
+	if (!local_irq_count(smp_processor_id())) {
 		if (local_enabled)
 			retval = 1;
 		if (global_irq_holder == (unsigned char) smp_processor_id())
@@ -769,4 +786,8 @@ void init_irq_proc (void)
 			continue;
 		register_irq_proc(i);
 	}
+}
+
+void no_action(int irq, void *dev, struct pt_regs *regs)
+{
 }

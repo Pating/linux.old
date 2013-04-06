@@ -1,4 +1,4 @@
-/* $Id: isdn_net.h,v 1.16 2000/03/21 23:53:22 kai Exp $
+/* $Id: isdn_net.h,v 1.19 2000/06/21 09:54:29 keil Exp $
 
  * header for Linux ISDN subsystem, network related functions (linklevel).
  *
@@ -19,68 +19,6 @@
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
- *
- * $Log: isdn_net.h,v $
- * Revision 1.16  2000/03/21 23:53:22  kai
- * fix backwards compatibility
- *
- * Revision 1.15  2000/03/19 15:27:53  kai
- * no known bugs left...
- *
- * Revision 1.14  2000/03/18 16:20:25  kai
- * cosmetics / renaming
- *
- * Revision 1.13  2000/03/17 18:20:46  kai
- * moved to frame_cnt based flow control
- * some races still need to be fixed
- *
- * Revision 1.12  2000/03/17 17:01:00  kai
- * cleanup
- *
- * Revision 1.11  2000/03/17 16:22:55  kai
- * we keep track of outstanding packets (given to HL, but not confirmed yet)
- * now, but we don't use it for flow control yet.
- *
- * Revision 1.10  1999/08/22 20:26:06  calle
- * backported changes from kernel 2.3.14:
- * - several #include "config.h" gone, others come.
- * - "struct device" changed to "struct net_device" in 2.3.14, added a
- *   define in isdn_compat.h for older kernel versions.
- *
- * Revision 1.9  1999/04/12 12:33:27  fritz
- * Changes from 2.0 tree.
- *
- * Revision 1.8  1998/10/30 17:55:33  he
- * dialmode for x25iface and multulink ppp
- *
- * Revision 1.7  1998/08/31 21:09:55  he
- * new ioctl IIOCNETGPN for /dev/isdninfo (get network interface'
- *     peer phone number)
- *
- * Revision 1.6  1997/10/09 21:28:54  fritz
- * New HL<->LL interface:
- *   New BSENT callback with nr. of bytes included.
- *   Sending without ACK.
- *   New L1 error status (not yet in use).
- *   Cleaned up obsolete structures.
- * Implemented Cisco-SLARP.
- * Changed local net-interface data to be dynamically allocated.
- * Removed old 2.0 compatibility stuff.
- *
- * Revision 1.5  1997/02/10 20:12:47  fritz
- * Changed interface for reporting incoming calls.
- *
- * Revision 1.4  1997/02/03 23:16:48  fritz
- * Removed isdn_net_receive_callback prototype.
- *
- * Revision 1.3  1997/01/17 01:19:30  fritz
- * Applied chargeint patch.
- *
- * Revision 1.2  1996/04/20 16:29:43  fritz
- * Misc. typos
- *
- * Revision 1.1  1996/02/11 02:35:13  fritz
- * Initial revision
  *
  */
 
@@ -137,7 +75,7 @@ extern int isdn_net_addphone(isdn_net_ioctl_phone *);
 extern int isdn_net_getphones(isdn_net_ioctl_phone *, char *);
 extern int isdn_net_getpeer(isdn_net_ioctl_phone *, isdn_net_ioctl_phone *);
 extern int isdn_net_delphone(isdn_net_ioctl_phone *);
-extern int isdn_net_find_icall(int, int, int, setup_parm);
+extern int isdn_net_find_icall(int, int, int, setup_parm *);
 extern void isdn_net_hangup(struct net_device *);
 extern void isdn_net_dial(void);
 extern void isdn_net_autohup(void);
@@ -178,13 +116,15 @@ static __inline__ isdn_net_local * isdn_net_get_locked_lp(isdn_net_dev *nd)
 	while (isdn_net_lp_busy(nd->queue)) {
 		spin_unlock_bh(&nd->queue->xmit_lock);
 		nd->queue = nd->queue->next;
-		if (nd->queue == lp) /* not found -- should never happen */
-			return 0;
+		if (nd->queue == lp) { /* not found -- should never happen */
+			lp = NULL;
+			goto errout;
+		}
 		spin_lock_bh(&nd->queue->xmit_lock);
 	}
 	lp = nd->queue;
-
 	nd->queue = nd->queue->next;
+errout:
 	spin_unlock_irqrestore(&nd->queue_lock, flags);
 	return lp;
 }

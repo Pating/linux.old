@@ -142,7 +142,7 @@ static int	stli_nrbrds = sizeof(stli_brdconf) / sizeof(stlconf_t);
  */
 #define	STLI_EISAPROBE	0
 
-static devfs_handle_t devfs_handle = NULL;
+static devfs_handle_t devfs_handle;
 
 /*****************************************************************************/
 
@@ -189,7 +189,7 @@ static int			stli_refcount;
  *	swapping!). All ports will share one buffer - since if the system
  *	is already swapping a shared buffer won't make things any worse.
  */
-static char			*stli_tmpwritebuf = (char *) NULL;
+static char			*stli_tmpwritebuf;
 static DECLARE_MUTEX(stli_tmpwritesem);
 
 #define	STLI_TXBUFSIZE		4096
@@ -201,10 +201,10 @@ static DECLARE_MUTEX(stli_tmpwritesem);
  *	with a large memcpy. Just use 1 buffer for all ports, since its
  *	use it is only need for short periods of time by each port.
  */
-static char			*stli_txcookbuf = (char *) NULL;
-static int			stli_txcooksize = 0;
-static int			stli_txcookrealsize = 0;
-static struct tty_struct	*stli_txcooktty = (struct tty_struct *) NULL;
+static char			*stli_txcookbuf;
+static int			stli_txcooksize;
+static int			stli_txcookrealsize;
+static struct tty_struct	*stli_txcooktty;
 
 /*
  *	Define a local default termios struct. All ports will be created
@@ -234,7 +234,7 @@ static stliport_t	stli_dummyport;
 
 static stlibrd_t	*stli_brds[STL_MAXBRDS];
 
-static int		stli_shared = 0;
+static int		stli_shared;
 
 /*
  *	Per board state flags. Used with the state field of the board struct.
@@ -687,8 +687,6 @@ static int	stli_portinfo(stlibrd_t *brdp, stliport_t *portp, int portnr, char *p
 
 static int	stli_brdinit(stlibrd_t *brdp);
 static int	stli_startbrd(stlibrd_t *brdp);
-static int	stli_memopen(struct inode *ip, struct file *fp);
-static int	stli_memclose(struct inode *ip, struct file *fp);
 static ssize_t	stli_memread(struct file *fp, char *buf, size_t count, loff_t *offp);
 static ssize_t	stli_memwrite(struct file *fp, const char *buf, size_t count, loff_t *offp);
 static int	stli_memioctl(struct inode *ip, struct file *fp, unsigned int cmd, unsigned long arg);
@@ -780,11 +778,10 @@ static inline int	stli_initpcibrd(int brdtype, struct pci_dev *devp);
  *	board. This is also a very useful debugging tool.
  */
 static struct file_operations	stli_fsiomem = {
+	owner:		THIS_MODULE,
 	read:		stli_memread,
 	write:		stli_memwrite,
 	ioctl:		stli_memioctl,
-	open:		stli_memopen,
-	release:	stli_memclose,
 };
 
 /*****************************************************************************/
@@ -799,7 +796,7 @@ static struct timer_list	stli_timerlist = {
 	function: stli_poll
 };
 
-static int	stli_timeron = 0;
+static int	stli_timeron;
 
 /*
  *	Define the calculation for the timeout routine.
@@ -871,9 +868,9 @@ void cleanup_module()
 		printk("STALLION: failed to un-register serial memory device, "
 			"errno=%d\n", -i);
 	if (stli_tmpwritebuf != (char *) NULL)
-		kfree_s(stli_tmpwritebuf, STLI_TXBUFSIZE);
+		kfree(stli_tmpwritebuf);
 	if (stli_txcookbuf != (char *) NULL)
-		kfree_s(stli_txcookbuf, STLI_TXBUFSIZE);
+		kfree(stli_txcookbuf);
 
 	for (i = 0; (i < stli_nrbrds); i++) {
 		if ((brdp = stli_brds[i]) == (stlibrd_t *) NULL)
@@ -883,14 +880,14 @@ void cleanup_module()
 			if (portp != (stliport_t *) NULL) {
 				if (portp->tty != (struct tty_struct *) NULL)
 					tty_hangup(portp->tty);
-				kfree_s(portp, sizeof(stliport_t));
+				kfree(portp);
 			}
 		}
 
 		iounmap(brdp->membase);
 		if (brdp->iosize > 0)
 			release_region(brdp->iobase, brdp->iosize);
-		kfree_s(brdp, sizeof(stlibrd_t));
+		kfree(brdp);
 		stli_brds[i] = (stlibrd_t *) NULL;
 	}
 
@@ -2366,12 +2363,18 @@ static void stli_dohangup(void *arg)
 	printk("stli_dohangup(portp=%x)\n", (int) arg);
 #endif
 
+	/*
+	 * FIXME: There's a module removal race here: tty_hangup
+	 * calls schedule_task which will call into this
+	 * driver later.
+	 */
 	portp = (stliport_t *) arg;
-	if (portp == (stliport_t *) NULL)
-		return;
-	if (portp->tty == (struct tty_struct *) NULL)
-		return;
-	tty_hangup(portp->tty);
+	if (portp != (stliport_t *) NULL) {
+		if (portp->tty != (struct tty_struct *) NULL) {
+			tty_hangup(portp->tty);
+		}
+	}
+	MOD_DEC_USE_COUNT;
 }
 
 /*****************************************************************************/
@@ -3002,8 +3005,11 @@ static inline int stli_hostcmd(stlibrd_t *brdp, stliport_t *portp)
 				if (portp->flags & ASYNC_CHECK_CD) {
 					if (! ((portp->flags & ASYNC_CALLOUT_ACTIVE) &&
 					    (portp->flags & ASYNC_CALLOUT_NOHUP))) {
-						if (tty != (struct tty_struct *) NULL)
-							queue_task(&portp->tqhangup, &tq_scheduler);
+						if (tty != (struct tty_struct *) NULL) {
+							MOD_INC_USE_COUNT;
+							if (schedule_task(&portp->tqhangup) == 0)
+								MOD_DEC_USE_COUNT;
+						}
 					}
 				}
 			}
@@ -5183,27 +5189,6 @@ static int stli_getbrdstruct(unsigned long arg)
 /*****************************************************************************/
 
 /*
- *	Memory device open code. Need to keep track of opens and close
- *	for module handling.
- */
-
-static int stli_memopen(struct inode *ip, struct file *fp)
-{
-	MOD_INC_USE_COUNT;
-	return(0);
-}
-
-/*****************************************************************************/
-
-static int stli_memclose(struct inode *ip, struct file *fp)
-{
-	MOD_DEC_USE_COUNT;
-	return(0);
-}
-
-/*****************************************************************************/
-
-/*
  *	The "staliomem" device is also required to do some special operations on
  *	the board. We need to be able to send an interrupt to the board,
  *	reset it, and start/stop it.
@@ -5331,10 +5316,10 @@ int __init stli_init(void)
 	if (devfs_register_chrdev(STL_SIOMEMMAJOR, "staliomem", &stli_fsiomem))
 		printk("STALLION: failed to register serial memory device\n");
 
-	devfs_handle = devfs_mk_dir (NULL, "staliomem", 9, NULL);
+	devfs_handle = devfs_mk_dir (NULL, "staliomem", NULL);
 	devfs_register_series (devfs_handle, "%u", 4, DEVFS_FL_DEFAULT,
 			       STL_SIOMEMMAJOR, 0,
-			       S_IFCHR | S_IRUSR | S_IWUSR, 0, 0,
+			       S_IFCHR | S_IRUSR | S_IWUSR,
 			       &stli_fsiomem, NULL);
 
 /*

@@ -125,10 +125,9 @@ void *hpfs_map_sector(struct super_block *s, unsigned secno, struct buffer_head 
 	kdev_t dev = s->s_dev;
 	struct buffer_head *bh;
 
-					/* vvvv - workaround for the breada bug */
-	if (!ahead || secno + ahead + (read_ahead[MAJOR(dev)] >> 9) >= s->s_hpfs_fs_size)
+	if (!ahead || secno + ahead >= s->s_hpfs_fs_size)
 		*bhp = bh = bread(dev, secno, 512);
-	else *bhp = bh = breada(dev, secno, 512, 0, (ahead + 1) << 9);
+	else *bhp = bh = bread(dev, secno, 512);
 	if (bh != NULL)
 		return bh->b_data;
 	else {
@@ -174,10 +173,9 @@ void *hpfs_map_4sectors(struct super_block *s, unsigned secno, struct quad_buffe
 		goto bail;
 	}
 
-					/* vvvv - workaround for the breada bug */
-	if (!ahead || secno + 4 + ahead + (read_ahead[MAJOR(dev)] >> 9) > s->s_hpfs_fs_size)
+	if (!ahead || secno + 4 + ahead > s->s_hpfs_fs_size)
 		qbh->bh[0] = bh = bread(dev, secno, 512);
-	else qbh->bh[0] = bh = breada(dev, secno, 512, 0, (ahead + 4) << 9);
+	else qbh->bh[0] = bh = bread(dev, secno, 512);
 	if (!bh)
 		goto bail0;
 	memcpy(data, bh->b_data, 512);
@@ -206,7 +204,7 @@ void *hpfs_map_4sectors(struct super_block *s, unsigned secno, struct quad_buffe
  bail1:
 	brelse(qbh->bh[0]);
  bail0:
-	kfree_s(data, 2048);
+	kfree(data);
 	printk("HPFS: hpfs_map_4sectors: read error\n");
  bail:
 	return NULL;
@@ -251,7 +249,7 @@ void hpfs_brelse4(struct quad_buffer_head *qbh)
 	brelse(qbh->bh[2]);
 	brelse(qbh->bh[1]);
 	brelse(qbh->bh[0]);
-	kfree_s(qbh->data, 2048);
+	kfree(qbh->data);
 }	
 
 void hpfs_mark_4buffers_dirty(struct quad_buffer_head *qbh)
@@ -261,8 +259,8 @@ void hpfs_mark_4buffers_dirty(struct quad_buffer_head *qbh)
 	memcpy(qbh->bh[1]->b_data, qbh->data + 512, 512);
 	memcpy(qbh->bh[2]->b_data, qbh->data + 2 * 512, 512);
 	memcpy(qbh->bh[3]->b_data, qbh->data + 3 * 512, 512);
-	mark_buffer_dirty(qbh->bh[0],1);
-	mark_buffer_dirty(qbh->bh[1],1);
-	mark_buffer_dirty(qbh->bh[2],1);
-	mark_buffer_dirty(qbh->bh[3],1);
+	mark_buffer_dirty(qbh->bh[0]);
+	mark_buffer_dirty(qbh->bh[1]);
+	mark_buffer_dirty(qbh->bh[2]);
+	mark_buffer_dirty(qbh->bh[3]);
 }

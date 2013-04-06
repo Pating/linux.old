@@ -13,8 +13,10 @@ CONFIG_EXPERIMENTAL=y
 # CONFIG_ACER_PICA_61 is not set
 # CONFIG_ALGOR_P4032 is not set
 # CONFIG_BAGET_MIPS is not set
+# CONFIG_COBALT_MICRO_SERVER is not set
 CONFIG_DECSTATION=y
 # CONFIG_DDB5074 is not set
+# CONFIG_ORION is not set
 # CONFIG_MIPS_MAGNUM_4000 is not set
 # CONFIG_OLIVETTI_M700 is not set
 # CONFIG_SGI_IP22 is not set
@@ -22,6 +24,13 @@ CONFIG_DECSTATION=y
 # CONFIG_SBUS is not set
 # CONFIG_ISA is not set
 # CONFIG_PCI is not set
+
+#
+# Loadable module support
+#
+CONFIG_MODULES=y
+# CONFIG_MODVERSIONS is not set
+CONFIG_KMOD=y
 
 #
 # CPU selection
@@ -56,11 +65,13 @@ CONFIG_SYSCTL=y
 # Parallel port support
 #
 # CONFIG_PARPORT is not set
-CONFIG_MODULES=y
-# CONFIG_MODVERSIONS is not set
-CONFIG_KMOD=y
 CONFIG_TC=y
 # CONFIG_PCMCIA is not set
+
+#
+# Memory Technology Devices (MTD)
+#
+# CONFIG_MTD is not set
 
 #
 # Block devices
@@ -70,17 +81,14 @@ CONFIG_TC=y
 # CONFIG_PARIDE is not set
 # CONFIG_BLK_CPQ_DA is not set
 # CONFIG_BLK_DEV_DAC960 is not set
-
-#
-# Additional Block Devices
-#
 # CONFIG_BLK_DEV_LOOP is not set
 # CONFIG_BLK_DEV_NBD is not set
 # CONFIG_BLK_DEV_LVM is not set
 # CONFIG_BLK_DEV_MD is not set
 # CONFIG_MD_LINEAR is not set
 # CONFIG_MD_RAID0 is not set
-# CONFIG_RAID15_DANGEROUS is not set
+# CONFIG_MD_RAID1 is not set
+# CONFIG_MD_RAID5 is not set
 # CONFIG_BLK_DEV_RAM is not set
 # CONFIG_BLK_DEV_INITRD is not set
 
@@ -103,12 +111,8 @@ CONFIG_IP_PNP_BOOTP=y
 # CONFIG_NET_IPIP is not set
 # CONFIG_NET_IPGRE is not set
 # CONFIG_IP_ALIAS is not set
+# CONFIG_INET_ECN is not set
 # CONFIG_SYN_COOKIES is not set
-
-#
-# (it is safe to leave these untouched)
-#
-# CONFIG_SKB_LARGE is not set
 # CONFIG_IPV6 is not set
 # CONFIG_KHTTPD is not set
 # CONFIG_ATM is not set
@@ -119,9 +123,9 @@ CONFIG_IP_PNP_BOOTP=y
 # CONFIG_IPX is not set
 # CONFIG_ATALK is not set
 # CONFIG_DECNET is not set
+# CONFIG_BRIDGE is not set
 # CONFIG_X25 is not set
 # CONFIG_LAPB is not set
-# CONFIG_BRIDGE is not set
 # CONFIG_LLC is not set
 # CONFIG_ECONET is not set
 # CONFIG_WAN_ROUTER is not set
@@ -212,8 +216,6 @@ CONFIG_SERIAL=y
 CONFIG_ZS=y
 CONFIG_SERIAL_CONSOLE=y
 # CONFIG_UNIX98_PTYS is not set
-# CONFIG_KEYBOARD is not set
-# CONFIG_MOUSE is not set
 # CONFIG_RTC is not set
 
 #
@@ -232,6 +234,7 @@ CONFIG_SERIAL_CONSOLE=y
 # CONFIG_UMSDOS_FS is not set
 # CONFIG_VFAT_FS is not set
 # CONFIG_EFS_FS is not set
+# CONFIG_JFFS_FS is not set
 # CONFIG_CRAMFS is not set
 # CONFIG_RAMFS is not set
 # CONFIG_ISO9660_FS is not set

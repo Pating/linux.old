@@ -1,11 +1,11 @@
-/* $Id: andes.c,v 1.7 2000/03/13 22:43:25 kanoj Exp $
- *
+/*
  * This file is subject to the terms and conditions of the GNU General Public
  * License.  See the file "COPYING" in the main directory of this archive
  * for more details.
  *
  * Copyright (C) 1997, 1998, 1999 Ralf Baechle (ralf@gnu.org)
  * Copyright (C) 1999 Silicon Graphics, Inc.
+ * Copyright (C) 2000 Kanoj Sarcar (kanoj@sgi.com)
  */
 #include <linux/init.h>
 #include <linux/kernel.h>
@@ -18,19 +18,20 @@
 #include <asm/sgialib.h>
 #include <asm/mmu_context.h>
 
-/* CP0 hazard avoidance.  I think we can drop this for the R10000.  */
-#define BARRIER __asm__ __volatile__(".set noreorder\n\t" \
-				     "nop; nop; nop; nop; nop; nop;\n\t" \
-				     ".set reorder\n\t")
+static int scache_lsz64;
 
-/* R10000 has no Create_Dirty type cacheops.  */
+/*
+ * This version has been tuned on an Origin.  For other machines the arguments
+ * of the pref instructin may have to be tuned differently.
+ */
 static void andes_clear_page(void * page)
 {
 	__asm__ __volatile__(
 		".set\tnoreorder\n\t"
 		".set\tnoat\n\t"
 		"daddiu\t$1,%0,%2\n"
-		"1:\tsd\t$0,(%0)\n\t"
+		"1:\tpref 7,512(%0)\n\t"
+		"sd\t$0,(%0)\n\t"
 		"sd\t$0,8(%0)\n\t"
 		"sd\t$0,16(%0)\n\t"
 		"sd\t$0,24(%0)\n\t"
@@ -47,147 +48,78 @@ static void andes_clear_page(void * page)
 		:"$1", "memory");
 }
 
+/* R10000 has no Create_Dirty type cacheops.  */
 static void andes_copy_page(void * to, void * from)
 {
-	unsigned long dummy1, dummy2, reg1, reg2;
+	unsigned long dummy1, dummy2, reg1, reg2, reg3, reg4;
 
 	__asm__ __volatile__(
 		".set\tnoreorder\n\t"
 		".set\tnoat\n\t"
-		"daddiu\t$1,%0,%6\n"
-		"1:\tld\t%2,(%1)\n\t"
+		"daddiu\t$1,%0,%8\n"
+		"1:\tpref\t0,2*128(%1)\n\t"
+		"pref\t1,2*128(%0)\n\t"
+		"ld\t%2,(%1)\n\t"
 		"ld\t%3,8(%1)\n\t"
+		"ld\t%4,16(%1)\n\t"
+		"ld\t%5,24(%1)\n\t"
 		"sd\t%2,(%0)\n\t"
 		"sd\t%3,8(%0)\n\t"
-		"ld\t%2,16(%1)\n\t"
-		"ld\t%3,24(%1)\n\t"
-		"sd\t%2,16(%0)\n\t"
-		"sd\t%3,24(%0)\n\t"
+		"sd\t%4,16(%0)\n\t"
+		"sd\t%5,24(%0)\n\t"
 		"daddiu\t%0,64\n\t"
 		"daddiu\t%1,64\n\t"
 		"ld\t%2,-32(%1)\n\t"
 		"ld\t%3,-24(%1)\n\t"
+		"ld\t%4,-16(%1)\n\t"
+		"ld\t%5,-8(%1)\n\t"
 		"sd\t%2,-32(%0)\n\t"
 		"sd\t%3,-24(%0)\n\t"
-		"ld\t%2,-16(%1)\n\t"
-		"ld\t%3,-8(%1)\n\t"
-		"sd\t%2,-16(%0)\n\t"
+		"sd\t%4,-16(%0)\n\t"
 		"bne\t$1,%0,1b\n\t"
-		" sd\t%3,-8(%0)\n\t"
+		" sd\t%5,-8(%0)\n\t"
 		".set\tat\n\t"
 		".set\treorder"
-		:"=r" (dummy1), "=r" (dummy2), "=&r" (reg1), "=&r" (reg2)
+		:"=r" (dummy1), "=r" (dummy2), "=&r" (reg1), "=&r" (reg2),
+		 "=&r" (reg3), "=&r" (reg4)
 		:"0" (to), "1" (from), "I" (PAGE_SIZE));
 }
 
 /* Cache operations.  These are only used with the virtual memory system,
    not for non-coherent I/O so it's ok to ignore the secondary caches.  */
 static void
-andes_flush_cache_all(void)
+andes_flush_cache_l1(void)
 {
 	blast_dcache32(); blast_icache64();
 }
 
+/*
+ * This is only used during initialization time. vmalloc() also calls
+ * this, but that will be changed pretty soon.
+ */
 static void
-andes_flush_cache_mm(struct mm_struct *mm)
+andes_flush_cache_l2(void)
 {
-	if (CPU_CONTEXT(smp_processor_id(), mm) != 0) {
-#ifdef DEBUG_CACHE
-		printk("cmm[%d]", (int)mm->context);
-#endif
-		andes_flush_cache_all();
+	switch (sc_lsize()) {
+		case 64:
+			blast_scache64();
+			break;
+		case 128:
+			blast_scache128();
+			break;
+		default:
+			printk("Unknown L2 line size\n");
+			while(1);
 	}
 }
 
-static void
-andes_flush_cache_range(struct mm_struct *mm, unsigned long start,
-                        unsigned long end)
+void
+andes_flush_icache_page(unsigned long page)
 {
-	if (CPU_CONTEXT(smp_processor_id(), mm) != 0) {
-		unsigned long flags;
-
-#ifdef DEBUG_CACHE
-		printk("crange[%d,%08lx,%08lx]", (int)mm->context, start, end);
-#endif
-		save_and_cli(flags);
-		blast_dcache32(); blast_icache64();
-		restore_flags(flags);
-	}
-}
-
-static void
-andes_flush_cache_page(struct vm_area_struct *vma, unsigned long page)
-{
-	struct mm_struct *mm = vma->vm_mm;
-	unsigned long flags;
-	pgd_t *pgdp;
-	pmd_t *pmdp;
-	pte_t *ptep;
-	int text;
-
-	/*
-	 * If ownes no valid ASID yet, cannot possibly have gotten
-	 * this page into the cache.
-	 */
-	if (CPU_CONTEXT(smp_processor_id(), mm) == 0)
-		return;
-
-#ifdef DEBUG_CACHE
-	printk("cpage[%d,%08lx]", (int)mm->context, page);
-#endif
-	save_and_cli(flags);
-	page &= PAGE_MASK;
-	pgdp = pgd_offset(mm, page);
-	pmdp = pmd_offset(pgdp, page);
-	ptep = pte_offset(pmdp, page);
-
-	/*
-	 * If the page isn't marked valid, the page cannot possibly be
-	 * in the cache.
-	 */
-	if(!(pte_val(*ptep) & _PAGE_PRESENT))
-		goto out;
-
-	text = (vma->vm_flags & VM_EXEC);
-	/*
-	 * Doing flushes for another ASID than the current one is
-	 * too difficult since stupid R4k caches do a TLB translation
-	 * for every cache flush operation.  So we do indexed flushes
-	 * in that case, which doesn't overly flush the cache too much.
-	 */
-	if ((mm == current->mm) && (pte_val(*ptep) & _PAGE_VALID)) {
-		blast_dcache32_page(page);
-		if(text)
-			blast_icache64_page(page);
-	} else {
-		/*
-		 * Do indexed flush, too much work to get the (possible)
-		 * tlb refills to work correctly.
-		 */
-		page = (CKSEG0 + (page & (dcache_size - 1)));
-		blast_dcache32_page_indexed(page);
-		if(text)
-			blast_icache64_page_indexed(page);
-	}
-out:
-	restore_flags(flags);
-}
-
-/* Hoo hum...  will this ever be called for an address that is not in CKSEG0
-   and not cacheable?  */
-static void
-andes_flush_page_to_ram(struct page * page)
-{
-	unsigned long addr = page_address(page) & PAGE_MASK;
-
-	if ((addr >= K0BASE_NONCOH && addr < (0xb0UL << 56))
-	    || (addr >= KSEG0 && addr < KSEG1)
-	    || (addr >= KSEG2)) {
-#ifdef DEBUG_CACHE
-		printk("cram[%08lx]", addr);
-#endif
-		blast_dcache32_page(addr);
-	}
+	if (scache_lsz64)
+		blast_scache64_page(page);
+	else
+		blast_scache128_page(page);
 }
 
 static void
@@ -206,8 +138,6 @@ andes_flush_cache_sigtramp(unsigned long addr)
 #define NTLB_ENTRIES       64
 #define NTLB_ENTRIES_HALF  32
 
-/* TLB operations.
-   XXX These should work fine on R10k without the BARRIERs.  */
 static inline void
 andes_flush_tlb_all(void)
 {
@@ -225,19 +155,15 @@ andes_flush_tlb_all(void)
 	set_entryhi(CKSEG0);
 	set_entrylo0(0);
 	set_entrylo1(0);
-	BARRIER;
 
 	entry = get_wired();
 
 	/* Blast 'em all away. */
 	while(entry < NTLB_ENTRIES) {
 		set_index(entry);
-		BARRIER;
 		tlb_write_indexed();
-		BARRIER;
 		entry++;
 	}
-	BARRIER;
 	set_entryhi(old_ctx);
 	__restore_flags(flags);
 }
@@ -285,18 +211,14 @@ andes_flush_tlb_range(struct mm_struct *mm, unsigned long start,
 
 				set_entryhi(start | newpid);
 				start += (PAGE_SIZE << 1);
-				BARRIER;
 				tlb_probe();
-				BARRIER;
 				idx = get_index();
 				set_entrylo0(0);
 				set_entrylo1(0);
 				set_entryhi(KSEG0);
-				BARRIER;
 				if(idx < 0)
 					continue;
 				tlb_write_indexed();
-				BARRIER;
 			}
 			set_entryhi(oldpid);
 		} else {
@@ -324,20 +246,16 @@ andes_flush_tlb_page(struct vm_area_struct *vma, unsigned long page)
 		__save_and_cli(flags);
 		oldpid = (get_entryhi() & 0xff);
 		set_entryhi(page | newpid);
-		BARRIER;
 		tlb_probe();
-		BARRIER;
 		idx = get_index();
 		set_entrylo0(0);
 		set_entrylo1(0);
 		set_entryhi(KSEG0);
 		if(idx < 0)
 			goto finish;
-		BARRIER;
 		tlb_write_indexed();
 
 	finish:
-		BARRIER;
 		set_entryhi(oldpid);
 		__restore_flags(flags);
 	}
@@ -355,6 +273,12 @@ static void andes_update_mmu_cache(struct vm_area_struct * vma,
 	pte_t *ptep;
 	int idx, pid;
 
+	/*
+	 * Handle debugger faulting in for debugee.
+	 */
+	if (current->active_mm != vma->vm_mm)
+		return;
+
 	__save_and_cli(flags);
 	pid = get_entryhi() & 0xff;
 
@@ -368,32 +292,20 @@ static void andes_update_mmu_cache(struct vm_area_struct * vma,
 	address &= (PAGE_MASK << 1);
 	set_entryhi(address | (pid));
 	pgdp = pgd_offset(vma->vm_mm, address);
-	BARRIER;
 	tlb_probe();
-	BARRIER;
 	pmdp = pmd_offset(pgdp, address);
 	idx = get_index();
 	ptep = pte_offset(pmdp, address);
-	BARRIER;
 	set_entrylo0(pte_val(*ptep++) >> 6);
 	set_entrylo1(pte_val(*ptep) >> 6);
 	set_entryhi(address | (pid));
-	BARRIER;
 	if(idx < 0) {
 		tlb_write_random();
 	} else {
 		tlb_write_indexed();
 	}
-	BARRIER;
 	set_entryhi(pid);
-	BARRIER;
 	__restore_flags(flags);
-}
-
-static int
-andes_user_mode(struct pt_regs *regs)
-{
-	return (regs->cp0_status & ST0_KSU) == KSU_USER;
 }
 
 static void andes_show_regs(struct pt_regs *regs)
@@ -440,25 +352,32 @@ void __init ld_mmu_andes(void)
 	_clear_page = andes_clear_page;
 	_copy_page = andes_copy_page;
 
-	_flush_cache_all = andes_flush_cache_all;
-	_flush_cache_mm = andes_flush_cache_mm;
-	_flush_cache_range = andes_flush_cache_range;
-	_flush_cache_page = andes_flush_cache_page;
+	_flush_cache_l1 = andes_flush_cache_l1;
+	_flush_cache_l2 = andes_flush_cache_l2;
 	_flush_cache_sigtramp = andes_flush_cache_sigtramp;
-	_flush_page_to_ram = andes_flush_page_to_ram;
 
 	_flush_tlb_all = andes_flush_tlb_all;
 	_flush_tlb_mm = andes_flush_tlb_mm;
 	_flush_tlb_range = andes_flush_tlb_range;
 	_flush_tlb_page = andes_flush_tlb_page;
+
+	switch (sc_lsize()) {
+		case 64:
+			scache_lsz64 = 1;
+			break;
+		case 128:
+			scache_lsz64 = 0;
+			break;
+		default:
+			printk("Unknown L2 line size\n");
+			while(1);
+	}
     
 	update_mmu_cache = andes_update_mmu_cache;
 
 	_show_regs = andes_show_regs;
-	_user_mode = andes_user_mode;
 
-        flush_cache_all();
-        write_32bit_cp0_register(CP0_WIRED, 0);
+        flush_cache_l1();
 
 	/*
 	 * You should never change this register:

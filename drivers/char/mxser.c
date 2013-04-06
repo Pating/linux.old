@@ -120,7 +120,7 @@
 #define CI104J_ASIC_ID  5
 
 enum {
-	MXSER_BOARD_C168_ISA = 1,
+	MXSER_BOARD_C168_ISA = 0,
 	MXSER_BOARD_C104_ISA,
 	MXSER_BOARD_CI104J,
 	MXSER_BOARD_C168_PCI,
@@ -170,10 +170,10 @@ static mxser_pciinfo mxser_pcibrds[] =
 	{PCI_VENDOR_ID_MOXA, PCI_DEVICE_ID_C104, MXSER_BOARD_C104_PCI},
 };
 
-static int ioaddr[MXSER_BOARDS] = {0, 0, 0, 0};
+static int ioaddr[MXSER_BOARDS];
 static int ttymajor = MXSERMAJOR;
 static int calloutmajor = MXSERCUMAJOR;
-static int verbose = 0;
+static int verbose;
 
 /* Variables for insmod */
 
@@ -274,7 +274,7 @@ static int mxvar_diagflag;
  * buffer across all the serial ports, since it significantly saves
  * memory if large numbers of serial ports are open.
  */
-static unsigned char *mxvar_tmp_buf = 0;
+static unsigned char *mxvar_tmp_buf;
 static struct semaphore mxvar_tmp_buf_sem;
 
 /*
@@ -618,6 +618,8 @@ int mxser_init(void)
 					       mxser_pcibrds[b].device_id, pdev);
 			if (!pdev)
 				break;
+			if (pci_enable_device(pdev))
+				continue;
 			b++;
 			hwconf.pdev = pdev;
 			printk("Found MOXA %s board(BusNo=%d,DevNo=%d)\n",
@@ -688,17 +690,18 @@ static void mxser_do_softint(void *private_)
 	struct tty_struct *tty;
 
 	tty = info->tty;
-	if (!tty)
-		return;
-	if (test_and_clear_bit(MXSER_EVENT_TXLOW, &info->event)) {
-		if ((tty->flags & (1 << TTY_DO_WRITE_WAKEUP)) &&
-		    tty->ldisc.write_wakeup)
-			(tty->ldisc.write_wakeup) (tty);
-		wake_up_interruptible(&tty->write_wait);
+	if (tty) {
+		if (test_and_clear_bit(MXSER_EVENT_TXLOW, &info->event)) {
+			if ((tty->flags & (1 << TTY_DO_WRITE_WAKEUP)) &&
+			    tty->ldisc.write_wakeup)
+				(tty->ldisc.write_wakeup) (tty);
+			wake_up_interruptible(&tty->write_wait);
+		}
+		if (test_and_clear_bit(MXSER_EVENT_HANGUP, &info->event)) {
+			tty_hangup(tty);	/* FIXME: module removal race here - AKPM */
+		}
 	}
-	if (test_and_clear_bit(MXSER_EVENT_HANGUP, &info->event)) {
-		tty_hangup(tty);
-	}
+	MOD_DEC_USE_COUNT;
 }
 
 /*
@@ -1454,7 +1457,7 @@ static inline void mxser_transmit_chars(struct mxser_struct *info)
 
 	if (info->xmit_cnt < WAKEUP_CHARS) {
 		set_bit(MXSER_EVENT_TXLOW, &info->event);
-		queue_task(&info->tqueue, &tq_scheduler);
+		schedule_task(&info->tqueue);
 	}
 	if (info->xmit_cnt <= 0) {
 		info->IER &= ~UART_IER_THRI;
@@ -1483,7 +1486,7 @@ static inline void mxser_check_modem_status(struct mxser_struct *info,
 		else if (!((info->flags & ASYNC_CALLOUT_ACTIVE) &&
 			   (info->flags & ASYNC_CALLOUT_NOHUP)))
 			set_bit(MXSER_EVENT_HANGUP, &info->event);
-		queue_task(&info->tqueue, &tq_scheduler);
+		schedule_task(&info->tqueue);
 
 	}
 	if (info->flags & ASYNC_CTS_FLOW) {
@@ -1494,7 +1497,9 @@ static inline void mxser_check_modem_status(struct mxser_struct *info,
 				outb(info->IER, info->base + UART_IER);
 
 				set_bit(MXSER_EVENT_TXLOW, &info->event);
-				queue_task(&info->tqueue, &tq_scheduler);
+				MOD_INC_USE_COUNT;
+				if (schedule_task(&info->tqueue) == 0)
+					MOD_DEC_USE_COUNT;
 			}
 		} else {
 			if (!(status & UART_MSR_CTS)) {

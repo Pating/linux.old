@@ -39,11 +39,11 @@
  *	1.10a	Andrea Arcangeli: Alpha updates
  *	1.10b	Andrew Morton: SMP lock fix
  *	1.10c	Cesar Barros: SMP locking fixes and cleanup
+ *	1.10d	Paul Gortmaker: delete paranoia check in rtc_exit
  */
 
-#define RTC_VERSION		"1.10c"
+#define RTC_VERSION		"1.10d"
 
-#define RTC_IRQ 	8	/* Can't see this changing soon.	*/
 #define RTC_IO_EXTENT	0x10	/* Only really two ports, but...	*/
 
 /*
@@ -54,6 +54,7 @@
  *	this driver.)
  */
 
+#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/types.h>
@@ -88,8 +89,6 @@ static struct fasync_struct *rtc_async_queue;
 
 static DECLARE_WAIT_QUEUE_HEAD(rtc_wait);
 
-extern spinlock_t rtc_lock;
-
 static struct timer_list rtc_irq_timer;
 
 static loff_t rtc_llseek(struct file *file, loff_t offset, int origin);
@@ -100,13 +99,13 @@ static ssize_t rtc_read(struct file *file, char *buf,
 static int rtc_ioctl(struct inode *inode, struct file *file,
 		     unsigned int cmd, unsigned long arg);
 
-#ifndef __alpha__
+#if RTC_IRQ
 static unsigned int rtc_poll(struct file *file, poll_table *wait);
 #endif
 
 static void get_rtc_time (struct rtc_time *rtc_tm);
 static void get_rtc_alm_time (struct rtc_time *alm_tm);
-#ifndef __alpha__
+#if RTC_IRQ
 static void rtc_dropped_irq(unsigned long data);
 
 static void set_rtc_irq_bit(unsigned char bit);
@@ -146,7 +145,7 @@ static unsigned long epoch = 1900;	/* year corresponding to 0x00	*/
 static const unsigned char days_in_mo[] = 
 {0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
 
-#ifndef __alpha__
+#if RTC_IRQ
 /*
  *	A very tiny interrupt handler. It runs with SA_INTERRUPT set,
  *	but there is possibility of conflicting with the set_rtc_mmss()
@@ -179,8 +178,7 @@ static void rtc_interrupt(int irq, void *dev_id, struct pt_regs *regs)
 	/* Now do the rest of the actions */
 	wake_up_interruptible(&rtc_wait);	
 
-	if (rtc_async_queue)
-		kill_fasync (rtc_async_queue, SIGIO, POLL_IN);
+	kill_fasync (&rtc_async_queue, SIGIO, POLL_IN);
 }
 #endif
 
@@ -196,7 +194,7 @@ static loff_t rtc_llseek(struct file *file, loff_t offset, int origin)
 static ssize_t rtc_read(struct file *file, char *buf,
 			size_t count, loff_t *ppos)
 {
-#ifdef __alpha__
+#if !RTC_IRQ
 	return -EIO;
 #else
 	DECLARE_WAITQUEUE(wait, current);
@@ -250,7 +248,7 @@ static int rtc_ioctl(struct inode *inode, struct file *file, unsigned int cmd,
 	struct rtc_time wtime; 
 
 	switch (cmd) {
-#ifndef __alpha__
+#if RTC_IRQ
 	case RTC_AIE_OFF:	/* Mask alarm int. enab. bit	*/
 	{
 		mask_rtc_irq_bit(RTC_AIE);
@@ -435,7 +433,7 @@ static int rtc_ioctl(struct inode *inode, struct file *file, unsigned int cmd,
 		spin_unlock_irq(&rtc_lock);
 		return 0;
 	}
-#ifndef __alpha__
+#if RTC_IRQ
 	case RTC_IRQP_READ:	/* Read the periodic IRQ rate.	*/
 	{
 		return put_user(rtc_freq, (unsigned long *)arg);
@@ -475,7 +473,7 @@ static int rtc_ioctl(struct inode *inode, struct file *file, unsigned int cmd,
 		spin_unlock_irq(&rtc_lock);
 		return 0;
 	}
-#else
+#elif !defined(CONFIG_DECSTATION)
 	case RTC_EPOCH_READ:	/* Read the epoch.	*/
 	{
 		return put_user (epoch, (unsigned long *)arg);
@@ -507,21 +505,24 @@ static int rtc_ioctl(struct inode *inode, struct file *file, unsigned int cmd,
  *	up things on a close.
  */
 
+/* We use rtc_lock to protect against concurrent opens. So the BKL is not
+ * needed here. Or anywhere else in this driver. */
 static int rtc_open(struct inode *inode, struct file *file)
 {
-	/* If someday somebody decides to remove the kernel_lock on open and
-	 * close and ioctl this is gonna get open to races */
-	if(rtc_status & RTC_IS_OPEN)
-		return -EBUSY;
+	spin_lock_irq (&rtc_lock);
 
-	MOD_INC_USE_COUNT;
+	if(rtc_status & RTC_IS_OPEN)
+		goto out_busy;
 
 	rtc_status |= RTC_IS_OPEN;
 
-	spin_lock_irq (&rtc_lock);
 	rtc_irq_data = 0;
 	spin_unlock_irq (&rtc_lock);
 	return 0;
+
+out_busy:
+	spin_unlock_irq (&rtc_lock);
+	return -EBUSY;
 }
 
 static int rtc_fasync (int fd, struct file *filp, int on)
@@ -532,7 +533,7 @@ static int rtc_fasync (int fd, struct file *filp, int on)
 
 static int rtc_release(struct inode *inode, struct file *file)
 {
-#ifndef __alpha__
+#if RTC_IRQ
 	/*
 	 * Turn off all interrupts once the device is no longer
 	 * in use, and clear the data.
@@ -557,18 +558,19 @@ static int rtc_release(struct inode *inode, struct file *file)
 	if (file->f_flags & FASYNC) {
 		rtc_fasync (-1, file, 0);
 	}
-
 #endif
-	MOD_DEC_USE_COUNT;
 
 	spin_lock_irq (&rtc_lock);
 	rtc_irq_data = 0;
 	spin_unlock_irq (&rtc_lock);
-	rtc_status = rtc_status & ~RTC_IS_OPEN;
+
+	/* No need for locking -- nobody else can do anything until this rmw is
+	 * committed, and no timer is running. */
+	rtc_status &= ~RTC_IS_OPEN;
 	return 0;
 }
 
-#ifndef __alpha__
+#if RTC_IRQ
 /* Called without the kernel lock - fine */
 static unsigned int rtc_poll(struct file *file, poll_table *wait)
 {
@@ -591,9 +593,10 @@ static unsigned int rtc_poll(struct file *file, poll_table *wait)
  */
 
 static struct file_operations rtc_fops = {
+	owner:		THIS_MODULE,
 	llseek:		rtc_llseek,
 	read:		rtc_read,
-#ifndef __alpha__
+#if RTC_IRQ
 	poll:		rtc_poll,
 #endif
 	ioctl:		rtc_ioctl,
@@ -611,7 +614,7 @@ static struct miscdevice rtc_dev=
 
 static int __init rtc_init(void)
 {
-#ifdef __alpha__
+#if defined(__alpha__) || defined(__mips__)
 	unsigned int year, ctrl;
 	unsigned long uip_watchdog;
 	char *guess = NULL;
@@ -629,7 +632,7 @@ static int __init rtc_init(void)
 			}
 		}
 	}
-	printk("rtc_init: no PC rtc found\n");
+	printk(KERN_ERR "rtc_init: no PC rtc found\n");
 	return -EIO;
 
 found:
@@ -645,7 +648,7 @@ found:
 		 * Standard way for sparc to print irq's is to use
 		 * __irq_itoa(). I think for EBus it's ok to use %d.
 		 */
-		printk("rtc: cannot register IRQ %d\n", rtc_irq);
+		printk(KERN_ERR "rtc: cannot register IRQ %d\n", rtc_irq);
 		return -EIO;
 	}
 #else
@@ -655,7 +658,7 @@ found:
 		return -EIO;
 	}
 
-#ifndef __alpha__
+#if RTC_IRQ
 	if(request_irq(RTC_IRQ, rtc_interrupt, SA_INTERRUPT, "rtc", NULL))
 	{
 		/* Yeah right, seeing as irq 8 doesn't even hit the bus. */
@@ -670,7 +673,7 @@ found:
 	misc_register(&rtc_dev);
 	create_proc_read_entry ("driver/rtc", 0, 0, rtc_read_proc, NULL);
 
-#ifdef __alpha__
+#if defined(__alpha__) || defined(__mips__)
 	rtc_freq = HZ;
 	
 	/* Each operating system on an Alpha uses its own epoch.
@@ -692,14 +695,17 @@ found:
 	if (year >= 20 && year < 48) {
 		epoch = 1980;
 		guess = "ARC console";
-	} else if (year >= 48 && year < 100) {
+	} else if (year >= 48 && year < 70) {
 		epoch = 1952;
 		guess = "Digital UNIX";
+	} else if (year >= 70 && year < 100) {
+		epoch = 1928;
+		guess = "Digital DECstation";
 	}
 	if (guess)
-		printk("rtc: %s epoch (%lu) detected\n", guess, epoch);
+		printk(KERN_INFO "rtc: %s epoch (%lu) detected\n", guess, epoch);
 #endif
-#ifndef __alpha__
+#if RTC_IRQ
 	init_timer(&rtc_irq_timer);
 	rtc_irq_timer.function = rtc_dropped_irq;
 	spin_lock_irq(&rtc_lock);
@@ -716,18 +722,6 @@ found:
 
 static void __exit rtc_exit (void)
 {
-	/* interrupts and maybe timer disabled at this point by rtc_release */
-	/* FIXME: Maybe??? */
-
-	if (rtc_status & RTC_TIMER_ON) {
-		spin_lock_irq (&rtc_lock);
-		rtc_status &= ~RTC_TIMER_ON;
-		del_timer(&rtc_irq_timer);
-		spin_unlock_irq (&rtc_lock);
-
-		printk(KERN_WARNING "rtc_exit(), and timer still running.\n");
-	}
-
 	remove_proc_entry ("driver/rtc", NULL);
 	misc_deregister(&rtc_dev);
 
@@ -735,7 +729,7 @@ static void __exit rtc_exit (void)
 	free_irq (rtc_irq, &rtc_port);
 #else
 	release_region (RTC_PORT (0), RTC_IO_EXTENT);
-#ifndef __alpha__
+#if RTC_IRQ
 	free_irq (RTC_IRQ, NULL);
 #endif
 #endif /* __sparc__ */
@@ -745,7 +739,7 @@ module_init(rtc_init);
 module_exit(rtc_exit);
 EXPORT_NO_SYMBOLS;
 
-#ifndef __alpha__
+#if RTC_IRQ
 /*
  * 	At IRQ rates >= 4096Hz, an interrupt may get lost altogether.
  *	(usually during an IDE disk interrupt, with IRQ unmasking off)
@@ -776,13 +770,12 @@ static void rtc_dropped_irq(unsigned long data)
 
 	spin_unlock_irq(&rtc_lock);
 
-	printk(KERN_INFO "rtc: lost some interrupts at %ldHz.\n", freq);
+	printk(KERN_WARNING "rtc: lost some interrupts at %ldHz.\n", freq);
 
 	/* Now we have new data */
 	wake_up_interruptible(&rtc_wait);
 
-	if (rtc_async_queue)
-		kill_fasync (rtc_async_queue, SIGIO, POLL_IN);
+	kill_fasync (&rtc_async_queue, SIGIO, POLL_IN);
 }
 #endif
 
@@ -972,7 +965,7 @@ static void get_rtc_alm_time(struct rtc_time *alm_tm)
 	}
 }
 
-#ifndef __alpha__
+#if RTC_IRQ
 /*
  * Used to disable/enable interrupts for any one of UIE, AIE, PIE.
  * Rumour has it that if you frob the interrupt enable/disable

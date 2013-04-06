@@ -814,7 +814,7 @@ static int receive(struct net_device *dev, int cnt)
 #ifdef __i386__
 #define GETTICK(x)                                                \
 ({                                                                \
-	if (current_cpu_data.x86_capability & X86_FEATURE_TSC)    \
+	if (cpu_has_tsc)                                          \
 		__asm__ __volatile__("rdtsc" : "=a" (x) : : "dx");\
 })
 #else /* __i386__ */
@@ -1023,7 +1023,8 @@ static int epp_open(struct net_device *dev)
 	struct baycom_state *bc;
         struct parport *pp;
 	const struct tq_struct run_bh = {
-		0, 0, (void *)(void *)epp_bh, dev
+		routine: (void *)(void *)epp_bh,
+		data: dev
 	};
 	unsigned int i, j;
 	unsigned char tmp[128];
@@ -1506,7 +1507,7 @@ module_exit(cleanup_baycomepp);
 
 static int __init baycom_epp_setup(char *str)
 {
-        static unsigned __initlocaldata nr_dev = 0;
+        static unsigned __initdata nr_dev = 0;
 	int ints[2];
 
         if (nr_dev >= NR_PORTS)

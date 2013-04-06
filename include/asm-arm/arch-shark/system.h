@@ -1,21 +1,28 @@
 /*
- * linux/include/asm-arm/arch-ebsa110/system.h
+ * linux/include/asm-arm/arch-shark/system.h
  *
  * Copyright (c) 1996-1998 Russell King.
  */
 #ifndef __ASM_ARCH_SYSTEM_H
 #define __ASM_ARCH_SYSTEM_H
 
-extern __inline__ void arch_reset(char mode)
+#include <asm/io.h>
+
+static void arch_reset(char mode)
 {
-	/*
-	 * loop endlessly
-	 */
+	short temp;
 	cli();
+	/* Reset the Machine via pc[3] of the sequoia chipset */
+	outw(0x09,0x24);
+	temp=inw(0x26);
+	temp = temp | (1<<3) | (1<<10);
+	outw(0x09,0x24);
+	outw(temp,0x26);
+
 }
 
-#define arch_power_off()   do { } while (0)
-#define arch_do_idle() do {} while (0)
-/*cpu_do_idle()*/
+static void arch_idle(void)
+{
+}
 
 #endif

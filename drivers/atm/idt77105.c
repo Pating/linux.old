@@ -48,10 +48,12 @@ static void idt77105_stats_timer_func(unsigned long);
 static void idt77105_restart_timer_func(unsigned long);
 
 
-static struct timer_list stats_timer = { NULL, NULL, 0L, 0L,
-                                         &idt77105_stats_timer_func };
-static struct timer_list restart_timer = { NULL, NULL, 0L, 0L, 
-                                           &idt77105_restart_timer_func };
+static struct timer_list stats_timer = {
+    function:	&idt77105_stats_timer_func
+};
+static struct timer_list restart_timer = {
+    function:	&idt77105_restart_timer_func
+};
 static int start_timer = 1;
 static struct idt77105_priv *idt77105_all = NULL;
 
@@ -334,9 +336,7 @@ static const struct atmphy_ops idt77105_ops = {
 
 int __init idt77105_init(struct atm_dev *dev)
 {
-#ifdef MODULE
 	MOD_INC_USE_COUNT;
-#endif /* MODULE */
 
 	dev->phy = &idt77105_ops;
 	return 0;

@@ -1,5 +1,5 @@
 /*
- *  $Id: ipconfig.c,v 1.31 2000/05/03 06:37:06 davem Exp $
+ *  $Id: ipconfig.c,v 1.34 2000/07/26 01:04:18 davem Exp $
  *
  *  Automatic Configuration of IP -- use BOOTP or RARP or user-supplied
  *  information to configure own IP address and routes.
@@ -40,7 +40,6 @@
 #include <net/ip.h>
 #include <net/ipconfig.h>
 
-#include <asm/segment.h>
 #include <asm/uaccess.h>
 #include <asm/checksum.h>
 
@@ -167,6 +166,7 @@ static void __init ic_close_devs(void)
 	struct ic_device *d, *next;
 	struct net_device *dev;
 
+	rtnl_shlock();
 	next = ic_first_dev;
 	while ((d = next)) {
 		next = d->next;
@@ -175,8 +175,9 @@ static void __init ic_close_devs(void)
 			DBG(("IP-Config: Downing %s\n", dev->name));
 			dev_change_flags(dev, d->flags);
 		}
-		kfree_s(d, sizeof(struct ic_device));
+		kfree(d);
 	}
+	rtnl_shunlock();
 }
 
 /*
@@ -782,7 +783,7 @@ static int __init ic_dynamic(void)
 		printk(".");
 		jiff = jiffies + timeout;
 		while (jiffies < jiff && !ic_got_reply)
-			;
+			barrier();
 		if (ic_got_reply) {
 			printk(" OK\n");
 			break;

@@ -17,6 +17,21 @@
 #include <asm/pgalloc.h>
 #include <asm/processor.h>
 
+/*
+ * For the fast tlb miss handlers, we currently keep a per cpu array
+ * of pointers to the current pgd for each processor. Also, the proc.
+ * id is stuffed into the context register. This should be changed to 
+ * use the processor id via current->processor, where current is stored
+ * in watchhi/lo. The context register should be used to contiguously
+ * map the page tables.
+ */
+#define TLBMISS_HANDLER_SETUP_PGD(pgd) \
+	pgd_current[smp_processor_id()] = (unsigned long)(pgd)
+#define TLBMISS_HANDLER_SETUP() \
+	set_context((unsigned long) smp_processor_id() << (23 + 3)); \
+	TLBMISS_HANDLER_SETUP_PGD(swapper_pg_dir)
+extern unsigned long pgd_current[];
+
 #ifndef CONFIG_SMP
 #define CPU_CONTEXT(cpu, mm)	(mm)->context
 #else
@@ -55,27 +70,23 @@ get_new_cpu_mmu_context(struct mm_struct *mm, unsigned long cpu)
  * Initialize the context related info for a new mm_struct
  * instance.
  */
-extern inline void
+extern inline int
 init_new_context(struct task_struct *tsk, struct mm_struct *mm)
 {
 #ifndef CONFIG_SMP
 	mm->context = 0;
 #else
-	/* Make sure not to do anything during a clone-vm operation */
-	if ((current == tsk) || (current->mm != mm)) {
-		mm->context = (unsigned long)kmalloc(smp_num_cpus * 
-					sizeof(unsigned long), GFP_KERNEL);
-		/*
-	 	 * Init the "context" values so that a tlbpid allocation 
-	 	 * happens on the first switch.
-	 	 */
-		if (mm->context)
-			memset((void *)mm->context, 0, smp_num_cpus * 
-							sizeof(unsigned long));
-		else
-			printk("Warning: init_new_context failed\n");
-	}
+	mm->context = (unsigned long)kmalloc(smp_num_cpus * 
+				sizeof(unsigned long), GFP_KERNEL);
+	/*
+ 	 * Init the "context" values so that a tlbpid allocation 
+	 * happens on the first switch.
+ 	 */
+	if (mm->context == 0)
+		return -ENOMEM;
+	memset((void *)mm->context, 0, smp_num_cpus * sizeof(unsigned long));
 #endif
+	return 0;
 }
 
 extern inline void switch_mm(struct mm_struct *prev, struct mm_struct *next,
@@ -85,7 +96,8 @@ extern inline void switch_mm(struct mm_struct *prev, struct mm_struct *next,
 	if ((CPU_CONTEXT(cpu, next) ^ ASID_CACHE(cpu)) & ASID_VERSION_MASK)
 		get_new_cpu_mmu_context(next, cpu);
 
-	set_entryhi(CPU_CONTEXT(cpu, next));
+	set_entryhi(CPU_CONTEXT(cpu, next) & 0xff);
+	TLBMISS_HANDLER_SETUP_PGD(next->pgd);
 }
 
 /*
@@ -110,7 +122,8 @@ activate_mm(struct mm_struct *prev, struct mm_struct *next)
 	/* Unconditionally get a new ASID.  */
 	get_new_cpu_mmu_context(next, smp_processor_id());
 
-	set_entryhi(CPU_CONTEXT(smp_processor_id(), next));
+	set_entryhi(CPU_CONTEXT(smp_processor_id(), next) & 0xff);
+	TLBMISS_HANDLER_SETUP_PGD(next->pgd);
 }
 
 #endif /* _ASM_MMU_CONTEXT_H */

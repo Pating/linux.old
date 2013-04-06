@@ -25,7 +25,7 @@ do_revalidate(struct dentry *dentry)
 }
 
 
-#if !defined(__alpha__) && !defined(__sparc__) && !defined(__ia64__) && !defined(__s390__)
+#if !defined(__alpha__) && !defined(__sparc__) && !defined(__ia64__) && !defined(__s390__) && !defined(__hppa__)
 
 /*
  * For backward compatibility?  Maybe this should be moved
@@ -36,10 +36,13 @@ static int cp_old_stat(struct inode * inode, struct __old_kernel_stat * statbuf)
 	static int warncount = 5;
 	struct __old_kernel_stat tmp;
 
-	if (warncount) {
+	if (warncount > 0) {
 		warncount--;
 		printk("VFS: Warning: %s using old stat() call. Recompile your binary.\n",
 			current->comm);
+	} else if (warncount < 0) {
+		/* it's laughable, but... */
+		warncount = 0;
 	}
 
 	tmp.st_dev = kdev_t_to_nr(inode->i_dev);
@@ -49,6 +52,10 @@ static int cp_old_stat(struct inode * inode, struct __old_kernel_stat * statbuf)
 	SET_OLDSTAT_UID(tmp, inode->i_uid);
 	SET_OLDSTAT_GID(tmp, inode->i_gid);
 	tmp.st_rdev = kdev_t_to_nr(inode->i_rdev);
+#if BITS_PER_LONG == 32
+	if (inode->i_size > 0x7fffffff)
+		return -EOVERFLOW;
+#endif	
 	tmp.st_size = inode->i_size;
 	tmp.st_atime = inode->i_atime;
 	tmp.st_mtime = inode->i_mtime;
@@ -71,6 +78,10 @@ static int cp_new_stat(struct inode * inode, struct stat * statbuf)
 	SET_STAT_UID(tmp, inode->i_uid);
 	SET_STAT_GID(tmp, inode->i_gid);
 	tmp.st_rdev = kdev_t_to_nr(inode->i_rdev);
+#if BITS_PER_LONG == 32
+	if (inode->i_size > 0x7fffffff)
+		return -EOVERFLOW;
+#endif	
 	tmp.st_size = inode->i_size;
 	tmp.st_atime = inode->i_atime;
 	tmp.st_mtime = inode->i_mtime;
@@ -115,7 +126,7 @@ static int cp_new_stat(struct inode * inode, struct stat * statbuf)
 }
 
 
-#if !defined(__alpha__) && !defined(__sparc__) && !defined(__ia64__) && !defined(__s390__)
+#if !defined(__alpha__) && !defined(__sparc__) && !defined(__ia64__) && !defined(__s390__) && !defined(__hppa__)
 /*
  * For backward compatibility?  Maybe this should be moved
  * into arch/i386 instead?
@@ -125,7 +136,6 @@ asmlinkage long sys_stat(char * filename, struct __old_kernel_stat * statbuf)
 	struct nameidata nd;
 	int error;
 
-	lock_kernel();
 	error = user_path_walk(filename, &nd);
 	if (!error) {
 		error = do_revalidate(nd.dentry);
@@ -133,7 +143,6 @@ asmlinkage long sys_stat(char * filename, struct __old_kernel_stat * statbuf)
 			error = cp_old_stat(nd.dentry->d_inode, statbuf);
 		path_release(&nd);
 	}
-	unlock_kernel();
 	return error;
 }
 #endif
@@ -143,7 +152,6 @@ asmlinkage long sys_newstat(char * filename, struct stat * statbuf)
 	struct nameidata nd;
 	int error;
 
-	lock_kernel();
 	error = user_path_walk(filename, &nd);
 	if (!error) {
 		error = do_revalidate(nd.dentry);
@@ -151,11 +159,10 @@ asmlinkage long sys_newstat(char * filename, struct stat * statbuf)
 			error = cp_new_stat(nd.dentry->d_inode, statbuf);
 		path_release(&nd);
 	}
-	unlock_kernel();
 	return error;
 }
 
-#if !defined(__alpha__) && !defined(__sparc__) && !defined(__ia64__) && !defined(__s390__)
+#if !defined(__alpha__) && !defined(__sparc__) && !defined(__ia64__) && !defined(__s390__) && !defined(__hppa__)
 
 /*
  * For backward compatibility?  Maybe this should be moved
@@ -166,7 +173,6 @@ asmlinkage long sys_lstat(char * filename, struct __old_kernel_stat * statbuf)
 	struct nameidata nd;
 	int error;
 
-	lock_kernel();
 	error = user_path_walk_link(filename, &nd);
 	if (!error) {
 		error = do_revalidate(nd.dentry);
@@ -174,7 +180,6 @@ asmlinkage long sys_lstat(char * filename, struct __old_kernel_stat * statbuf)
 			error = cp_old_stat(nd.dentry->d_inode, statbuf);
 		path_release(&nd);
 	}
-	unlock_kernel();
 	return error;
 }
 
@@ -185,7 +190,6 @@ asmlinkage long sys_newlstat(char * filename, struct stat * statbuf)
 	struct nameidata nd;
 	int error;
 
-	lock_kernel();
 	error = user_path_walk_link(filename, &nd);
 	if (!error) {
 		error = do_revalidate(nd.dentry);
@@ -193,11 +197,10 @@ asmlinkage long sys_newlstat(char * filename, struct stat * statbuf)
 			error = cp_new_stat(nd.dentry->d_inode, statbuf);
 		path_release(&nd);
 	}
-	unlock_kernel();
 	return error;
 }
 
-#if !defined(__alpha__) && !defined(__sparc__) && !defined(__ia64__) && !defined(__s390__)
+#if !defined(__alpha__) && !defined(__sparc__) && !defined(__ia64__) && !defined(__s390__) && !defined(__hppa__)
 
 /*
  * For backward compatibility?  Maybe this should be moved
@@ -208,7 +211,6 @@ asmlinkage long sys_fstat(unsigned int fd, struct __old_kernel_stat * statbuf)
 	struct file * f;
 	int err = -EBADF;
 
-	lock_kernel();
 	f = fget(fd);
 	if (f) {
 		struct dentry * dentry = f->f_dentry;
@@ -218,7 +220,6 @@ asmlinkage long sys_fstat(unsigned int fd, struct __old_kernel_stat * statbuf)
 			err = cp_old_stat(dentry->d_inode, statbuf);
 		fput(f);
 	}
-	unlock_kernel();
 	return err;
 }
 
@@ -229,7 +230,6 @@ asmlinkage long sys_newfstat(unsigned int fd, struct stat * statbuf)
 	struct file * f;
 	int err = -EBADF;
 
-	lock_kernel();
 	f = fget(fd);
 	if (f) {
 		struct dentry * dentry = f->f_dentry;
@@ -239,7 +239,6 @@ asmlinkage long sys_newfstat(unsigned int fd, struct stat * statbuf)
 			err = cp_new_stat(dentry->d_inode, statbuf);
 		fput(f);
 	}
-	unlock_kernel();
 	return err;
 }
 
@@ -251,7 +250,6 @@ asmlinkage long sys_readlink(const char * path, char * buf, int bufsiz)
 	if (bufsiz <= 0)
 		return -EINVAL;
 
-	lock_kernel();
 	error = user_path_walk_link(path, &nd);
 	if (!error) {
 		struct inode * inode = nd.dentry->d_inode;
@@ -264,13 +262,12 @@ asmlinkage long sys_readlink(const char * path, char * buf, int bufsiz)
 		}
 		path_release(&nd);
 	}
-	unlock_kernel();
 	return error;
 }
 
 
 /* ---------- LFS-64 ----------- */
-#if !defined(__alpha__) && !defined(__ia64__)
+#if !defined(__alpha__) && !defined (__ia64__) && !defined(__mips64)
 
 static long cp_new_stat64(struct inode * inode, struct stat64 * statbuf)
 {
@@ -280,6 +277,9 @@ static long cp_new_stat64(struct inode * inode, struct stat64 * statbuf)
 	memset(&tmp, 0, sizeof(tmp));
 	tmp.st_dev = kdev_t_to_nr(inode->i_dev);
 	tmp.st_ino = inode->i_ino;
+#ifdef STAT64_HAS_BROKEN_ST_INO
+	tmp.__st_ino = inode->i_ino;
+#endif
 	tmp.st_mode = inode->i_mode;
 	tmp.st_nlink = inode->i_nlink;
 	tmp.st_uid = inode->i_uid;
@@ -333,7 +333,6 @@ asmlinkage long sys_stat64(char * filename, struct stat64 * statbuf, long flags)
 	struct nameidata nd;
 	int error;
 
-	lock_kernel();
 	error = user_path_walk(filename, &nd);
 	if (!error) {
 		error = do_revalidate(nd.dentry);
@@ -341,7 +340,6 @@ asmlinkage long sys_stat64(char * filename, struct stat64 * statbuf, long flags)
 			error = cp_new_stat64(nd.dentry->d_inode, statbuf);
 		path_release(&nd);
 	}
-	unlock_kernel();
 	return error;
 }
 
@@ -350,7 +348,6 @@ asmlinkage long sys_lstat64(char * filename, struct stat64 * statbuf, long flags
 	struct nameidata nd;
 	int error;
 
-	lock_kernel();
 	error = user_path_walk_link(filename, &nd);
 	if (!error) {
 		error = do_revalidate(nd.dentry);
@@ -358,7 +355,6 @@ asmlinkage long sys_lstat64(char * filename, struct stat64 * statbuf, long flags
 			error = cp_new_stat64(nd.dentry->d_inode, statbuf);
 		path_release(&nd);
 	}
-	unlock_kernel();
 	return error;
 }
 
@@ -367,7 +363,6 @@ asmlinkage long sys_fstat64(unsigned long fd, struct stat64 * statbuf, long flag
 	struct file * f;
 	int err = -EBADF;
 
-	lock_kernel();
 	f = fget(fd);
 	if (f) {
 		struct dentry * dentry = f->f_dentry;
@@ -377,7 +372,6 @@ asmlinkage long sys_fstat64(unsigned long fd, struct stat64 * statbuf, long flag
 			err = cp_new_stat64(dentry->d_inode, statbuf);
 		fput(f);
 	}
-	unlock_kernel();
 	return err;
 }
 

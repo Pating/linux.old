@@ -225,7 +225,9 @@ void gunzip(void *dst, int dstlen, unsigned char *src, int *lenp)
 	s.avail_out = dstlen;
 	r = inflate(&s, Z_FINISH);
 	if (r != Z_OK && r != Z_STREAM_END) {
-		puts("inflate returned %d\n");
+		puts("inflate returned ");
+		puthex(r);
+		puts("\n");
 		exit();
 	}
 	*lenp = s.next_out - (unsigned char *) dst;
@@ -267,6 +269,11 @@ decompress_kernel(unsigned long load_addr, int num_words, unsigned long cksum, b
 	 */
 #ifdef CONFIG_MBX
 	cmd_line = (char *)(load_addr - 0x10000);
+
+	/* To be like everyone else, we need one too, although this
+	 * board information is passed from the boot rom.
+	 */
+	bp->bi_baudrate = 9600;
 #else
 	cmd_line = (char *)(0x200000);
 #endif

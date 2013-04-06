@@ -8,7 +8,7 @@
  *		as published by the Free Software Foundation; either version
  *		2 of the License, or (at your option) any later version.
  *
- * Version:	$Id: af_unix.c,v 1.96 2000/05/12 23:51:26 davem Exp $
+ * Version:	$Id: af_unix.c,v 1.108 2000/11/10 04:02:04 davem Exp $
  *
  * Fixes:
  *		Linus Torvalds	:	Assorted bug cures.
@@ -46,6 +46,7 @@
  *		Artur Skawina   :	Hash function optimizations
  *	     Alexey Kuznetsov   :	Full scale SMP. Lot of bugs are introduced 8)
  *	      Malcolm Beattie   :	Set peercred for socketpair
+ *	     Michal Ostrowski   :       Module initialization cleanup.
  *
  *
  * Known differences from reference BSD that was tested:
@@ -306,6 +307,27 @@ static void unix_write_space(struct sock *sk)
 	read_unlock(&sk->callback_lock);
 }
 
+/* When dgram socket disconnects (or changes its peer), we clear its receive
+ * queue of packets arrived from previous peer. First, it allows to do
+ * flow control based only on wmem_alloc; second, sk connected to peer
+ * may receive messages only from that peer. */
+static void unix_dgram_disconnected(struct sock *sk, struct sock *other)
+{
+	if (skb_queue_len(&sk->receive_queue)) {
+		skb_queue_purge(&sk->receive_queue);
+		wake_up_interruptible_all(&sk->protinfo.af_unix.peer_wait);
+
+		/* If one link of bidirectional dgram pipe is disconnected,
+		 * we signal error. Messages are lost. Do not make this,
+		 * when peer was not connected to us.
+		 */
+		if (!other->dead && unix_peer(other) == sk) {
+			other->err = ECONNRESET;
+			other->error_report(other);
+		}
+	}
+}
+
 static void unix_sock_destructor(struct sock *sk)
 {
 	skb_queue_purge(&sk->receive_queue);
@@ -381,10 +403,8 @@ static int unix_release_sock (unix_socket *sk, int embrion)
 	}
 
 	if (dentry) {
-		lock_kernel();
 		dput(dentry);
 		mntput(mnt);
-		unlock_kernel();
 	}
 
 	sock_put(sk);
@@ -445,7 +465,7 @@ static struct sock * unix_create1(struct socket *sock)
 {
 	struct sock *sk;
 
-	if (atomic_read(&unix_nr_socks) >= 2*max_files)
+	if (atomic_read(&unix_nr_socks) >= 2*files_stat.max_files)
 		return NULL;
 
 	MOD_INC_USE_COUNT;
@@ -574,14 +594,11 @@ static unix_socket *unix_find_other(struct sockaddr_un *sunname, int len,
 	int err = 0;
 	
 	if (sunname->sun_path[0]) {
-		/* Do not believe to VFS, grab kernel lock */
-		lock_kernel();
-		if (path_init(sunname->sun_path, LOOKUP_POSITIVE, &nd))
+		if (path_init(sunname->sun_path, 
+			      LOOKUP_POSITIVE|LOOKUP_FOLLOW, &nd))
 			err = path_walk(sunname->sun_path, &nd);
-		if (err) {
-			unlock_kernel();
+		if (err)
 			goto fail;
-		}
 		err = permission(nd.dentry->d_inode,MAY_WRITE);
 		if (err)
 			goto put_fail;
@@ -594,7 +611,6 @@ static unix_socket *unix_find_other(struct sockaddr_un *sunname, int len,
 			goto put_fail;
 
 		path_release(&nd);
-		unlock_kernel();
 
 		err=-EPROTOTYPE;
 		if (u->type != type) {
@@ -611,7 +627,6 @@ static unix_socket *unix_find_other(struct sockaddr_un *sunname, int len,
 
 put_fail:
 	path_release(&nd);
-	unlock_kernel();
 fail:
 	*error=err;
 	return NULL;
@@ -660,23 +675,45 @@ static int unix_bind(struct socket *sock, struct sockaddr *uaddr, int addr_len)
 	atomic_set(&addr->refcnt, 1);
 
 	if (sunaddr->sun_path[0]) {
-		lock_kernel();
 		err = 0;
+		/*
+		 * Get the parent directory, calculate the hash for last
+		 * component.
+		 */
 		if (path_init(sunaddr->sun_path, LOOKUP_PARENT, &nd))
 			err = path_walk(sunaddr->sun_path, &nd);
 		if (err)
 			goto out_mknod_parent;
+		/*
+		 * Yucky last component or no last component at all?
+		 * (foo/., foo/.., /////)
+		 */
 		err = -EEXIST;
 		if (nd.last_type != LAST_NORM)
 			goto out_mknod;
+		/*
+		 * Lock the directory.
+		 */
 		down(&nd.dentry->d_inode->i_sem);
+		/*
+		 * Do the final lookup.
+		 */
 		dentry = lookup_hash(&nd.last, nd.dentry);
 		err = PTR_ERR(dentry);
 		if (IS_ERR(dentry))
 			goto out_mknod_unlock;
 		err = -ENOENT;
+		/*
+		 * Special case - lookup gave negative, but... we had foo/bar/
+		 * From the vfs_mknod() POV we just have a negative dentry -
+		 * all is fine. Let's be bastards - you had / on the end, you've
+		 * been asking for (non-existent) directory. -ENOENT for you.
+		 */
 		if (nd.last.name[nd.last.len] && !dentry->d_inode)
 			goto out_mknod_dput;
+		/*
+		 * All right, let's create it.
+		 */
 		err = vfs_mknod(nd.dentry->d_inode, dentry,
 			S_IFSOCK|sock->inode->i_mode, 0);
 		if (err)
@@ -684,7 +721,6 @@ static int unix_bind(struct socket *sock, struct sockaddr *uaddr, int addr_len)
 		up(&nd.dentry->d_inode->i_sem);
 		dput(nd.dentry);
 		nd.dentry = dentry;
-		unlock_kernel();
 
 		addr->hash = UNIX_HASH_SIZE;
 	}
@@ -725,7 +761,6 @@ out_mknod_unlock:
 out_mknod:
 	path_release(&nd);
 out_mknod_parent:
-	unlock_kernel();
 	if (err==-EEXIST)
 		err=-EADDRINUSE;
 	unix_release_addr(addr);
@@ -772,12 +807,18 @@ static int unix_dgram_connect(struct socket *sock, struct sockaddr *addr,
 	 * If it was connected, reconnect.
 	 */
 	if (unix_peer(sk)) {
-		sock_put(unix_peer(sk));
-		unix_peer(sk)=NULL;
+		struct sock *old_peer = unix_peer(sk);
+		unix_peer(sk)=other;
+		unix_state_wunlock(sk);
+
+		if (other != old_peer)
+			unix_dgram_disconnected(sk, old_peer);
+		sock_put(old_peer);
+	} else {
+		unix_peer(sk)=other;
+		unix_state_wunlock(sk);
 	}
-	unix_peer(sk)=other;
-	unix_state_wunlock(sk);
-	return 0;
+ 	return 0;
 
 out_unlock:
 	unix_state_wunlock(sk);
@@ -791,7 +832,7 @@ static long unix_wait_for_peer(unix_socket *other, long timeo)
 	int sched;
 	DECLARE_WAITQUEUE(wait, current);
 
-	__set_current_state(TASK_INTERRUPTIBLE|TASK_EXCLUSIVE);
+	__set_current_state(TASK_INTERRUPTIBLE);
 	add_wait_queue_exclusive(&other->protinfo.af_unix.peer_wait, &wait);
 
 	sched = (!other->dead &&
@@ -936,11 +977,8 @@ restart:
 		newsk->protinfo.af_unix.addr=other->protinfo.af_unix.addr;
 	}
 	if (other->protinfo.af_unix.dentry) {
-		/* Damn, even dget is not SMP safe. It becomes ridiculous... */
-		lock_kernel();
 		newsk->protinfo.af_unix.dentry=dget(other->protinfo.af_unix.dentry);
 		newsk->protinfo.af_unix.mnt=mntget(other->protinfo.af_unix.mnt);
-		unlock_kernel();
 	}
 
 	/* Set credentials */
@@ -1089,9 +1127,8 @@ static void unix_destruct_fds(struct sk_buff *skb)
 	unix_detach_fds(&scm, skb);
 
 	/* Alas, it calls VFS */
-	lock_kernel();
+	/* So fscking what? fput() had been SMP-safe since the last Summer */
 	scm_destroy(&scm);
-	unlock_kernel();
 	sock_wfree(skb);
 }
 
@@ -1188,11 +1225,15 @@ restart:
 		err = 0;
 		unix_state_wlock(sk);
 		if (unix_peer(sk) == other) {
-			sock_put(other);
 			unix_peer(sk)=NULL;
+			unix_state_wunlock(sk);
+
+			unix_dgram_disconnected(sk, other);
+			sock_put(other);
 			err = -ECONNREFUSED;
+		} else {
+			unix_state_wunlock(sk);
 		}
-		unix_state_wunlock(sk);
 
 		other = NULL;
 		if (err)
@@ -1204,7 +1245,8 @@ restart:
 	if (other->shutdown&RCV_SHUTDOWN)
 		goto out_unlock;
 
-	if (skb_queue_len(&other->receive_queue) > other->max_ack_backlog) {
+	if (unix_peer(other) != sk &&
+	    skb_queue_len(&other->receive_queue) > other->max_ack_backlog) {
 		if (!timeo) {
 			err = -EAGAIN;
 			goto out_unlock;
@@ -1330,8 +1372,8 @@ static int unix_stream_sendmsg(struct socket *sock, struct msghdr *msg, int len,
 	return sent;
 
 pipe_err_free:
-	kfree_skb(skb);
 	unix_state_runlock(other);
+	kfree_skb(skb);
 pipe_err:
 	if (sent==0 && !(msg->msg_flags&MSG_NOSIGNAL))
 		send_sig(SIGPIPE,current,0);
@@ -1625,7 +1667,6 @@ static int unix_shutdown(struct socket *sock, int mode)
 	return 0;
 }
 
-		
 static int unix_ioctl(struct socket *sock, unsigned int cmd, unsigned long arg)
 {
 	struct sock *sk = sock->sk;
@@ -1655,7 +1696,7 @@ static int unix_ioctl(struct socket *sock, unsigned int cmd, unsigned long arg)
 		}
 
 		default:
-			err = -EINVAL;
+			err = dev_ioctl(cmd, (void *)arg);
 			break;
 	}
 	return err;
@@ -1721,7 +1762,7 @@ static int unix_read_proc(char *buffer, char **start, off_t offset,
 			s->socket ?
 			(s->state == TCP_ESTABLISHED ? SS_CONNECTED : SS_UNCONNECTED) :
 			(s->state == TCP_ESTABLISHED ? SS_CONNECTING : SS_DISCONNECTING),
-			s->socket ? s->socket->inode->i_ino : 0);
+			sock_i_ino(s));
 
 		if (s->protinfo.af_unix.addr)
 		{
@@ -1805,16 +1846,12 @@ struct net_proto_family unix_family_ops = {
 	unix_create
 };
 
-#ifdef MODULE
 #ifdef CONFIG_SYSCTL
 extern void unix_sysctl_register(void);
 extern void unix_sysctl_unregister(void);
 #endif
 
-int init_module(void)
-#else
-void __init unix_proto_init(struct net_proto *pro)
-#endif
+static int __init af_unix_init(void)
 {
 	struct sk_buff *dummy_skb;
 	
@@ -1822,28 +1859,21 @@ void __init unix_proto_init(struct net_proto *pro)
 	if (sizeof(struct unix_skb_parms) > sizeof(dummy_skb->cb))
 	{
 		printk(KERN_CRIT "unix_proto_init: panic\n");
-#ifdef MODULE
 		return -1;
-#else
-		return;
-#endif
 	}
 	sock_register(&unix_family_ops);
 #ifdef CONFIG_PROC_FS
 	create_proc_read_entry("net/unix", 0, 0, unix_read_proc, NULL);
 #endif
 
-#ifdef MODULE
 #ifdef CONFIG_SYSCTL
 	unix_sysctl_register();
 #endif
 
 	return 0;
-#endif
 }
 
-#ifdef MODULE
-void cleanup_module(void)
+static void __exit af_unix_exit(void)
 {
 	sock_unregister(PF_UNIX);
 #ifdef CONFIG_SYSCTL
@@ -1853,7 +1883,9 @@ void cleanup_module(void)
 	remove_proc_entry("net/unix", 0);
 #endif
 }
-#endif
+
+module_init(af_unix_init);
+module_exit(af_unix_exit);
 
 /*
  * Local variables:

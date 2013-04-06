@@ -31,7 +31,6 @@
 #endif
 
 #include "sound_config.h"
-#include "soundmodule.h"
 
 #include "awe_wave.h"
 #include "awe_hw.h"
@@ -496,27 +495,28 @@ static int ctrls[AWE_MD_END];
 
 static struct synth_operations awe_operations =
 {
-	"EMU8K",
-	&awe_info,
-	0,
-	SYNTH_TYPE_SAMPLE,
-	SAMPLE_TYPE_AWE32,
-	awe_open,
-	awe_close,
-	awe_ioctl,
-	awe_kill_note,
-	awe_start_note,
-	awe_set_instr_2,
-	awe_reset,
-	awe_hw_control,
-	awe_load_patch,
-	awe_aftertouch,
-	awe_controller,
-	awe_panning,
-	awe_volume_method,
-	awe_bender,
-	awe_alloc,
-	awe_setup_voice
+	owner:		THIS_MODULE,
+	id:		"EMU8K",
+	info:		&awe_info,
+	midi_dev:	0,
+	synth_type:	SYNTH_TYPE_SAMPLE,
+	synth_subtype:	SAMPLE_TYPE_AWE32,
+	open:		awe_open,
+	close:		awe_close,
+	ioctl:		awe_ioctl,
+	kill_note:	awe_kill_note,
+	start_note:	awe_start_note,
+	set_instr:	awe_set_instr_2,
+	reset:		awe_reset,
+	hw_control:	awe_hw_control,
+	load_patch:	awe_load_patch,
+	aftertouch:	awe_aftertouch,
+	controller:	awe_controller,
+	panning:	awe_panning,
+	volume_method:	awe_volume_method,
+	bender:		awe_bender,
+	alloc_voice:	awe_alloc,
+	setup_voice:	awe_setup_voice
 };
 
 
@@ -575,8 +575,6 @@ static int __init _attach_awe(void)
 
 	awe_present = TRUE;
 
-	SOUND_LOCK;
-
 	return 1;
 }
 
@@ -608,7 +606,6 @@ static void __exit _unload_awe(void)
 #endif
 		sound_unload_synthdev(my_dev);
 		awe_present = FALSE;
-		SOUND_LOCK_END;
 	}
 }
 
@@ -3252,7 +3249,7 @@ remove_info(sf_list *sf, int bank, int instr)
 	int removed = 0;
 
 	prev = NULL;
-	for (p = sf->infos; p; prev = p, p = next) {
+	for (p = sf->infos; p; p = next) {
 		next = p->next;
 		if (p->type == V_ST_NORMAL &&
 		    p->bank == bank && p->instr == instr) {
@@ -3266,8 +3263,11 @@ remove_info(sf_list *sf, int bank, int instr)
 			sf->num_info--;
 			removed++;
 			kfree(p);
-		}
+		} else
+			prev = p;
 	}
+	if (removed)
+		rebuild_preset_list();
 	return removed;
 }
 
@@ -3318,7 +3318,7 @@ awe_load_info(awe_patch_info *patch, const char *addr, int count)
 		}
 		break;
 	case AWE_WR_REPLACE:
-		/* replace mode - remoe the instrument if it already exists */
+		/* replace mode - remove the instrument if it already exists */
 		remove_info(sf, hdr.bank, hdr.instr);
 		break;
 	}
@@ -4290,8 +4290,10 @@ static int awe_mixer_ioctl(int dev, unsigned int cmd, caddr_t arg);
 static int my_mixerdev = -1;
 
 static struct mixer_operations awe_mixer_operations = {
-	"AWE32 Equalizer",
-	awe_mixer_ioctl,
+	owner:	THIS_MODULE,
+	id:	"AWE",
+	name:	"AWE32 Equalizer",
+	ioctl:	awe_mixer_ioctl,
 };
 
 static void __init attach_mixer(void)
@@ -4319,7 +4321,7 @@ awe_mixer_ioctl(int dev, unsigned int cmd, caddr_t arg)
 	level = ((level & 0xff) + (level >> 8)) / 2;
 	DEBUG(0,printk("AWEMix: cmd=%x val=%d\n", cmd & 0xff, level));
 
-	if (_SIOC_DIR(cmd) & _IOC_WRITE) {
+	if (_SIOC_DIR(cmd) & _SIOC_WRITE) {
 		switch (cmd & 0xff) {
 		case SOUND_MIXER_BASS:
 			value = level * 12 / 100;
@@ -5222,17 +5224,13 @@ static int xg_control_change(MidiStatus *st, int cmd, int val);
 
 static struct midi_operations awe_midi_operations =
 {
-	{"AWE Midi Emu", 0, 0, SNDCARD_SB},
-	NULL /*&std_midi_synth*/,
-	{0}, /* input_info */
-	awe_midi_open, /*open*/
-	awe_midi_close, /*close*/
-	awe_midi_ioctl, /*ioctl*/
-	awe_midi_outputc, /*outputc*/
-	NULL /*start_read*/,
-	NULL /*end_read*/,
-	NULL, /* kick */
-	NULL, /* command */
+	owner:		THIS_MODULE,
+	info:		{"AWE Midi Emu", 0, 0, SNDCARD_SB},
+	in_info:	{0},
+	open:		awe_midi_open, /*open*/
+	close:		awe_midi_close, /*close*/
+	ioctl:		awe_midi_ioctl, /*ioctl*/
+	outputc:	awe_midi_outputc, /*outputc*/
 };
 
 static int my_mididev = -1;

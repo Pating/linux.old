@@ -1,4 +1,4 @@
-/* $Id: processor.h,v 1.64 2000/05/09 17:40:15 davem Exp $
+/* $Id: processor.h,v 1.68 2000/12/31 10:05:43 davem Exp $
  * include/asm-sparc64/processor.h
  *
  * Copyright (C) 1996 David S. Miller (davem@caip.rutgers.edu)
@@ -80,6 +80,7 @@ struct thread_struct {
 #define SPARC_FLAG_32BIT        0x04    /* task is older 32-bit binary		*/
 #define SPARC_FLAG_NEWCHILD     0x08    /* task is just-spawned child process	*/
 #define SPARC_FLAG_PERFCTR	0x10    /* task has performance counters active	*/
+#define SPARC_FLAG_MMAPSHARED	0x20    /* task wants a shared mmap             */
 
 #define FAULT_CODE_WRITE	0x01	/* Write access, implies D-TLB		*/
 #define FAULT_CODE_DTLB		0x02	/* Miss happened in D-TLB		*/
@@ -219,7 +220,6 @@ extern pid_t kernel_thread(int (*fn)(void *), void * arg, unsigned long flags);
 
 #define copy_segments(tsk, mm)		do { } while (0)
 #define release_segments(mm)		do { } while (0)
-#define forget_segments()		do { } while (0)
 
 #define get_wchan(__TSK) \
 ({	extern void scheduling_functions_start_here(void); \
@@ -259,7 +259,7 @@ __out:	__ret; \
 /* Allocation and freeing of task_struct and kernel stack. */
 #define alloc_task_struct()   ((struct task_struct *)__get_free_pages(GFP_KERNEL, 1))
 #define free_task_struct(tsk) free_pages((unsigned long)(tsk),1)
-#define get_task_struct(tsk)      atomic_inc(&mem_map[MAP_NR(tsk)].count)
+#define get_task_struct(tsk)      atomic_inc(&virt_to_page(tsk)->count)
 
 #define init_task	(init_task_union.task)
 #define init_stack	(init_task_union.stack)

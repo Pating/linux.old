@@ -3237,7 +3237,7 @@ static void i2o_proc_remove_controller(struct i2o_controller *pctrl,
 	for(dev=pctrl->devices; dev; dev=dev->next)
 		i2o_proc_remove_device(dev);
 
-	if(!pctrl->proc_entry->count)
+	if(!atomic_read(&pctrl->proc_entry->count))
 	{
 		sprintf(buff, "iop%d", pctrl->unit);
 
@@ -3257,7 +3257,7 @@ void i2o_proc_remove_device(struct i2o_device *dev)
 
 	i2o_device_notify_off(dev, &i2o_proc_handler);
 	/* Would it be safe to remove _files_ even if they are in use? */
-	if((de) && (!de->count))
+	if((de) && (!atomic_read(&de->count)))
 	{
 		i2o_proc_remove_entries(generic_dev_entries, de);
 		switch(dev->lct_data.class_id)
@@ -3319,7 +3319,7 @@ static int create_i2o_procfs(void)
 	return 0;
 }
 
-static int destroy_i2o_procfs(void)
+static int __exit destroy_i2o_procfs(void)
 {
 	struct i2o_controller *pctrl = NULL;
 	int i;
@@ -3334,17 +3334,13 @@ static int destroy_i2o_procfs(void)
 		}
 	}
 
-	if(!i2o_proc_dir_root->count)
+	if(!atomic_read(&i2o_proc_dir_root->count))
 		remove_proc_entry("i2o", 0);
 	else
 		return -1;
 
 	return 0;
 }
-
-#ifdef MODULE
-#define i2o_proc_init init_module
-#endif
 
 int __init i2o_proc_init(void)
 {
@@ -3360,14 +3356,17 @@ int __init i2o_proc_init(void)
 	return 0;
 }
 
-#ifdef MODULE
-
 MODULE_AUTHOR("Deepak Saxena");
 MODULE_DESCRIPTION("I2O procfs Handler");
 
-void cleanup_module(void)
+static void __exit i2o_proc_exit(void)
 {
 	destroy_i2o_procfs();
 	i2o_remove_handler(&i2o_proc_handler);
 }
+
+#ifdef MODULE
+module_init(i2o_proc_init);
 #endif
+module_exit(i2o_proc_exit);
+

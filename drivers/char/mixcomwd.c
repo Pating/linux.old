@@ -43,6 +43,7 @@
 #include <linux/watchdog.h>
 #include <linux/reboot.h>
 #include <linux/init.h>
+#include <linux/smp_lock.h>
 #include <asm/uaccess.h>
 #include <asm/io.h>
 
@@ -53,7 +54,7 @@ static int mixcomwd_ioports[] = { 0x180, 0x280, 0x380, 0x000 };
 #define FLASHCOM_WATCHDOG_OFFSET 0x4
 #define FLASHCOM_ID 0x18
 
-static int mixcomwd_opened;
+static long mixcomwd_opened; /* long req'd for setbit --RR */
 
 static int watchdog_port;
 
@@ -94,17 +95,17 @@ static int mixcomwd_open(struct inode *inode, struct file *file)
 		mixcomwd_timer_alive=0;
 	} 
 #endif
-	MOD_INC_USE_COUNT;
-
 	return 0;
 }
 
 static int mixcomwd_release(struct inode *inode, struct file *file)
 {
 
+	lock_kernel();
 #ifndef CONFIG_WATCHDOG_NOWAYOUT
 	if(mixcomwd_timer_alive) {
 		printk(KERN_ERR "mixcomwd: release called while internal timer alive");
+		unlock_kernel();
 		return -EBUSY;
 	}
 	init_timer(&mixcomwd_timer);
@@ -114,9 +115,9 @@ static int mixcomwd_release(struct inode *inode, struct file *file)
 	mixcomwd_timer_alive=1;
 	add_timer(&mixcomwd_timer);
 #endif
-	MOD_DEC_USE_COUNT;
 
 	clear_bit(0,&mixcomwd_opened);
+	unlock_kernel();
 	return 0;
 }
 
@@ -171,6 +172,7 @@ static int mixcomwd_ioctl(struct inode *inode, struct file *file,
 
 static struct file_operations mixcomwd_fops=
 {
+	owner:		THIS_MODULE,
 	write:		mixcomwd_write,
 	ioctl:		mixcomwd_ioctl,
 	open:		mixcomwd_open,
@@ -214,9 +216,10 @@ static int __init flashcom_checkcard(int port)
  	return 1;
  }
  
-void __init mixcomwd_init(void)
+static int __init mixcomwd_init(void)
 {
 	int i;
+	int ret;
 	int found=0;
 
 	for (i = 0; !found && mixcomwd_ioports[i] != 0; i++) {
@@ -236,23 +239,21 @@ void __init mixcomwd_init(void)
 	
 	if (!found) {
 		printk("mixcomwd: No card detected, or port not available.\n");
-		return;
+		return -ENODEV;
 	}
 
 	request_region(watchdog_port,1,"MixCOM watchdog");
 		
-	misc_register(&mixcomwd_miscdev);
+	ret = misc_register(&mixcomwd_miscdev);
+	if (ret)
+		return ret;
+	
 	printk(KERN_INFO "MixCOM watchdog driver v%s, watchdog port at 0x%3x\n",VERSION,watchdog_port);
+
+	return 0;
 }	
 
-#ifdef MODULE
-int init_module(void)
-{
-	mixcomwd_init();
-	return 0;
-}
-
-void cleanup_module(void)
+static void __exit mixcomwd_exit(void)
 {
 #ifndef CONFIG_WATCHDOG_NOWAYOUT
 	if(mixcomwd_timer_alive) {
@@ -265,4 +266,6 @@ void cleanup_module(void)
 	release_region(watchdog_port,1);
 	misc_deregister(&mixcomwd_miscdev);
 }
-#endif
+
+module_init(mixcomwd_init);
+module_exit(mixcomwd_exit);

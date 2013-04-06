@@ -1,4 +1,4 @@
-/* $Id: irq.c,v 1.87 2000/05/09 17:40:13 davem Exp $
+/* $Id: irq.c,v 1.94 2000/09/21 06:27:10 anton Exp $
  * irq.c: UltraSparc IRQ handling/init/registry.
  *
  * Copyright (C) 1997  David S. Miller  (davem@caip.rutgers.edu)
@@ -31,6 +31,7 @@
 #include <asm/smp.h>
 #include <asm/hardirq.h>
 #include <asm/softirq.h>
+#include <asm/starfire.h>
 
 /* Internal flag, should not be visible elsewhere at all. */
 #define SA_IMAP_MASKED		0x100
@@ -60,6 +61,19 @@ unsigned int __up_workvec[16] __attribute__ ((aligned (64)));
 #define irq_work(__cpu, __pil)	&(__up_workvec[(void)(__cpu), (__pil)])
 #else
 #define irq_work(__cpu, __pil)	&(cpu_data[(__cpu)].irq_worklists[(__pil)])
+#endif
+
+#ifdef CONFIG_PCI
+/* This is a table of physical addresses used to deal with SA_DMA_SYNC.
+ * It is used for PCI only to synchronize DMA transfers with IRQ delivery
+ * for devices behind busses other than APB on Sabre systems.
+ *
+ * Currently these physical addresses are just config space accesses
+ * to the command register for that device.
+ */
+unsigned long pci_dma_wsync;
+unsigned long dma_sync_reg_table[256];
+unsigned char dma_sync_reg_table_entry = 0;
 #endif
 
 /* This is based upon code in the 32-bit Sparc kernel written mostly by
@@ -110,7 +124,6 @@ int get_irq_list(char *buf)
 /* Now these are always passed a true fully specified sun4u INO. */
 void enable_irq(unsigned int irq)
 {
-	extern int this_is_starfire;
 	struct ino_bucket *bucket = __bucket(irq);
 	unsigned long imap;
 	unsigned long tid;
@@ -126,9 +139,6 @@ void enable_irq(unsigned int irq)
 				     : "i" (ASI_UPA_CONFIG));
 		tid = ((tid & UPA_CONFIG_MID) << 9);
 	} else {
-		extern unsigned int starfire_translate(unsigned long imap,
-						       unsigned int upaid);
-
 		tid = (starfire_translate(imap, current->processor) << 26);
 	}
 
@@ -280,8 +290,6 @@ int request_irq(unsigned int irq, void (*handler)(int, void *, struct pt_regs *)
 			/*
 			 * Check wether we _should_ use DMA Write Sync
 			 * (for devices behind bridges behind APB). 
-			 *
-			 * XXX: Not implemented, yet.
 			 */
 			if (bucket->flags & IBF_DMA_SYNC)
 				irqflags |= SA_DMA_SYNC;
@@ -537,15 +545,9 @@ out:
 	restore_flags(flags);
 }
 
-/* Only uniprocessor needs this IRQ/BH locking depth, on SMP it
- * lives in the brlock table for cache reasons.
- */
-#ifndef CONFIG_SMP
-unsigned int local_irq_count;
-unsigned int local_bh_count;
-#else
+#ifdef CONFIG_SMP
 
-/* Who has global_irq_lock. */
+/* Who has the global irq brlock */
 unsigned char global_irq_holder = NO_PROC_ID;
 
 static void show(char * str)
@@ -560,7 +562,7 @@ static void show(char * str)
 	printk("]\nbh:   %d [ ",
 	       (spin_is_locked(&global_bh_lock) ? 1 : 0));
 	for (i = 0; i < smp_num_cpus; i++)
-		printk("%u ", cpu_data[i].bh_count);
+		printk("%u ", local_bh_count(i));
 	printk("]\n");
 }
 
@@ -594,16 +596,16 @@ again:
 		spinlock_t *lock;
 
 		if (!irqs_running() &&
-		    (local_bh_count || !spin_is_locked(&global_bh_lock)))
+		    (local_bh_count(smp_processor_id()) || !spin_is_locked(&global_bh_lock)))
 			break;
 
 		br_write_unlock(BR_GLOBALIRQ_LOCK);
 		lock = &__br_write_locks[BR_GLOBALIRQ_LOCK].lock;
 		while (irqs_running() ||
 		       spin_is_locked(lock) ||
-		       (!local_bh_count && spin_is_locked(&global_bh_lock))) {
+		       (!local_bh_count(smp_processor_id()) && spin_is_locked(&global_bh_lock))) {
 			if (!--count) {
-				show("wait_on_irq");
+				show("get_irqlock");
 				count = (~0 >> 1);
 			}
 			__sti();
@@ -624,7 +626,7 @@ void __global_cli(void)
 	if(flags == 0) {
 		int cpu = smp_processor_id();
 		__cli();
-		if (! local_irq_count)
+		if (! local_irq_count(cpu))
 			get_irqlock(cpu);
 	}
 }
@@ -633,7 +635,7 @@ void __global_sti(void)
 {
 	int cpu = smp_processor_id();
 
-	if (! local_irq_count)
+	if (! local_irq_count(cpu))
 		release_irqlock(cpu);
 	__sti();
 }
@@ -645,7 +647,7 @@ unsigned long __global_save_flags(void)
 	__save_flags(flags);
 	local_enabled = ((flags == 0) ? 1 : 0);
 	retval = 2 + local_enabled;
-	if (! local_irq_count) {
+	if (! local_irq_count(smp_processor_id())) {
 		if (local_enabled)
 			retval = 1;
 		if (global_irq_holder == (unsigned char) smp_processor_id())
@@ -710,7 +712,6 @@ void handler_irq(int irq, struct pt_regs *regs)
 	struct ino_bucket *bp, *nbp;
 	int cpu = smp_processor_id();
 #ifdef CONFIG_SMP
-	extern int this_is_starfire;
 	int should_forward = (this_is_starfire == 0	&&
 			      irq < 10			&&
 			      current->pid != 0);
@@ -719,14 +720,14 @@ void handler_irq(int irq, struct pt_regs *regs)
 	/* 'cpu' is the MID (ie. UPAID), calculate the MID
 	 * of our buddy.
 	 */
-	if(should_forward != 0) {
+	if (should_forward != 0) {
 		buddy = cpu_number_map(cpu) + 1;
 		if (buddy >= NR_CPUS ||
 		    (buddy = cpu_logical_map(buddy)) == -1)
 			buddy = cpu_logical_map(0);
 
 		/* Voo-doo programming. */
-		if(cpu_data[buddy].idle_volume < FORWARD_VOLUME)
+		if (cpu_data[buddy].idle_volume < FORWARD_VOLUME)
 			should_forward = 0;
 		buddy <<= 26;
 	}
@@ -752,25 +753,31 @@ void handler_irq(int irq, struct pt_regs *regs)
 #else
 	bp = __bucket(xchg32(irq_work(cpu, irq), 0));
 #endif
-	for( ; bp != NULL; bp = nbp) {
+	for ( ; bp != NULL; bp = nbp) {
 		unsigned char flags = bp->flags;
 
 		nbp = __bucket(bp->irq_chain);
-		if((flags & IBF_ACTIVE) != 0) {
-			if((flags & IBF_MULTI) == 0) {
+		if ((flags & IBF_ACTIVE) != 0) {
+#ifdef CONFIG_PCI
+			if ((flags & IBF_DMA_SYNC) != 0) {
+				upa_readl(dma_sync_reg_table[bp->synctab_ent]);
+				upa_readq(pci_dma_wsync);
+			}
+#endif
+			if ((flags & IBF_MULTI) == 0) {
 				struct irqaction *ap = bp->irq_info;
 				ap->handler(__irq(bp), ap->dev_id, regs);
 			} else {
 				void **vector = (void **)bp->irq_info;
 				int ent;
-				for(ent = 0; ent < 4; ent++) {
+				for (ent = 0; ent < 4; ent++) {
 					struct irqaction *ap = vector[ent];
-					if(ap != NULL)
+					if (ap != NULL)
 						ap->handler(__irq(bp), ap->dev_id, regs);
 				}
 			}
 			/* Only the dummy bucket lacks IMAP/ICLR. */
-			if(bp->pil != 0) {
+			if (bp->pil != 0) {
 #ifdef CONFIG_SMP
 				/* Ok, here is what is going on:
 				 * 1) Retargeting IRQs on Starfire is very
@@ -1018,7 +1025,6 @@ void init_timers(void (*cfunc)(int, void *, struct pt_regs *),
 #ifdef CONFIG_SMP
 static int retarget_one_irq(struct irqaction *p, int goal_cpu)
 {
-	extern int this_is_starfire;
 	struct ino_bucket *bucket = __bucket(p->mask);
 	unsigned long imap = bucket->imap;
 	unsigned int tid;
@@ -1030,9 +1036,6 @@ static int retarget_one_irq(struct irqaction *p, int goal_cpu)
 	if(this_is_starfire == 0) {
 		tid = __cpu_logical_map[goal_cpu] << 26;
 	} else {
-		extern unsigned int starfire_translate(unsigned long imap,
-						       unsigned int upaid);
-
 		tid = (starfire_translate(imap, __cpu_logical_map[goal_cpu]) << 26);
 	}
 	upa_writel(IMAP_VALID | (tid & IMAP_TID), imap);

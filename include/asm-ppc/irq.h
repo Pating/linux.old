@@ -1,8 +1,8 @@
-#include <linux/config.h>
-
+#ifdef __KERNEL__
 #ifndef _ASM_IRQ_H
 #define _ASM_IRQ_H
 
+#include <linux/config.h>
 #include <asm/machdep.h>		/* ppc_md */
 
 extern void disable_irq(unsigned int);
@@ -184,6 +184,9 @@ extern irq_node_t *new_irq_node(void);
 */
 #define	SIU_INT_SMC1		((uint)0x04)
 #define	SIU_INT_SMC2		((uint)0x05)
+#define	SIU_INT_FCC1		((uint)0x20)
+#define	SIU_INT_FCC2		((uint)0x21)
+#define	SIU_INT_FCC3		((uint)0x22)
 #define	SIU_INT_SCC1		((uint)0x28)
 #define	SIU_INT_SCC2		((uint)0x29)
 #define	SIU_INT_SCC3		((uint)0x2a)
@@ -214,3 +217,4 @@ static __inline__ int irq_cannonicalize(int irq)
 extern unsigned int ppc_lost_interrupts[NR_MASK_WORDS];
 
 #endif /* _ASM_IRQ_H */
+#endif /* __KERNEL__ */

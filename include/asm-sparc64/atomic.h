@@ -1,4 +1,4 @@
-/* $Id: atomic.h,v 1.20 2000/03/16 16:44:44 davem Exp $
+/* $Id: atomic.h,v 1.21 2000/10/03 07:28:56 anton Exp $
  * atomic.h: Thankfully the V9 is at least reasonable for this
  *           stuff.
  *
@@ -8,7 +8,7 @@
 #ifndef __ARCH_SPARC64_ATOMIC__
 #define __ARCH_SPARC64_ATOMIC__
 
-typedef struct { int counter; } atomic_t;
+typedef struct { volatile int counter; } atomic_t;
 #define ATOMIC_INIT(i)	{ (i) }
 
 #define atomic_read(v)		((v)->counter)

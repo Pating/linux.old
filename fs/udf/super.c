@@ -100,14 +100,14 @@ static DECLARE_FSTYPE_DEV(udf_fstype, "udf", udf_read_super);
 
 /* Superblock operations */
 static struct super_operations udf_sb_ops = {
-	read_inode:			udf_read_inode,
+	read_inode:		udf_read_inode,
 	write_inode:		udf_write_inode,
-	put_inode:			udf_put_inode,
+	put_inode:		udf_put_inode,
 	delete_inode:		udf_delete_inode,
-	put_super:			udf_put_super,
+	put_super:		udf_put_super,
 	write_super:		udf_write_super,
-	statfs:				udf_statfs,
-	remount_fs:			udf_remount_fs,
+	statfs:			udf_statfs,
+	remount_fs:		udf_remount_fs,
 };
 
 struct udf_options
@@ -1219,7 +1219,7 @@ static void udf_open_lvid(struct super_block *sb)
 				UDF_SB_LVID(sb)->descTag.tagChecksum +=
 					((Uint8 *)&(UDF_SB_LVID(sb)->descTag))[i];
 
-		mark_buffer_dirty(UDF_SB_LVIDBH(sb), 1);
+		mark_buffer_dirty(UDF_SB_LVIDBH(sb));
 		sb->s_dirt = 0;
 	}
 }
@@ -1254,7 +1254,7 @@ static void udf_close_lvid(struct super_block *sb)
 				UDF_SB_LVID(sb)->descTag.tagChecksum +=
 					((Uint8 *)&(UDF_SB_LVID(sb)->descTag))[i];
 
-		mark_buffer_dirty(UDF_SB_LVIDBH(sb), 1);
+		mark_buffer_dirty(UDF_SB_LVIDBH(sb));
 	}
 }
 
@@ -1419,7 +1419,6 @@ udf_read_super(struct super_block *sb, void *options, int silent)
 	return sb;
 
 error_out:
-	sb->s_dev = NODEV;
 	if (UDF_SB_VAT(sb))
 		iput(UDF_SB_VAT(sb));
 	if (!(sb->s_flags & MS_RDONLY))

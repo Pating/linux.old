@@ -67,7 +67,7 @@ struct proc_dir_entry {
 	void *data;
 	read_proc_t *read_proc;
 	write_proc_t *write_proc;
-	unsigned int count;	/* use count */
+	atomic_t count;		/* use count */
 	int deleted;		/* delete flag */
 	kdev_t	rdev;
 };
@@ -127,7 +127,7 @@ extern void proc_tty_unregister_driver(struct tty_driver *driver);
 extern void proc_device_tree_init(void);
 
 extern struct proc_dir_entry *proc_symlink(const char *,
-		struct proc_dir_entry *,char *);
+		struct proc_dir_entry *, const char *);
 extern struct proc_dir_entry *proc_mknod(const char *,mode_t,
 		struct proc_dir_entry *,kdev_t);
 extern struct proc_dir_entry *proc_mkdir(const char *,struct proc_dir_entry *);

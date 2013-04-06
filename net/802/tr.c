@@ -434,7 +434,7 @@ static void rif_check_expire(unsigned long dummy)
 			if((now-entry->last_used) > sysctl_tr_rif_timeout) 
 			{
 				*pentry=entry->next;
-				kfree_s(entry,sizeof(struct rif_cache_s));
+				kfree(entry);
 			}
 			else
 				pentry=&entry->next;
@@ -457,7 +457,7 @@ static void rif_check_expire(unsigned long dummy)
  */
  
 #ifndef CONFIG_PROC_FS
-static int rif_get_info(char *buffer,char **start, off_t offset, int length)  {}
+static int rif_get_info(char *buffer,char **start, off_t offset, int length)  { return 0;}
 #else
 static int rif_get_info(char *buffer,char **start, off_t offset, int length) 
 {
@@ -540,7 +540,7 @@ static int rif_get_info(char *buffer,char **start, off_t offset, int length)
  *	too much for this.
  */
 
-void __init rif_init(struct net_proto *unused)
+static int __init rif_init(void)
 {
 	rif_timer.expires  = RIF_TIMEOUT;
 	rif_timer.data     = 0L;
@@ -549,4 +549,7 @@ void __init rif_init(struct net_proto *unused)
 	add_timer(&rif_timer);
 
 	proc_net_create("tr_rif",0,rif_get_info);
+	return 0;
 }
+
+module_init(rif_init);

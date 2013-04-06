@@ -2,6 +2,7 @@
  * Created: Mon Jan  4 10:05:05 1999 by faith@precisioninsight.com
  *
  * Copyright 1999 Precision Insight, Inc., Cedar Park, Texas.
+ * Copyright 2000 VA Linux Systems, Inc., Sunnyvale, California.
  * All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
@@ -24,7 +25,7 @@
  * DEALINGS IN THE SOFTWARE.
  * 
  * Authors:
- *    Rickard E. (Rik) Faith <faith@precisioninsight.com>
+ *    Rickard E. (Rik) Faith <faith@valinux.com>
  * 
  */
 
@@ -32,8 +33,6 @@
 #define _GAMMA_DRV_H_
 
 				/* gamma_drv.c */
-extern int  gamma_init(void);
-extern void gamma_cleanup(void);
 extern int  gamma_version(struct inode *inode, struct file *filp,
 			  unsigned int cmd, unsigned long arg);
 extern int  gamma_open(struct inode *inode, struct file *filp);
@@ -53,5 +52,7 @@ extern int  gamma_irq_install(drm_device_t *dev, int irq);
 extern int  gamma_irq_uninstall(drm_device_t *dev);
 extern int  gamma_control(struct inode *inode, struct file *filp,
 			  unsigned int cmd, unsigned long arg);
+extern int  gamma_find_devices(void);
+extern int  gamma_found(void);
 
 #endif

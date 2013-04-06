@@ -8,7 +8,7 @@
 # Note 2! The CFLAGS definition is now in the main makefile...
 
 O_TARGET := math-emu.o
-O_OBJS   := math.o ashldi3.o
+obj-y    := math.o ashldi3.o
 
 .S.s:
 	$(CPP) $(AFLAGS) -ansi $< -o $*.s
@@ -16,6 +16,6 @@ O_OBJS   := math.o ashldi3.o
 .S.o:
 	$(CC) $(AFLAGS) -ansi -c $< -o $*.o
 
-CFLAGS += -I. -I$(TOPDIR)/include/math-emu -w
+EXTRA_CFLAGS = -I. -I$(TOPDIR)/include/math-emu -w
 
 include $(TOPDIR)/Rules.make

@@ -1,8 +1,3 @@
-#include <linux/config.h>
-#ifndef __ASSEMBLY__
-#include <asm/system.h> /* for xmon definition */
-#endif /* ndef __ASSEMBLY__ */
-
 #ifndef _PPC_PAGE_H
 #define _PPC_PAGE_H
 
@@ -11,11 +6,14 @@
 #define PAGE_SIZE	(1UL << PAGE_SHIFT)
 #define PAGE_MASK	(~(PAGE_SIZE-1))
 
+#ifdef __KERNEL__
+#include <linux/config.h>
+
 #define PAGE_OFFSET	0xc0000000
 #define KERNELBASE	PAGE_OFFSET
 
 #ifndef __ASSEMBLY__
-#ifdef __KERNEL__
+#include <asm/system.h> /* for xmon definition */
 
 #ifdef CONFIG_XMON
 #define BUG() do { \
@@ -114,8 +112,9 @@ static inline void* ___va(unsigned long p)
 #define __pa(x) ___pa ((unsigned long)(x))
 #define __va(x) ___va ((unsigned long)(x))
 
-#define MAP_NR(addr)		(((unsigned long)addr-PAGE_OFFSET) >> PAGE_SHIFT)
 #define MAP_PAGE_RESERVED	(1<<15)
+#define virt_to_page(kaddr)	(mem_map + (((unsigned long)kaddr-PAGE_OFFSET) >> PAGE_SHIFT))
+#define VALID_PAGE(page)	((page - mem_map) < max_mapnr)
 
 extern unsigned long get_zero_page_fast(void);
 
@@ -133,6 +132,6 @@ extern __inline__ int get_order(unsigned long size)
 	return order;
 }
 
-#endif /* __KERNEL__ */
 #endif /* __ASSEMBLY__ */
+#endif /* __KERNEL__ */
 #endif /* _PPC_PAGE_H */

@@ -240,7 +240,7 @@ select_smp_affinity(int irq)
 		return;
 
 	while (((cpu_present_mask >> cpu) & 1) == 0)
-		cpu = (cpu < NR_CPUS ? cpu + 1 : 0);
+		cpu = (cpu < (NR_CPUS-1) ? cpu + 1 : 0);
 	last_cpu = cpu;
 
 	irq_affinity[irq] = 1UL << cpu;
@@ -520,8 +520,10 @@ get_irq_list(char *buf)
 	p += sprintf(p, "           ");
 	for (i = 0; i < smp_num_cpus; i++)
 		p += sprintf(p, "CPU%d       ", i);
+#ifdef DO_BROADCAST_INTS
 	for (i = 0; i < smp_num_cpus; i++)
 		p += sprintf(p, "TRY%d       ", i);
+#endif
 	*p++ = '\n';
 #endif
 
@@ -536,9 +538,11 @@ get_irq_list(char *buf)
 		for (j = 0; j < smp_num_cpus; j++)
 			p += sprintf(p, "%10u ",
 				     kstat.irqs[cpu_logical_map(j)][i]);
+#ifdef DO_BROADCAST_INTS
 		for (j = 0; j < smp_num_cpus; j++)
 			p += sprintf(p, "%10lu ",
 				     irq_attempt(cpu_logical_map(j), i));
+#endif
 #endif
 		p += sprintf(p, " %14s", irq_desc[i].handler->typename);
 		p += sprintf(p, "  %c%s",
@@ -743,7 +747,7 @@ probe_irq_mask(unsigned long val)
 	unsigned int mask;
 
 	mask = 0;
-	for (i = 0; i < 16; i++) {
+	for (i = 0; i < NR_IRQS; i++) {
 		irq_desc_t *desc = irq_desc + i;
 		unsigned int status;
 
@@ -751,8 +755,11 @@ probe_irq_mask(unsigned long val)
 		status = desc->status;
 
 		if (status & IRQ_AUTODETECT) {
-			if (!(status & IRQ_WAITING))
-				mask |= 1 << i;
+			/* We only react to ISA interrupts */
+			if (!(status & IRQ_WAITING)) {
+				if (i < 16)
+					mask |= 1 << i;
+			}
 
 			desc->status = status & ~IRQ_AUTODETECT;
 			desc->handler->shutdown(i);

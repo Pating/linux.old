@@ -233,7 +233,7 @@ void ide_config(dev_link_t *link)
     config_info_t conf;
     cistpl_cftable_entry_t *cfg = &parse.cftable_entry;
     cistpl_cftable_entry_t dflt = { 0 };
-    int i, pass, last_ret, last_fn, hd, io_base, ctl_base;
+    int i, pass, last_ret, last_fn, hd=-1, io_base, ctl_base;
 
     DEBUG(0, "ide_config(0x%p)\n", link);
     
@@ -341,7 +341,7 @@ void ide_config(dev_link_t *link)
     }
     
     if (hd < 0) {
-	printk(KERN_NOTICE "ide_cs: ide_register() at 0x%3x & 0x%3x"
+	printk(KERN_NOTICE "ide_cs: ide_register() at 0x%03x & 0x%03x"
 	       ", irq %u failed\n", io_base, ctl_base,
 	       link->irq.AssignedIRQ);
 	goto failed;

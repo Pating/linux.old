@@ -295,13 +295,13 @@ static int ref_count;
 /* Here, then is a table of board pointers which the interrupt routine should
  * scan through to determine who it must service.
  */
-static unsigned short i2nBoards = 0; // Number of boards here
+static unsigned short i2nBoards; // Number of boards here
 
 static i2eBordStrPtr i2BoardPtrTable[IP2_MAX_BOARDS];
 
 static i2ChanStrPtr  DevTable[IP2_MAX_PORTS];
 //DevTableMem just used to save addresses for kfree
-static void  *DevTableMem[IP2_MAX_BOARDS] = {NULL,NULL,NULL,NULL};
+static void  *DevTableMem[IP2_MAX_BOARDS];
 
 static struct tty_struct * TtyTable[IP2_MAX_PORTS];
 static struct termios    * Termios[IP2_MAX_PORTS];
@@ -311,14 +311,15 @@ static struct termios    * TermiosLocked[IP2_MAX_PORTS];
  * download the loadware to the boards.
  */
 static struct file_operations ip2_ipl = {
+	owner:		THIS_MODULE,
 	read:		ip2_ipl_read,
 	write:		ip2_ipl_write,
 	ioctl:		ip2_ipl_ioctl,
 	open:		ip2_ipl_open,
 }; 
 
-static long irq_counter = 0;
-static long bh_counter = 0;
+static long irq_counter;
+static long bh_counter;
 
 // Use immediate queue to service interrupts
 //#define USE_IQI	// PCI&2.2 needs work
@@ -328,17 +329,16 @@ static long bh_counter = 0;
  * selected, the board is serviced periodically to see if anything needs doing.
  */
 #define  POLL_TIMEOUT   (jiffies + 1)
-static struct timer_list PollTimer = { NULL, NULL,       0,   0, ip2_poll };
-//                                     next, prev, expires,data, func()
-static char  TimerOn = 0;
+static struct timer_list PollTimer = { function: ip2_poll };
+static char  TimerOn;
 
 #ifdef IP2DEBUG_TRACE
 /* Trace (debug) buffer data */
 #define TRACEMAX  1000
 static unsigned long tracebuf[TRACEMAX];
-static int tracestuff = 0;
-static int tracestrip = 0;
-static int tracewrap  = 0;
+static int tracestuff;
+static int tracestrip;
+static int tracewrap;
 #endif
 
 /**********/
@@ -372,13 +372,13 @@ static int tracewrap  = 0;
 #	endif	/* LINUX_VERSION */
 #endif	/* MODULE */
 
-static int poll_only = 0;
+static int poll_only;
 
-static int Eisa_irq = 0;
-static int Eisa_slot = 0;
+static int Eisa_irq;
+static int Eisa_slot;
 
-static int iindx = 0;
-static char rirqs[IP2_MAX_BOARDS] = {0,};
+static int iindx;
+static char rirqs[IP2_MAX_BOARDS];
 static int Valid_Irqs[] = { 3, 4, 5, 7, 10, 11, 12, 15, 0};
 
 /******************************************************************************/
@@ -584,13 +584,13 @@ int __init
 old_ip2_init(void)
 {
 #ifdef	CONFIG_DEVFS_FS
-	static devfs_handle_t devfs_handle = NULL;
+	static devfs_handle_t devfs_handle;
 	int j, box;
 #endif
 	int i;
 	int err;
 	int status = 0;
-	static int loaded = 0;
+	static int loaded;
 	i2eBordStrPtr pB = NULL;
 	int rc = -1;
 
@@ -861,7 +861,7 @@ old_ip2_init(void)
 		 */
 #ifdef	CONFIG_DEVFS_FS
 		if (!devfs_handle)
-			devfs_handle = devfs_mk_dir (NULL, "ip2", 3, NULL);
+			devfs_handle = devfs_mk_dir (NULL, "ip2", NULL);
 #endif
 
 		for( i = 0; i < IP2_MAX_BOARDS; ++i ) {
@@ -876,19 +876,19 @@ old_ip2_init(void)
 #ifdef	CONFIG_DEVFS_FS
 			sprintf( name, "ipl%d", i );
 			i2BoardPtrTable[i]->devfs_ipl_handle =
-				devfs_register (devfs_handle, name, 0,
-					DEVFS_FL_NONE,
+				devfs_register (devfs_handle, name,
+					DEVFS_FL_DEFAULT,
 					IP2_IPL_MAJOR, 4 * i,
 					S_IRUSR | S_IWUSR | S_IRGRP | S_IFCHR,
-					0, 0, &ip2_ipl, NULL);
+					&ip2_ipl, NULL);
 
 			sprintf( name, "stat%d", i );
 			i2BoardPtrTable[i]->devfs_stat_handle =
-				devfs_register (devfs_handle, name, 0,
-					DEVFS_FL_NONE,
+				devfs_register (devfs_handle, name,
+					DEVFS_FL_DEFAULT,
 					IP2_IPL_MAJOR, 4 * i + 1,
 					S_IRUSR | S_IWUSR | S_IRGRP | S_IFCHR,
-					0, 0, &ip2_ipl, NULL);
+					&ip2_ipl, NULL);
 
 			for ( box = 0; box < ABS_MAX_BOXES; ++box )
 			{
@@ -2567,10 +2567,10 @@ set_serial_info( i2ChanStrPtr pCh, struct serial_struct *new_info )
 	 * base. Also line nunber as such is meaningless but we use it for our
 	 * array index so it is fixed also.
 	 */
-	if ( ns.irq  	    != ip2config.irq
-	    || (int) ns.port      != ((int) pCh->pMyBord->i2eBase)
-	    || ns.baud_base != pCh->BaudBase
-	    || ns.line      != pCh->port_index ) {
+	if ( (ns.irq  	    != ip2config.irq[pCh->port_index])
+	    || ((int) ns.port      != ((int) (pCh->pMyBord->i2eBase)))
+	    || (ns.baud_base != pCh->BaudBase)
+	    || (ns.line      != pCh->port_index) ) {
 		return -EINVAL;
 	}
 
@@ -3201,8 +3201,6 @@ ip2_ipl_open( struct inode *pInode, struct file *pFile )
 #ifdef IP2DEBUG_IPL
 	printk (KERN_DEBUG "IP2IPL: open\n" );
 #endif
-
-	//MOD_INC_USE_COUNT; // Needs close entry with decrement.
 
 	switch(iplminor) {
 	// These are the IPL devices

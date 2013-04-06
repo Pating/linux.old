@@ -101,37 +101,52 @@ static inline void put_binfmt(struct linux_binfmt * fmt)
  */
 asmlinkage long sys_uselib(const char * library)
 {
-	int fd, retval;
 	struct file * file;
+	struct nameidata nd;
+	int error;
 
-	fd = sys_open(library, 0, 0);
-	if (fd < 0)
-		return fd;
-	file = fget(fd);
-	retval = -ENOEXEC;
-	if (file) {
-		if(file->f_op && file->f_op->read) {
-			struct linux_binfmt * fmt;
+	error = user_path_walk(library, &nd);
+	if (error)
+		goto out;
 
-			read_lock(&binfmt_lock);
-			for (fmt = formats ; fmt ; fmt = fmt->next) {
-				if (!fmt->load_shlib)
-					continue;
-				if (!try_inc_mod_count(fmt->module))
-					continue;
-				read_unlock(&binfmt_lock);
-				retval = fmt->load_shlib(file);
-				read_lock(&binfmt_lock);
-				put_binfmt(fmt);
-				if (retval != -ENOEXEC)
-					break;
-			}
+	error = -EINVAL;
+	if (!S_ISREG(nd.dentry->d_inode->i_mode))
+		goto exit;
+
+	error = permission(nd.dentry->d_inode, MAY_READ | MAY_EXEC);
+	if (error)
+		goto exit;
+
+	file = dentry_open(nd.dentry, nd.mnt, O_RDONLY);
+	error = PTR_ERR(file);
+	if (IS_ERR(file))
+		goto out;
+
+	error = -ENOEXEC;
+	if(file->f_op && file->f_op->read) {
+		struct linux_binfmt * fmt;
+
+		read_lock(&binfmt_lock);
+		for (fmt = formats ; fmt ; fmt = fmt->next) {
+			if (!fmt->load_shlib)
+				continue;
+			if (!try_inc_mod_count(fmt->module))
+				continue;
 			read_unlock(&binfmt_lock);
+			error = fmt->load_shlib(file);
+			read_lock(&binfmt_lock);
+			put_binfmt(fmt);
+			if (error != -ENOEXEC)
+				break;
 		}
-		fput(file);
+		read_unlock(&binfmt_lock);
 	}
-	sys_close(fd);
-  	return retval;
+	fput(file);
+out:
+  	return error;
+exit:
+	path_release(&nd);
+	goto out;
 }
 
 /*
@@ -197,7 +212,7 @@ int copy_strings(int argc,char ** argv, struct linux_binprm *bprm)
 					return -ENOMEM;
 				new = 1;
 			}
-			kaddr = (char *)kmap(page);
+			kaddr = kmap(page);
 
 			if (new && offset)
 				memset(kaddr, 0, offset);
@@ -208,7 +223,6 @@ int copy_strings(int argc,char ** argv, struct linux_binprm *bprm)
 					memset(kaddr+offset+len, 0, PAGE_SIZE-offset-len);
 			}
 			err = copy_from_user(kaddr + offset, str, bytes_to_copy);
-			flush_page_to_ram(page);
 			kunmap(page);
 
 			if (err)
@@ -265,6 +279,7 @@ void put_dirty_page(struct task_struct * tsk, struct page *page, unsigned long a
 		__free_page(page);
 		return;
 	}
+	flush_dcache_page(page);
 	flush_page_to_ram(page);
 	set_pte(pte, pte_mkdirty(pte_mkwrite(mk_pte(page, PAGE_COPY))));
 /* no need for flush_tlb */
@@ -298,16 +313,16 @@ int setup_arg_pages(struct linux_binprm *bprm)
 		mpnt->vm_pgoff = 0;
 		mpnt->vm_file = NULL;
 		mpnt->vm_private_data = (void *) 0;
-		vmlist_modify_lock(current->mm);
 		insert_vm_struct(current->mm, mpnt);
-		vmlist_modify_unlock(current->mm);
 		current->mm->total_vm = (mpnt->vm_end - mpnt->vm_start) >> PAGE_SHIFT;
 	} 
 
 	for (i = 0 ; i < MAX_ARG_PAGES ; i++) {
-		if (bprm->page[i]) {
+		struct page *page = bprm->page[i];
+		if (page) {
+			bprm->page[i] = NULL;
 			current->mm->rss++;
-			put_dirty_page(current,bprm->page[i],stack_base);
+			put_dirty_page(current,page,stack_base);
 		}
 		stack_base += PAGE_SIZE;
 	}
@@ -319,23 +334,28 @@ int setup_arg_pages(struct linux_binprm *bprm)
 struct file *open_exec(const char *name)
 {
 	struct nameidata nd;
+	struct inode *inode;
 	struct file *file;
 	int err = 0;
 
-	lock_kernel();
 	if (path_init(name, LOOKUP_FOLLOW|LOOKUP_POSITIVE, &nd))
 		err = path_walk(name, &nd);
-	unlock_kernel();
 	file = ERR_PTR(err);
 	if (!err) {
+		inode = nd.dentry->d_inode;
 		file = ERR_PTR(-EACCES);
-		if (S_ISREG(nd.dentry->d_inode->i_mode)) {
-			int err = permission(nd.dentry->d_inode, MAY_EXEC);
+		if (!IS_NOEXEC(inode) && S_ISREG(inode->i_mode)) {
+			int err = permission(inode, MAY_EXEC);
 			file = ERR_PTR(err);
 			if (!err) {
-				lock_kernel();
 				file = dentry_open(nd.dentry, nd.mnt, O_RDONLY);
-				unlock_kernel();
+				if (!IS_ERR(file)) {
+					err = deny_write_access(file);
+					if (err) {
+						fput(file);
+						file = ERR_PTR(err);
+					}
+				}
 out:
 				return file;
 			}
@@ -379,7 +399,16 @@ static int exec_mmap(void)
 	if (mm) {
 		struct mm_struct *active_mm = current->active_mm;
 
-		init_new_context(current, mm);
+		if (init_new_context(current, mm)) {
+			mmdrop(mm);
+			return -ENOMEM;
+		}
+
+		/* Add it to the list of mm's */
+		spin_lock(&mmlist_lock);
+		list_add(&mm->mmlist, &init_mm.mmlist);
+		spin_unlock(&mmlist_lock);
+
 		task_lock(current);
 		current->mm = mm;
 		current->active_mm = mm;
@@ -401,7 +430,7 @@ static int exec_mmap(void)
  * This function makes sure the current process has its own signal table,
  * so that flush_signal_handlers can later reset the handlers without
  * disturbing other processes.  (Other processes might share the signal
- * table via the CLONE_SIGHAND option to clone().)
+ * table via the CLONE_SIGNAL option to clone().)
  */
  
 static inline int make_private_signals(void)
@@ -410,7 +439,7 @@ static inline int make_private_signals(void)
 
 	if (atomic_read(&current->sig->count) <= 1)
 		return 0;
-	newsig = kmalloc(sizeof(*newsig), GFP_KERNEL);
+	newsig = kmem_cache_alloc(sigact_cachep, GFP_KERNEL);
 	if (newsig == NULL)
 		return -ENOMEM;
 	spin_lock_init(&newsig->siglock);
@@ -434,7 +463,7 @@ static inline void release_old_signals(struct signal_struct * oldsig)
 	if (current->sig == oldsig)
 		return;
 	if (atomic_dec_and_test(&oldsig->count))
-		kfree(oldsig);
+		kmem_cache_free(sigact_cachep, oldsig);
 }
 
 /*
@@ -444,22 +473,51 @@ static inline void release_old_signals(struct signal_struct * oldsig)
 
 static inline void flush_old_files(struct files_struct * files)
 {
-	unsigned long j;
+	long j = -1;
 
-	j = 0;
+	write_lock(&files->file_lock);
 	for (;;) {
 		unsigned long set, i;
 
+		j++;
 		i = j * __NFDBITS;
 		if (i >= files->max_fds || i >= files->max_fdset)
 			break;
-		set = xchg(&files->close_on_exec->fds_bits[j], 0);
-		j++;
+		set = files->close_on_exec->fds_bits[j];
+		if (!set)
+			continue;
+		files->close_on_exec->fds_bits[j] = 0;
+		write_unlock(&files->file_lock);
 		for ( ; set ; i++,set >>= 1) {
-			if (set & 1)
+			if (set & 1) {
 				sys_close(i);
+			}
 		}
+		write_lock(&files->file_lock);
+
 	}
+	write_unlock(&files->file_lock);
+}
+
+/*
+ * An execve() will automatically "de-thread" the process.
+ * Note: we don't have to hold the tasklist_lock to test
+ * whether we migth need to do this. If we're not part of
+ * a thread group, there is no way we can become one
+ * dynamically. And if we are, we only need to protect the
+ * unlink - even if we race with the last other thread exit,
+ * at worst the list_del_init() might end up being a no-op.
+ */
+static inline void de_thread(struct task_struct *tsk)
+{
+	if (!list_empty(&tsk->thread_group)) {
+		write_lock_irq(&tasklist_lock);
+		list_del_init(&tsk->thread_group);
+		write_unlock_irq(&tasklist_lock);
+	}
+
+	/* Minor oddity: this might stay the same. */
+	tsk->tgid = tsk->pid;
 }
 
 int flush_old_exec(struct linux_binprm * bprm)
@@ -484,6 +542,8 @@ int flush_old_exec(struct linux_binprm * bprm)
 	/* This is the point of no return */
 	release_old_signals(oldsig);
 
+	current->sas_ss_sp = current->sas_ss_size = 0;
+
 	if (current->euid == current->uid && current->egid == current->gid)
 		current->dumpable = 1;
 	name = bprm->filename;
@@ -497,6 +557,8 @@ int flush_old_exec(struct linux_binprm * bprm)
 	current->comm[i] = '\0';
 
 	flush_thread();
+
+	de_thread(current);
 
 	if (bprm->e_uid != current->euid || bprm->e_gid != current->egid || 
 	    permission(bprm->file->f_dentry->d_inode,MAY_READ))
@@ -528,55 +590,41 @@ flush_failed:
  */
 static inline int must_not_trace_exec(struct task_struct * p)
 {
-	return (p->flags & PF_PTRACED) && !cap_raised(p->p_pptr->cap_effective, CAP_SYS_PTRACE);
+	return (p->ptrace & PT_PTRACED) && !cap_raised(p->p_pptr->cap_effective, CAP_SYS_PTRACE);
 }
 
 /* 
  * Fill the binprm structure from the inode. 
- * Check permissions, then read the first 512 bytes
+ * Check permissions, then read the first 128 (BINPRM_BUF_SIZE) bytes
  */
 int prepare_binprm(struct linux_binprm *bprm)
 {
 	int mode;
-	int retval,id_change,cap_raised;
 	struct inode * inode = bprm->file->f_dentry->d_inode;
 
 	mode = inode->i_mode;
-	if (!S_ISREG(mode))			/* must be regular file */
+	/* Huh? We had already checked for MAY_EXEC, WTF do we check this? */
+	if (!(mode & 0111))	/* with at least _one_ execute bit set */
 		return -EACCES;
-	if (!(mode & 0111))			/* with at least _one_ execute bit set */
+	if (bprm->file->f_op == NULL)
 		return -EACCES;
-	if (IS_NOEXEC(inode))			/* FS mustn't be mounted noexec */
-		return -EACCES;
-	if (!inode->i_sb)
-		return -EACCES;
-	if ((retval = permission(inode, MAY_EXEC)) != 0)
-		return retval;
-	/* better not execute files which are being written to */
-	if (atomic_read(&inode->i_writecount) > 0)
-		return -ETXTBSY;
 
 	bprm->e_uid = current->euid;
 	bprm->e_gid = current->egid;
-	id_change = cap_raised = 0;
 
-	/* Set-uid? */
-	if (mode & S_ISUID) {
-		bprm->e_uid = inode->i_uid;
-		if (bprm->e_uid != current->euid)
-			id_change = 1;
-	}
+	if(!IS_NOSUID(inode)) {
+		/* Set-uid? */
+		if (mode & S_ISUID)
+			bprm->e_uid = inode->i_uid;
 
-	/* Set-gid? */
-	/*
-	 * If setgid is set but no group execute bit then this
-	 * is a candidate for mandatory locking, not a setgid
-	 * executable.
-	 */
-	if ((mode & (S_ISGID | S_IXGRP)) == (S_ISGID | S_IXGRP)) {
-		bprm->e_gid = inode->i_gid;
-		if (!in_group_p(bprm->e_gid))
-			id_change = 1;
+		/* Set-gid? */
+		/*
+		 * If setgid is set but no group execute bit then this
+		 * is a candidate for mandatory locking, not a setgid
+		 * executable.
+		 */
+		if ((mode & (S_ISGID | S_IXGRP)) == (S_ISGID | S_IXGRP))
+			bprm->e_gid = inode->i_gid;
 	}
 
 	/* We don't have VFS support for capabilities yet */
@@ -585,58 +633,24 @@ int prepare_binprm(struct linux_binprm *bprm)
 	cap_clear(bprm->cap_effective);
 
 	/*  To support inheritance of root-permissions and suid-root
-         *  executables under compatibility mode, we raise the
-         *  effective and inherited bitmasks of the executable file
-         *  (translation: we set the executable "capability dumb" and
-         *  set the allowed set to maximum). We don't set any forced
-         *  bits.
+         *  executables under compatibility mode, we raise all three
+         *  capability sets for the file.
          *
          *  If only the real uid is 0, we only raise the inheritable
-         *  bitmask of the executable file (translation: we set the
-         *  allowed set to maximum and the application to "capability
-         *  smart"). 
+         *  and permitted sets of the executable file.
          */
 
 	if (!issecure(SECURE_NOROOT)) {
-		if (bprm->e_uid == 0 || current->uid == 0)
+		if (bprm->e_uid == 0 || current->uid == 0) {
 			cap_set_full(bprm->cap_inheritable);
+			cap_set_full(bprm->cap_permitted);
+		}
 		if (bprm->e_uid == 0) 
 			cap_set_full(bprm->cap_effective);
 	}
 
-        /* Only if pP' is _not_ a subset of pP, do we consider there
-         * has been a capability related "change of capability".  In
-         * such cases, we need to check that the elevation of
-         * privilege does not go against other system constraints.
-         * The new Permitted set is defined below -- see (***). */
-	{
-		kernel_cap_t working =
-			cap_combine(bprm->cap_permitted,
-				    cap_intersect(bprm->cap_inheritable,
-						  current->cap_inheritable));
-		if (!cap_issubset(working, current->cap_permitted)) {
-			cap_raised = 1;
-		}
-	}
-
-	if (id_change || cap_raised) {
-		/* We can't suid-execute if we're sharing parts of the executable */
-		/* or if we're being traced (or if suid execs are not allowed)    */
-		/* (current->mm->mm_users > 1 is ok, as we'll get a new mm anyway)   */
-		if (IS_NOSUID(inode)
-		    || must_not_trace_exec(current)
-		    || (atomic_read(&current->fs->count) > 1)
-		    || (atomic_read(&current->sig->count) > 1)
-		    || (atomic_read(&current->files->count) > 1)) {
- 			if (id_change && !capable(CAP_SETUID))
- 				return -EPERM;
- 			if (cap_raised && !capable(CAP_SETPCAP))
-  				return -EPERM;
-		}
-	}
-
-	memset(bprm->buf,0,sizeof(bprm->buf));
-	return kernel_read(bprm->file,0,bprm->buf,128);
+	memset(bprm->buf,0,BINPRM_BUF_SIZE);
+	return kernel_read(bprm->file,0,bprm->buf,BINPRM_BUF_SIZE);
 }
 
 /*
@@ -646,36 +660,62 @@ int prepare_binprm(struct linux_binprm *bprm)
  * The formula used for evolving capabilities is:
  *
  *       pI' = pI
- * (***) pP' = fP | (fI & pI)
+ * (***) pP' = (fP & X) | (fI & pI)
  *       pE' = pP' & fE          [NB. fE is 0 or ~0]
  *
  * I=Inheritable, P=Permitted, E=Effective // p=process, f=file
- * ' indicates post-exec().
+ * ' indicates post-exec(), and X is the global 'cap_bset'.
+ *
  */
 
 void compute_creds(struct linux_binprm *bprm) 
 {
-	int new_permitted = cap_t(bprm->cap_permitted) |
-		(cap_t(bprm->cap_inheritable) & 
-		 cap_t(current->cap_inheritable));
+	kernel_cap_t new_permitted, working;
+	int do_unlock = 0;
+
+	new_permitted = cap_intersect(bprm->cap_permitted, cap_bset);
+	working = cap_intersect(bprm->cap_inheritable,
+				current->cap_inheritable);
+	new_permitted = cap_combine(new_permitted, working);
+
+	if (bprm->e_uid != current->uid || bprm->e_gid != current->gid ||
+	    !cap_issubset(new_permitted, current->cap_permitted)) {
+                current->dumpable = 0;
+		
+		lock_kernel();
+		if (must_not_trace_exec(current)
+		    || atomic_read(&current->fs->count) > 1
+		    || atomic_read(&current->files->count) > 1
+		    || atomic_read(&current->sig->count) > 1) {
+			if(!capable(CAP_SETUID)) {
+				bprm->e_uid = current->uid;
+				bprm->e_gid = current->gid;
+			}
+			if(!capable(CAP_SETPCAP)) {
+				new_permitted = cap_intersect(new_permitted,
+							current->cap_permitted);
+			}
+		}
+		do_unlock = 1;
+	}
+
 
 	/* For init, we want to retain the capabilities set
          * in the init_task struct. Thus we skip the usual
          * capability rules */
 	if (current->pid != 1) {
-		cap_t(current->cap_permitted) = new_permitted;
-		cap_t(current->cap_effective) = new_permitted & 
-						cap_t(bprm->cap_effective);
+		current->cap_permitted = new_permitted;
+		current->cap_effective =
+			cap_intersect(new_permitted, bprm->cap_effective);
 	}
 	
         /* AUD: Audit candidate if current->cap_effective is set */
 
         current->suid = current->euid = current->fsuid = bprm->e_uid;
         current->sgid = current->egid = current->fsgid = bprm->e_gid;
-        if (current->euid != current->uid || current->egid != current->gid ||
-	    !cap_issubset(new_permitted, current->cap_permitted))
-                current->dumpable = 0;
 
+	if(do_unlock)
+		unlock_kernel();
 	current->keep_capabilities = 0;
 }
 
@@ -697,7 +737,7 @@ void remove_arg_zero(struct linux_binprm *bprm)
 			kunmap(page);
 inside:
 			page = bprm->page[bprm->p/PAGE_SIZE];
-			kaddr = (char *)kmap(page);
+			kaddr = kmap(page);
 		}
 		kunmap(page);
 		bprm->argc--;
@@ -715,28 +755,26 @@ int search_binary_handler(struct linux_binprm *bprm,struct pt_regs *regs)
 	/* handle /sbin/loader.. */
 	{
 	    struct exec * eh = (struct exec *) bprm->buf;
-	    struct linux_binprm bprm_loader;
 
 	    if (!bprm->loader && eh->fh.f_magic == 0x183 &&
 		(eh->fh.f_flags & 0x3000) == 0x3000)
 	    {
-		int i;
 		char * dynloader[] = { "/sbin/loader" };
 		struct file * file;
+		unsigned long loader;
 
+		allow_write_access(bprm->file);
 		fput(bprm->file);
 		bprm->file = NULL;
 
-	        bprm_loader.p = PAGE_SIZE*MAX_ARG_PAGES-sizeof(void *);
-	        for (i = 0 ; i < MAX_ARG_PAGES ; i++)	/* clear page-table */
-                    bprm_loader.page[i] = NULL;
+	        loader = PAGE_SIZE*MAX_ARG_PAGES-sizeof(void *);
 
 		file = open_exec(dynloader[0]);
 		retval = PTR_ERR(file);
 		if (IS_ERR(file))
 			return retval;
 		bprm->file = file;
-		bprm->loader = bprm_loader.p;
+		bprm->loader = loader;
 		retval = prepare_binprm(bprm);
 		if (retval<0)
 			return retval;
@@ -757,6 +795,7 @@ int search_binary_handler(struct linux_binprm *bprm,struct pt_regs *regs)
 			retval = fn(bprm, regs);
 			if (retval >= 0) {
 				put_binfmt(fmt);
+				allow_write_access(bprm->file);
 				if (bprm->file)
 					fput(bprm->file);
 				bprm->file = NULL;
@@ -803,14 +842,14 @@ int do_execve(char * filename, char ** argv, char ** envp, struct pt_regs * regs
 	int retval;
 	int i;
 
-	bprm.p = PAGE_SIZE*MAX_ARG_PAGES-sizeof(void *);
-	memset(bprm.page, 0, MAX_ARG_PAGES*sizeof(bprm.page[0])); 
-
 	file = open_exec(filename);
 
 	retval = PTR_ERR(file);
 	if (IS_ERR(file))
 		return retval;
+
+	bprm.p = PAGE_SIZE*MAX_ARG_PAGES-sizeof(void *);
+	memset(bprm.page, 0, MAX_ARG_PAGES*sizeof(bprm.page[0])); 
 
 	bprm.file = file;
 	bprm.filename = filename;
@@ -818,11 +857,13 @@ int do_execve(char * filename, char ** argv, char ** envp, struct pt_regs * regs
 	bprm.loader = 0;
 	bprm.exec = 0;
 	if ((bprm.argc = count(argv, bprm.p / sizeof(void *))) < 0) {
+		allow_write_access(file);
 		fput(file);
 		return bprm.argc;
 	}
 
 	if ((bprm.envc = count(envp, bprm.p / sizeof(void *))) < 0) {
+		allow_write_access(file);
 		fput(file);
 		return bprm.envc;
 	}
@@ -851,14 +892,15 @@ int do_execve(char * filename, char ** argv, char ** envp, struct pt_regs * regs
 
 out:
 	/* Something went wrong, return the inode and free the argument pages*/
+	allow_write_access(bprm.file);
 	if (bprm.file)
 		fput(bprm.file);
 
-	/* Assumes that free_page() can take a NULL argument. */ 
-	/* I hope this is ok for all architectures */ 
-	for (i = 0 ; i < MAX_ARG_PAGES ; i++)
-		if (bprm.page[i])
-			__free_page(bprm.page[i]);
+	for (i = 0 ; i < MAX_ARG_PAGES ; i++) {
+		struct page * page = bprm.page[i];
+		if (page)
+			__free_page(page);
+	}
 
 	return retval;
 }
@@ -911,8 +953,8 @@ int do_coredump(long signr, struct pt_regs * regs)
 		goto close_fail;
 	if (!binfmt->core_dump(signr, regs, file))
 		goto close_fail;
-	filp_close(file, NULL);
 	unlock_kernel();
+	filp_close(file, NULL);
 	return 1;
 
 close_fail:

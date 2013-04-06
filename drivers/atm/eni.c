@@ -1187,14 +1187,12 @@ static void poll_tx(struct atm_dev *dev)
 		if (tx->send)
 			while ((skb = skb_dequeue(&tx->backlog))) {
 				res = do_tx(skb);
-				if (res == enq_ok) atomic_dec(&tx->backlog_len);
-				else {
-					DPRINTK("re-queuing TX PDU\n");
-					skb_queue_head(&tx->backlog,skb);
+				if (res == enq_ok) continue;
+				DPRINTK("re-queuing TX PDU\n");
+				skb_queue_head(&tx->backlog,skb);
 requeued++;
-					if (res == enq_jam) return;
-					else break;
-				}
+				if (res == enq_jam) return;
+				break;
 			}
 	}
 }
@@ -1326,7 +1324,6 @@ static int reserve_or_set_tx(struct atm_vcc *vcc,struct atm_trafprm *txtp,
 		tx->send = mem;
 		tx->words = size >> 2;
 		skb_queue_head_init(&tx->backlog);
-		atomic_set(&tx->backlog_len,0);
 		for (order = 0; size > (1 << (order+10)); order++);
 		eni_out((order << MID_SIZE_SHIFT) |
 		    ((tx->send-eni_dev->ram) >> (MID_LOC_SKIP+2)),
@@ -1711,7 +1708,7 @@ static int __devinit eni_do_init(struct atm_dev *dev)
 	dev->link_rate = ATM_OC3_PCR;
 	eni_dev = ENI_DEV(dev);
 	pci_dev = eni_dev->pci_dev;
-	real_base = pci_dev->resource[0].start;
+	real_base = pci_resource_start(pci_dev, 0);
 	eni_dev->irq = pci_dev->irq;
 	error = pci_read_config_byte(pci_dev,PCI_REVISION_ID,&revision);
 	if (error) {
@@ -2064,6 +2061,8 @@ static int eni_setsockopt(struct atm_vcc *vcc,int level,int optname,
 
 static int eni_send(struct atm_vcc *vcc,struct sk_buff *skb)
 {
+	enum enq_res res;
+
 	DPRINTK(">eni_send\n");
 	if (!ENI_VCC(vcc)->tx) {
 		if (vcc->pop) vcc->pop(vcc,skb);
@@ -2085,8 +2084,11 @@ static int eni_send(struct atm_vcc *vcc,struct sk_buff *skb)
 	}
 submitted++;
 	ATM_SKB(skb)->vcc = vcc;
+	tasklet_disable(&ENI_DEV(vcc->dev)->task);
+	res = do_tx(skb);
+	tasklet_enable(&ENI_DEV(vcc->dev)->task);
+	if (res == enq_ok) return 0;
 	skb_queue_tail(&ENI_VCC(vcc)->tx->backlog,skb);
-	atomic_inc(&ENI_VCC(vcc)->tx->backlog_len);
 backlogged++;
 	tasklet_schedule(&ENI_DEV(vcc->dev)->task);
 	return 0;
@@ -2186,8 +2188,8 @@ static int eni_proc_read(struct atm_dev *dev,loff_t *pos,char *page)
 			    tx == eni_dev->ubr ? " (UBR)" : "");
 		}
 		if (--left) continue;
-		return sprintf(page,"%10sbacklog %d bytes\n","",
-		    atomic_read(&tx->backlog_len));
+		return sprintf(page,"%10sbacklog %u packets\n","",
+		    skb_queue_len(&tx->backlog));
 	}
 	for (vcc = dev->vccs; vcc; vcc = vcc->next) {
 		struct eni_vcc *eni_vcc = ENI_VCC(vcc);
@@ -2246,8 +2248,16 @@ static int __devinit eni_init_one(struct pci_dev *pci_dev,
 	int error = -ENOMEM;
 
 	DPRINTK("eni_init_one\n");
+
+	MOD_INC_USE_COUNT; /* @@@ we don't support unloading yet */
+
+	if (pci_enable_device(pci_dev)) {
+		error = -EIO;
+		goto out0;
+	}
+
 	eni_dev = (struct eni_dev *) kmalloc(sizeof(struct eni_dev),GFP_KERNEL);
-	if (!eni_dev) return -ENOMEM;
+	if (!eni_dev) goto out0;
 	if (!cpu_zeroes) {
 		cpu_zeroes = pci_alloc_consistent(pci_dev,ENI_ZEROES_SIZE,
 		    &zeroes);
@@ -2265,7 +2275,6 @@ static int __devinit eni_init_one(struct pci_dev *pci_dev,
 	if (error) goto out3;
 	eni_dev->more = eni_boards;
 	eni_boards = dev;
-	MOD_INC_USE_COUNT; /* @@@ we don't support unloading yet */
 	return 0;
 out3:
 	atm_dev_deregister(dev);
@@ -2274,6 +2283,8 @@ out2:
 	cpu_zeroes = NULL;
 out1:
 	kfree(eni_dev);
+out0:
+	MOD_DEC_USE_COUNT; /* @@@ we don't support unloading yet */
 	return error;
 }
 

@@ -26,7 +26,7 @@
 
 /* inode dynamic allocation 1999, Andrea Arcangeli <andrea@suse.de> */
 
-#define INODE_PARANOIA 1
+/* #define INODE_PARANOIA 1 */
 /* #define INODE_DEBUG 1 */
 
 /*
@@ -71,13 +71,19 @@ struct {
 	int nr_inodes;
 	int nr_unused;
 	int dummy[5];
-} inodes_stat = {0, 0,};
+} inodes_stat;
 
 static kmem_cache_t * inode_cachep;
 
 #define alloc_inode() \
 	 ((struct inode *) kmem_cache_alloc(inode_cachep, SLAB_KERNEL))
-#define destroy_inode(inode) kmem_cache_free(inode_cachep, (inode))
+static void destroy_inode(struct inode *inode) 
+{
+	if (!list_empty(&inode->i_dirty_buffers))
+		BUG();
+	kmem_cache_free(inode_cachep, (inode));
+}
+
 
 /*
  * These are initializations that only need to be done
@@ -94,8 +100,11 @@ static void init_once(void * foo, kmem_cache_t * cachep, unsigned long flags)
 		memset(inode, 0, sizeof(*inode));
 		init_waitqueue_head(&inode->i_wait);
 		INIT_LIST_HEAD(&inode->i_hash);
-		INIT_LIST_HEAD(&inode->i_data.pages);
+		INIT_LIST_HEAD(&inode->i_data.clean_pages);
+		INIT_LIST_HEAD(&inode->i_data.dirty_pages);
+		INIT_LIST_HEAD(&inode->i_data.locked_pages);
 		INIT_LIST_HEAD(&inode->i_dentry);
+		INIT_LIST_HEAD(&inode->i_dirty_buffers);
 		sema_init(&inode->i_sem, 1);
 		sema_init(&inode->i_zombie, 1);
 		spin_lock_init(&inode->i_data.i_shared_lock);
@@ -122,14 +131,14 @@ static void init_once(void * foo, kmem_cache_t * cachep, unsigned long flags)
  *	Mark an inode as dirty. Callers should use mark_inode_dirty.
  */
  
-void __mark_inode_dirty(struct inode *inode)
+void __mark_inode_dirty(struct inode *inode, int flags)
 {
 	struct super_block * sb = inode->i_sb;
 
 	if (sb) {
 		spin_lock(&inode_lock);
-		if (!(inode->i_state & I_DIRTY)) {
-			inode->i_state |= I_DIRTY;
+		if ((inode->i_state & flags) != flags) {
+			inode->i_state |= flags;
 			/* Only add valid (ie hashed) inodes to the dirty list */
 			if (!list_empty(&inode->i_hash)) {
 				list_del(&inode->i_list);
@@ -162,26 +171,27 @@ static inline void wait_on_inode(struct inode *inode)
 }
 
 
-static inline void write_inode(struct inode *inode)
+static inline void write_inode(struct inode *inode, int sync)
 {
 	if (inode->i_sb && inode->i_sb->s_op && inode->i_sb->s_op->write_inode)
-		inode->i_sb->s_op->write_inode(inode);
+		inode->i_sb->s_op->write_inode(inode, sync);
 }
 
 static inline void __iget(struct inode * inode)
 {
-	if (!inode->i_count++)
-	{
-		if (!(inode->i_state & I_DIRTY))
-		{
-			list_del(&inode->i_list);
-			list_add(&inode->i_list, &inode_in_use);
-		}
-		inodes_stat.nr_unused--;
+	if (atomic_read(&inode->i_count)) {
+		atomic_inc(&inode->i_count);
+		return;
 	}
+	atomic_inc(&inode->i_count);
+	if (!(inode->i_state & I_DIRTY)) {
+		list_del(&inode->i_list);
+		list_add(&inode->i_list, &inode_in_use);
+	}
+	inodes_stat.nr_unused--;
 }
 
-static inline void sync_one(struct inode *inode)
+static inline void sync_one(struct inode *inode, int sync)
 {
 	if (inode->i_state & I_LOCK) {
 		__iget(inode);
@@ -190,14 +200,25 @@ static inline void sync_one(struct inode *inode)
 		iput(inode);
 		spin_lock(&inode_lock);
 	} else {
+		unsigned dirty;
+
 		list_del(&inode->i_list);
-		list_add(&inode->i_list,
-			 inode->i_count ? &inode_in_use : &inode_unused);
+		list_add(&inode->i_list, atomic_read(&inode->i_count)
+							? &inode_in_use
+							: &inode_unused);
 		/* Set I_LOCK, reset I_DIRTY */
-		inode->i_state ^= I_DIRTY | I_LOCK;
+		dirty = inode->i_state & I_DIRTY;
+		inode->i_state |= I_LOCK;
+		inode->i_state &= ~I_DIRTY;
 		spin_unlock(&inode_lock);
 
-		write_inode(inode);
+		filemap_fdatasync(inode->i_mapping);
+
+		/* Don't write the inode if only I_DIRTY_PAGES was set */
+		if (dirty & (I_DIRTY_SYNC | I_DIRTY_DATASYNC))
+			write_inode(inode, sync);
+
+		filemap_fdatawait(inode->i_mapping);
 
 		spin_lock(&inode_lock);
 		inode->i_state &= ~I_LOCK;
@@ -210,7 +231,7 @@ static inline void sync_list(struct list_head *head)
 	struct list_head * tmp;
 
 	while ((tmp = head->prev) != head)
-		sync_one(list_entry(tmp, struct inode, i_list));
+		sync_one(list_entry(tmp, struct inode, i_list), 0);
 }
 
 /**
@@ -259,23 +280,78 @@ static void sync_all_inodes(void)
 /**
  *	write_inode_now	-	write an inode to disk
  *	@inode: inode to write to disk
+ *	@sync: whether the write should be synchronous or not
  *
  *	This function commits an inode to disk immediately if it is
  *	dirty. This is primarily needed by knfsd.
  */
  
-void write_inode_now(struct inode *inode)
+void write_inode_now(struct inode *inode, int sync)
 {
 	struct super_block * sb = inode->i_sb;
 
 	if (sb) {
 		spin_lock(&inode_lock);
 		while (inode->i_state & I_DIRTY)
-			sync_one(inode);
+			sync_one(inode, sync);
 		spin_unlock(&inode_lock);
 	}
 	else
 		printk("write_inode_now: no super block\n");
+}
+
+/**
+ * generic_osync_inode - flush all dirty data for a given inode to disk
+ * @inode: inode to write
+ * @datasync: if set, don't bother flushing timestamps
+ *
+ * This can be called by file_write functions for files which have the
+ * O_SYNC flag set, to flush dirty writes to disk.  
+ */
+
+int generic_osync_inode(struct inode *inode, int datasync)
+{
+	int err;
+	
+	/* 
+	 * WARNING
+	 *
+	 * Currently, the filesystem write path does not pass the
+	 * filp down to the low-level write functions.  Therefore it
+	 * is impossible for (say) __block_commit_write to know if
+	 * the operation is O_SYNC or not.
+	 *
+	 * Ideally, O_SYNC writes would have the filesystem call
+	 * ll_rw_block as it went to kick-start the writes, and we
+	 * could call osync_inode_buffers() here to wait only for
+	 * those IOs which have already been submitted to the device
+	 * driver layer.  As it stands, if we did this we'd not write
+	 * anything to disk since our writes have not been queued by
+	 * this point: they are still on the dirty LRU.
+	 * 
+	 * So, currently we will call fsync_inode_buffers() instead,
+	 * to flush _all_ dirty buffers for this inode to disk on 
+	 * every O_SYNC write, not just the synchronous I/Os.  --sct
+	 */
+
+#ifdef WRITERS_QUEUE_IO
+	err = osync_inode_buffers(inode);
+#else
+	err = fsync_inode_buffers(inode);
+#endif
+
+	spin_lock(&inode_lock);
+	if (!(inode->i_state & I_DIRTY))
+		goto out;
+	if (datasync && !(inode->i_state & I_DIRTY_DATASYNC))
+		goto out;
+	spin_unlock(&inode_lock);
+	write_inode_now(inode, 1);
+	return err;
+
+ out:
+	spin_unlock(&inode_lock);
+	return err;
 }
 
 /**
@@ -289,6 +365,9 @@ void write_inode_now(struct inode *inode)
  
 void clear_inode(struct inode *inode)
 {
+	if (!list_empty(&inode->i_dirty_buffers))
+		invalidate_inode_buffers(inode);
+       
 	if (inode->i_data.nrpages)
 		BUG();
 	if (!(inode->i_state & I_FREEING))
@@ -325,6 +404,7 @@ static void dispose_list(struct list_head * head)
 			truncate_inode_pages(&inode->i_data, 0);
 		clear_inode(inode);
 		destroy_inode(inode);
+		inodes_stat.nr_inodes--;
 	}
 }
 
@@ -347,7 +427,8 @@ static int invalidate_list(struct list_head *head, struct super_block * sb, stru
 		inode = list_entry(tmp, struct inode, i_list);
 		if (inode->i_sb != sb)
 			continue;
-		if (!inode->i_count) {
+		invalidate_inode_buffers(inode);
+		if (!atomic_read(&inode->i_count)) {
 			list_del(&inode->i_hash);
 			INIT_LIST_HEAD(&inode->i_hash);
 			list_del(&inode->i_list);
@@ -408,7 +489,8 @@ int invalidate_inodes(struct super_block * sb)
  *      dispose_list.
  */
 #define CAN_UNUSE(inode) \
-	(((inode)->i_state | (inode)->i_data.nrpages) == 0)
+	((((inode)->i_state | (inode)->i_data.nrpages) == 0)  && \
+	 !inode_has_buffers(inode))
 #define INODE(entry)	(list_entry(entry, struct inode, i_list))
 
 void prune_icache(int goal)
@@ -433,7 +515,7 @@ void prune_icache(int goal)
 			BUG();
 		if (!CAN_UNUSE(inode))
 			continue;
-		if (inode->i_count)
+		if (atomic_read(&inode->i_count))
 			BUG();
 		list_del(tmp);
 		list_del(&inode->i_hash);
@@ -450,21 +532,25 @@ void prune_icache(int goal)
 	dispose_list(freeable);
 }
 
-int shrink_icache_memory(int priority, int gfp_mask)
+void shrink_icache_memory(int priority, int gfp_mask)
 {
 	int count = 0;
-		
+
+	/*
+	 * Nasty deadlock avoidance..
+	 *
+	 * We may hold various FS locks, and we don't
+	 * want to recurse into the FS that called us
+	 * in clear_inode() and friends..
+	 */
+	if (!(gfp_mask & __GFP_IO))
+		return;
+
 	if (priority)
 		count = inodes_stat.nr_unused / priority;
-	prune_icache(count);
-	/* FIXME: kmem_cache_shrink here should tell us
-	   the number of pages freed, and it should
-	   work in a __GFP_DMA/__GFP_HIGHMEM behaviour
-	   to free only the interesting pages in
-	   function of the needs of the current allocation. */
-	kmem_cache_shrink(inode_cachep);
 
-	return 0;
+	prune_icache(count);
+	kmem_cache_shrink(inode_cachep);
 }
 
 /*
@@ -485,9 +571,9 @@ static struct inode * find_inode(struct super_block * sb, unsigned long ino, str
 		if (tmp == head)
 			break;
 		inode = list_entry(tmp, struct inode, i_hash);
-		if (inode->i_sb != sb)
-			continue;
 		if (inode->i_ino != ino)
+			continue;
+		if (inode->i_sb != sb)
 			continue;
 		if (find_actor && !find_actor(inode, ino, opaque))
 			continue;
@@ -505,9 +591,9 @@ static struct inode * find_inode(struct super_block * sb, unsigned long ino, str
  */
 static void clean_inode(struct inode *inode)
 {
-	static struct address_space_operations empty_aops = {};
-	static struct inode_operations empty_iops = {};
-	static struct file_operations empty_fops = {};
+	static struct address_space_operations empty_aops;
+	static struct inode_operations empty_iops;
+	static struct file_operations empty_fops;
 	memset(&inode->u, 0, sizeof(inode->u));
 	inode->i_sock = 0;
 	inode->i_op = &empty_iops;
@@ -520,7 +606,7 @@ static void clean_inode(struct inode *inode)
 	inode->i_pipe = NULL;
 	inode->i_bdev = NULL;
 	inode->i_data.a_ops = &empty_aops;
-	inode->i_data.host = (void*)inode;
+	inode->i_data.host = inode;
 	inode->i_mapping = &inode->i_data;
 }
 
@@ -539,19 +625,20 @@ static void clean_inode(struct inode *inode)
  
 struct inode * get_empty_inode(void)
 {
-	static unsigned long last_ino = 0;
+	static unsigned long last_ino;
 	struct inode * inode;
 
 	inode = alloc_inode();
 	if (inode)
 	{
 		spin_lock(&inode_lock);
+		inodes_stat.nr_inodes++;
 		list_add(&inode->i_list, &inode_in_use);
 		inode->i_sb = NULL;
 		inode->i_dev = 0;
 		inode->i_ino = ++last_ino;
 		inode->i_flags = 0;
-		inode->i_count = 1;
+		atomic_set(&inode->i_count, 1);
 		inode->i_state = 0;
 		spin_unlock(&inode_lock);
 		clean_inode(inode);
@@ -577,13 +664,14 @@ static struct inode * get_new_inode(struct super_block *sb, unsigned long ino, s
 		/* We released the lock, so.. */
 		old = find_inode(sb, ino, head, find_actor, opaque);
 		if (!old) {
+			inodes_stat.nr_inodes++;
 			list_add(&inode->i_list, &inode_in_use);
 			list_add(&inode->i_hash, head);
 			inode->i_sb = sb;
 			inode->i_dev = sb->s_dev;
 			inode->i_ino = ino;
 			inode->i_flags = 0;
-			inode->i_count = 1;
+			atomic_set(&inode->i_count, 1);
 			inode->i_state = I_LOCK;
 			spin_unlock(&inode_lock);
 
@@ -750,79 +838,67 @@ void iput(struct inode *inode)
 {
 	if (inode) {
 		struct super_operations *op = NULL;
-		int destroy = 0;
 
 		if (inode->i_sb && inode->i_sb->s_op)
 			op = inode->i_sb->s_op;
 		if (op && op->put_inode)
 			op->put_inode(inode);
 
-		spin_lock(&inode_lock);
-		if (!--inode->i_count) {
-			if (!inode->i_nlink) {
-				list_del(&inode->i_hash);
-				INIT_LIST_HEAD(&inode->i_hash);
+		if (!atomic_dec_and_lock(&inode->i_count, &inode_lock))
+			return;
+
+		if (!inode->i_nlink) {
+			list_del(&inode->i_hash);
+			INIT_LIST_HEAD(&inode->i_hash);
+			list_del(&inode->i_list);
+			INIT_LIST_HEAD(&inode->i_list);
+			inode->i_state|=I_FREEING;
+			inodes_stat.nr_inodes--;
+			spin_unlock(&inode_lock);
+
+			if (inode->i_data.nrpages)
+				truncate_inode_pages(&inode->i_data, 0);
+
+			if (op && op->delete_inode) {
+				void (*delete)(struct inode *) = op->delete_inode;
+				/* s_op->delete_inode internally recalls clear_inode() */
+				delete(inode);
+			} else
+				clear_inode(inode);
+			if (inode->i_state != I_CLEAR)
+				BUG();
+		} else {
+			if (!list_empty(&inode->i_hash)) {
+				if (!(inode->i_state & I_DIRTY)) {
+					list_del(&inode->i_list);
+					list_add(&inode->i_list,
+						 &inode_unused);
+				}
+				inodes_stat.nr_unused++;
+				spin_unlock(&inode_lock);
+				return;
+			} else {
+				/* magic nfs path */
 				list_del(&inode->i_list);
 				INIT_LIST_HEAD(&inode->i_list);
 				inode->i_state|=I_FREEING;
+				inodes_stat.nr_inodes--;
 				spin_unlock(&inode_lock);
-
-				if (inode->i_data.nrpages)
-					truncate_inode_pages(&inode->i_data, 0);
-
-				destroy = 1;
-				if (op && op->delete_inode) {
-					void (*delete)(struct inode *) = op->delete_inode;
-					/* s_op->delete_inode internally recalls clear_inode() */
-					delete(inode);
-				} else
-					clear_inode(inode);
-				if (inode->i_state != I_CLEAR)
-					BUG();
-
-				spin_lock(&inode_lock);
-			} else {
-				if (!list_empty(&inode->i_hash)) {
-					if (!(inode->i_state & I_DIRTY)) {
-						list_del(&inode->i_list);
-						list_add(&inode->i_list,
-							 &inode_unused);
-					}
-					inodes_stat.nr_unused++;
-				} else {
-					/* magic nfs path */
-					list_del(&inode->i_list);
-					INIT_LIST_HEAD(&inode->i_list);
-					inode->i_state|=I_FREEING;
-					spin_unlock(&inode_lock);
-					clear_inode(inode);
-					destroy = 1;
-					spin_lock(&inode_lock);
-				}
+				clear_inode(inode);
 			}
-#ifdef INODE_PARANOIA
-if (inode->i_flock)
-printk(KERN_ERR "iput: inode %s/%ld still has locks!\n",
-kdevname(inode->i_dev), inode->i_ino);
-if (!list_empty(&inode->i_dentry))
-printk(KERN_ERR "iput: device %s inode %ld still has aliases!\n",
-kdevname(inode->i_dev), inode->i_ino);
-if (inode->i_count)
-printk(KERN_ERR "iput: device %s inode %ld count changed, count=%d\n",
-kdevname(inode->i_dev), inode->i_ino, inode->i_count);
-if (atomic_read(&inode->i_sem.count) != 1)
-printk(KERN_ERR "iput: Aieee, semaphore in use inode %s/%ld, count=%d\n",
-kdevname(inode->i_dev), inode->i_ino, atomic_read(&inode->i_sem.count));
-#endif
 		}
-		if (inode->i_count > (1<<31)) {
-			printk(KERN_ERR "iput: inode %s/%ld count wrapped\n",
-				kdevname(inode->i_dev), inode->i_ino);
-		}
-		spin_unlock(&inode_lock);
-		if (destroy)
-			destroy_inode(inode);
+		destroy_inode(inode);
 	}
+}
+
+void force_delete(struct inode *inode)
+{
+	/*
+	 * Kill off unused inodes ... iput() will unhash and
+	 * delete the inode if we set i_nlink to zero.
+	 */
+	if (atomic_read(&inode->i_count) == 1)
+		inode->i_nlink = 0;
 }
 
 /**
@@ -913,7 +989,7 @@ void update_atime (struct inode *inode)
 	if ( IS_NODIRATIME (inode) && S_ISDIR (inode->i_mode) ) return;
 	if ( IS_RDONLY (inode) ) return;
 	inode->i_atime = CURRENT_TIME;
-	mark_inode_dirty (inode);
+	mark_inode_dirty_sync (inode);
 }   /*  End Function update_atime  */
 
 

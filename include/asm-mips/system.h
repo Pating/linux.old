@@ -153,9 +153,6 @@ __asm__ __volatile__(					\
 #define set_mb(var, value) \
 do { var = value; mb(); } while (0)
 
-#define set_rmb(var, value) \
-do { var = value; rmb(); } while (0)
-
 #define set_wmb(var, value) \
 do { var = value; wmb(); } while (0)
 
@@ -267,6 +264,7 @@ extern void __die(const char *, struct pt_regs *, const char *where,
 	unsigned long line) __attribute__((noreturn));
 extern void __die_if_kernel(const char *, struct pt_regs *, const char *where,
 	unsigned long line);
+extern int abs(int);
 
 #define die(msg, regs)							\
 	__die(msg, regs, __FILE__ ":"__FUNCTION__, __LINE__)

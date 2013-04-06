@@ -3,14 +3,16 @@
 
 #ifdef __KERNEL__
 
-#define pcibios_assign_all_busses()	0
-
-#define PCIBIOS_MIN_IO		0x8000
-#define PCIBIOS_MIN_MEM		0x40000000
+#include <asm/arch/hardware.h>
 
 extern inline void pcibios_set_master(struct pci_dev *dev)
 {
 	/* No special bus mastering setup handling */
+}
+
+extern inline void pcibios_penalize_isa_irq(int irq)
+{
+	/* We don't do dynamic PCI IRQ allocation */
 }
 
 #include <asm/scatterlist.h>
@@ -88,8 +90,10 @@ pci_map_sg(struct pci_dev *hwdev, struct scatterlist *sg, int nents, int directi
 {
 	int i;
 
-	for (i = 0; i < nents; i++, sg++)
+	for (i = 0; i < nents; i++, sg++) {
 		consistent_sync(sg->address, sg->length, direction);
+		sg->dma_address = virt_to_bus(sg->address);
+	}
 
 	return nents;
 }
@@ -131,7 +135,7 @@ pci_dma_sync_sg(struct pci_dev *hwdev, struct scatterlist *sg, int nelems, int d
 	int i;
 
 	for (i = 0; i < nelems; i++, sg++)
-		consistent_sync(sg->address, sg->length, 3);
+		consistent_sync(sg->address, sg->length, direction);
 }
 
 /* Return whether the given PCI device DMA address mask can
@@ -143,15 +147,6 @@ extern inline int pci_dma_supported(struct pci_dev *hwdev, dma_addr_t mask)
 {
 	return 1;
 }
-
-/* These macros should be used after a pci_map_sg call has been done
- * to get bus addresses of each of the SG entries and their lengths.
- * You should only work with the number of sg entries pci_map_sg
- * returns, or alternatively stop on the first sg_dma_len(sg) which
- * is 0.
- */
-#define sg_dma_address(sg)      (virt_to_bus((sg)->address))
-#define sg_dma_len(sg)          ((sg)->length)
 
 #endif /* __KERNEL__ */
  

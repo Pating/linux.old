@@ -1,4 +1,4 @@
-/* $Id: fault.c,v 1.48 2000/05/03 06:37:03 davem Exp $
+/* $Id: fault.c,v 1.51 2000/09/14 06:22:32 anton Exp $
  * arch/sparc64/mm/fault.c: Page fault handlers for the 64-bit Sparc.
  *
  * Copyright (C) 1996 David S. Miller (davem@caip.rutgers.edu)
@@ -42,7 +42,7 @@ unsigned long __init prom_probe_memory (void)
 	sp_banks[0].base_addr = base_paddr;
 	sp_banks[0].num_bytes = bytes;
 
-	while (mlist->theres_more != (void *) 0){
+	while (mlist->theres_more != (void *) 0) {
 		i++;
 		mlist = mlist->theres_more;
 		bytes = mlist->num_bytes;
@@ -68,7 +68,7 @@ unsigned long __init prom_probe_memory (void)
 	/* Now mask all bank sizes on a page boundary, it is all we can
 	 * use anyways.
 	 */
-	for(i=0; sp_banks[i].num_bytes != 0; i++)
+	for (i = 0; sp_banks[i].num_bytes != 0; i++)
 		sp_banks[i].num_bytes &= PAGE_MASK;
 
 	return tally;
@@ -77,7 +77,7 @@ unsigned long __init prom_probe_memory (void)
 void unhandled_fault(unsigned long address, struct task_struct *tsk,
                      struct pt_regs *regs)
 {
-	if((unsigned long) address < PAGE_SIZE) {
+	if ((unsigned long) address < PAGE_SIZE) {
 		printk(KERN_ALERT "Unable to handle kernel NULL "
 		       "pointer dereference\n");
 	} else {
@@ -100,17 +100,17 @@ static unsigned int get_user_insn(unsigned long tpc)
 	unsigned long pa;
 	u32 insn = 0;
 
-	if(pgd_none(*pgdp))
+	if (pgd_none(*pgdp))
 		goto out;
 	pmdp = pmd_offset(pgdp, tpc);
-	if(pmd_none(*pmdp))
+	if (pmd_none(*pmdp))
 		goto out;
 	ptep = pte_offset(pmdp, tpc);
 	pte = *ptep;
-	if(!pte_present(pte))
+	if (!pte_present(pte))
 		goto out;
 
-	pa  = phys_base + (pte_pagenr(pte) << PAGE_SHIFT);
+	pa  = (pte_val(pte) & _PAGE_PADDR);
 	pa += (tpc & ~PAGE_MASK);
 
 	/* Use phys bypass so we don't pollute dtlb/dcache. */
@@ -145,7 +145,7 @@ static void do_kernel_fault(struct pt_regs *regs, int si_code, int fault_code,
 		
 	if (!insn) {
 		if (regs->tstate & TSTATE_PRIV) {
-			if (regs->tpc & 0x3)
+			if (!regs->tpc || (regs->tpc & 0x3))
 				goto cannot_handle;
 			insn = *(unsigned int *)regs->tpc;
 		} else {

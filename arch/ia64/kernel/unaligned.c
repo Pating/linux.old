@@ -1,8 +1,8 @@
 /*
  * Architecture-specific unaligned trap handling.
  *
- * Copyright (C) 1999 Hewlett-Packard Co
- * Copyright (C) 1999 Stephane Eranian <eranian@hpl.hp.com>
+ * Copyright (C) 1999-2000 Hewlett-Packard Co
+ * Copyright (C) 1999-2000 Stephane Eranian <eranian@hpl.hp.com>
  */
 #include <linux/kernel.h>
 #include <linux/sched.h>
@@ -278,9 +278,9 @@ set_rse_reg(struct pt_regs *regs, unsigned long r1, unsigned long val, int nat)
 	bspstore = (unsigned long *)regs->ar_bspstore;
 
 	DPRINT(("rse_slot_num=0x%lx\n",ia64_rse_slot_num((unsigned long *)sw->ar_bspstore)));
-	DPRINT(("kbs=%p nlocals=%ld\n", kbs, nlocals));
+	DPRINT(("kbs=%p nlocals=%ld\n", (void *) kbs, nlocals));
 	DPRINT(("bspstore next rnat slot %p\n",
-		ia64_rse_rnat_addr((unsigned long *)sw->ar_bspstore)));
+		(void *) ia64_rse_rnat_addr((unsigned long *)sw->ar_bspstore)));
 	DPRINT(("on_kbs=%ld rnats=%ld\n",
 		on_kbs, ((sw->ar_bspstore-(unsigned long)kbs)>>3) - on_kbs));
 
@@ -292,7 +292,7 @@ set_rse_reg(struct pt_regs *regs, unsigned long r1, unsigned long val, int nat)
 	addr    = slot = ia64_rse_skip_regs(bsp, r1 - 32);
 
 	DPRINT(("ubs_end=%p bsp=%p addr=%p slot=0x%lx\n",
-		ubs_end, bsp, addr, ia64_rse_slot_num(addr)));
+		(void *) ubs_end, (void *) bsp, (void *) addr, ia64_rse_slot_num(addr)));
 
 	ia64_poke(regs, current, (unsigned long)addr, val);
 
@@ -303,7 +303,7 @@ set_rse_reg(struct pt_regs *regs, unsigned long r1, unsigned long val, int nat)
 
 	ia64_peek(regs, current, (unsigned long)addr, &rnats);
 	DPRINT(("rnat @%p = 0x%lx nat=%d rnatval=%lx\n",
-		addr, rnats, nat, rnats &ia64_rse_slot_num(slot)));
+		(void *) addr, rnats, nat, rnats &ia64_rse_slot_num(slot)));
 	
 	if (nat) {
 		rnats |= __IA64_UL(1) << ia64_rse_slot_num(slot);
@@ -312,7 +312,7 @@ set_rse_reg(struct pt_regs *regs, unsigned long r1, unsigned long val, int nat)
 	}
 	ia64_poke(regs, current, (unsigned long)addr, rnats);
 
-	DPRINT(("rnat changed to @%p = 0x%lx\n", addr, rnats));
+	DPRINT(("rnat changed to @%p = 0x%lx\n", (void *) addr, rnats));
 }
 
 
@@ -373,7 +373,7 @@ get_rse_reg(struct pt_regs *regs, unsigned long r1, unsigned long *val, int *nat
 	addr    = slot = ia64_rse_skip_regs(bsp, r1 - 32);
 
 	DPRINT(("ubs_end=%p bsp=%p addr=%p slot=0x%lx\n",
-		ubs_end, bsp, addr, ia64_rse_slot_num(addr)));
+		(void *) ubs_end, (void *) bsp, (void *) addr, ia64_rse_slot_num(addr)));
 	
 	ia64_peek(regs, current, (unsigned long)addr, val);
 
@@ -383,7 +383,7 @@ get_rse_reg(struct pt_regs *regs, unsigned long r1, unsigned long *val, int *nat
 	addr = ia64_rse_rnat_addr(addr);
 
 	ia64_peek(regs, current, (unsigned long)addr, &rnats);
-	DPRINT(("rnat @%p = 0x%lx\n", addr, rnats));
+	DPRINT(("rnat @%p = 0x%lx\n", (void *) addr, rnats));
 	
 	if (nat)
 		*nat = rnats >> ia64_rse_slot_num(slot) & 0x1;
@@ -437,13 +437,13 @@ setreg(unsigned long regnum, unsigned long val, int nat, struct pt_regs *regs)
 	 * UNAT bit_pos = GR[r3]{8:3} form EAS-2.4
 	 */
 	bitmask   = __IA64_UL(1) << (addr >> 3 & 0x3f);
-	DPRINT(("*0x%lx=0x%lx NaT=%d prev_unat @%p=%lx\n", addr, val, nat, unat, *unat));
+	DPRINT(("*0x%lx=0x%lx NaT=%d prev_unat @%p=%lx\n", addr, val, nat, (void *) unat, *unat));
 	if (nat) {
 		*unat |= bitmask;
 	} else {
 		*unat &= ~bitmask;
 	}
-	DPRINT(("*0x%lx=0x%lx NaT=%d new unat: %p=%lx\n", addr, val, nat, unat,*unat));
+	DPRINT(("*0x%lx=0x%lx NaT=%d new unat: %p=%lx\n", addr, val, nat, (void *) unat,*unat));
 }
 
 #define IA64_FPH_OFFS(r) (r - IA64_FIRST_ROTATING_FR)
@@ -455,37 +455,19 @@ setfpreg(unsigned long regnum, struct ia64_fpreg *fpval, struct pt_regs *regs)
 	unsigned long addr;
 
 	/*
-	 * From EAS-2.5: FPDisableFault has higher priority than 
-	 * Unaligned Fault. Thus, when we get here, we know the partition is 
-	 * enabled.
+	 * From EAS-2.5: FPDisableFault has higher priority than Unaligned
+	 * Fault. Thus, when we get here, we know the partition is enabled.
+	 * To update f32-f127, there are three choices:
 	 *
-	 * The registers [32-127] are ususally saved in the tss. When get here,
-	 * they are NECESSARY live because they are only saved explicitely.
-	 * We have 3 ways of updating the values: force a save of the range
-	 * in tss, use a gigantic switch/case statement or generate code on the
-	 * fly to store to the right register.
-	 * For now, we are using the (slow) save/restore way.
+	 *	(1) save f32-f127 to thread.fph and update the values there
+	 *	(2) use a gigantic switch statement to directly access the registers
+	 *	(3) generate code on the fly to update the desired register
+	 *
+	 * For now, we are using approach (1).
 	 */
  	if (regnum >= IA64_FIRST_ROTATING_FR) {
-		/*
-		 * force a save of [32-127] to tss
-		 * we use the __() form to avoid fiddling with the dfh bit
-		 */
-		__ia64_save_fpu(&current->thread.fph[0]);
-
+		ia64_sync_fph(current);
 		current->thread.fph[IA64_FPH_OFFS(regnum)] = *fpval;
-
-		__ia64_load_fpu(&current->thread.fph[0]);
-
-		/*
-	 	 * mark the high partition as being used now
-		 *
-		 * This is REQUIRED because the disabled_fph_fault() does
-		 * not set it, it's relying on the faulting instruction to
-		 * do it. In our case the faulty instruction never gets executed
-		 * completely, so we need to toggle the bit.
-	 	 */
-		regs->cr_ipsr |= IA64_PSR_MFH;
 	} else {
 		/*
 		 * pt_regs or switch_stack ?
@@ -508,7 +490,6 @@ setfpreg(unsigned long regnum, struct ia64_fpreg *fpval, struct pt_regs *regs)
 		 * let's do it for safety.
 	 	 */
 		regs->cr_ipsr |= IA64_PSR_MFL;
-
 	}
 }
 
@@ -539,20 +520,13 @@ getfpreg(unsigned long regnum, struct ia64_fpreg *fpval, struct pt_regs *regs)
 	 * Unaligned Fault. Thus, when we get here, we know the partition is 
 	 * enabled.
 	 *
-	 * When regnum > 31, the register is still live and
-	 * we need to force a save to the tss to get access to it.
-	 * See discussion in setfpreg() for reasons and other ways of doing this.
+	 * When regnum > 31, the register is still live and we need to force a save
+	 * to current->thread.fph to get access to it.  See discussion in setfpreg()
+	 * for reasons and other ways of doing this.
 	 */
  	if (regnum >= IA64_FIRST_ROTATING_FR) {
-	
-		/*
-		 * force a save of [32-127] to tss
-		 * we use the__ia64_save_fpu() form to avoid fiddling with
-		 * the dfh bit.
-		 */
-		__ia64_save_fpu(&current->thread.fph[0]);
-
-		*fpval =  current->thread.fph[IA64_FPH_OFFS(regnum)];
+		ia64_flush_fph(current);
+		*fpval = current->thread.fph[IA64_FPH_OFFS(regnum)];
 	} else {
 		/*
 		 * f0 = 0.0, f1= 1.0. Those registers are constant and are thus
@@ -598,7 +572,8 @@ getreg(unsigned long regnum, unsigned long *val, int *nat, struct pt_regs *regs)
 	 */
 	if (regnum == 0) {
 		*val = 0;
-		*nat = 0;
+		if (nat)
+			*nat = 0;
 		return;
 	}
 
@@ -1108,9 +1083,9 @@ emulate_load_floatpair(unsigned long ifa, load_store_t *ld, struct pt_regs *regs
 		/*
 		 * XXX fixme
 		 *
-		 * A possible optimization would be to drop fpr_final
-		 * and directly use the storage from the saved context i.e.,
-		 * the actual final destination (pt_regs, switch_stack or tss).
+		 * A possible optimization would be to drop fpr_final and directly
+		 * use the storage from the saved context i.e., the actual final
+		 * destination (pt_regs, switch_stack or thread structure).
 		 */
 		setfpreg(ld->r1, &fpr_final[0], regs);
 		setfpreg(ld->imm, &fpr_final[1], regs);
@@ -1236,9 +1211,9 @@ emulate_load_float(unsigned long ifa, load_store_t *ld, struct pt_regs *regs)
 		/*
 		 * XXX fixme
 		 *
-		 * A possible optimization would be to drop fpr_final
-		 * and directly use the storage from the saved context i.e.,
-		 * the actual final destination (pt_regs, switch_stack or tss).
+		 * A possible optimization would be to drop fpr_final and directly
+		 * use the storage from the saved context i.e., the actual final
+		 * destination (pt_regs, switch_stack or thread structure).
 		 */
 		setfpreg(ld->r1, &fpr_final, regs);
 	}
@@ -1247,9 +1222,7 @@ emulate_load_float(unsigned long ifa, load_store_t *ld, struct pt_regs *regs)
 	 * check for updates on any loads
 	 */
 	if (ld->op == 0x7 || ld->m)
-		emulate_load_updates(ld->op == 0x7 ? UPD_IMMEDIATE: UPD_REG, 
-				ld, regs, ifa);
-
+		emulate_load_updates(ld->op == 0x7 ? UPD_IMMEDIATE: UPD_REG, ld, regs, ifa);
 
 	/*
 	 * invalidate ALAT entry in case of advanced floating point loads
@@ -1410,6 +1383,25 @@ ia64_handle_unaligned(unsigned long ifa, struct pt_regs *regs)
 		die_if_kernel("Unaligned reference while in kernel\n", regs, 30);
 		/* NOT_REACHED */
 	}
+	/*
+	 * For now, we don't support user processes running big-endian
+	 * which do unaligned accesses
+	 */
+	if (ia64_psr(regs)->be) {
+		struct siginfo si;
+
+		printk(KERN_ERR "%s(%d): big-endian unaligned access %016lx (ip=%016lx) not "
+		       "yet supported\n",
+		       current->comm, current->pid, ifa, regs->cr_iip + ipsr->ri);
+
+		si.si_signo = SIGBUS;
+		si.si_errno = 0;
+		si.si_code = BUS_ADRALN;
+		si.si_addr = (void *) ifa;
+		force_sig_info(SIGBUS, &si, current);
+		return;
+	}
+
 	if (current->thread.flags & IA64_THREAD_UAC_SIGBUS) {
 		struct siginfo si;
 
@@ -1417,7 +1409,7 @@ ia64_handle_unaligned(unsigned long ifa, struct pt_regs *regs)
 		si.si_errno = 0;
 		si.si_code = BUS_ADRALN;
 		si.si_addr = (void *) ifa;
-		send_sig_info (SIGBUS, &si, current);
+		force_sig_info(SIGBUS, &si, current);
 		return;
 	}
 
@@ -1433,9 +1425,15 @@ ia64_handle_unaligned(unsigned long ifa, struct pt_regs *regs)
 		if (unalign_count > 5 && jiffies - last_time > 5*HZ)
 			unalign_count = 0;
 		if (++unalign_count < 5) {
+			char buf[200];	/* comm[] is at most 16 bytes... */
+			size_t len;
+
 			last_time = jiffies;
-			printk("%s(%d): unaligned trap accessing %016lx (ip=%016lx)\n",
-			       current->comm, current->pid, ifa, regs->cr_iip + ipsr->ri);
+			len = sprintf(buf, "%s(%d): unaligned access to 0x%016lx, ip=0x%016lx\n\r",
+				      current->comm, current->pid, ifa, regs->cr_iip + ipsr->ri);
+			tty_write_message(current->tty, buf);
+			buf[len-1] = '\0';	/* drop '\r' */
+			printk("%s", buf);	/* guard against command names containing %s!! */
 		}
 	}
 
@@ -1566,9 +1564,13 @@ ia64_handle_unaligned(unsigned long ifa, struct pt_regs *regs)
 
 	DPRINT(("ret=%d\n", ret));
 	if (ret) {
-		lock_kernel();
-	        force_sig(SIGSEGV, current);
-	        unlock_kernel();
+		struct siginfo si;
+
+		si.si_signo = SIGBUS;
+		si.si_errno = 0;
+		si.si_code = BUS_ADRALN;
+		si.si_addr = (void *) ifa;
+	        force_sig_info(SIGBUS, &si, current);
 	} else {
 		/*
 	 	 * given today's architecture this case is not likely to happen

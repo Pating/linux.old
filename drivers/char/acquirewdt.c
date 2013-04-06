@@ -38,8 +38,9 @@
 #include <linux/reboot.h>
 #include <linux/init.h>
 #include <linux/spinlock.h>
+#include <linux/smp_lock.h>
 
-static int acq_is_open=0;
+static int acq_is_open;
 static spinlock_t acq_lock;
 
 /*
@@ -125,7 +126,6 @@ static int acq_open(struct inode *inode, struct file *file)
 				spin_unlock(&acq_lock);
 				return -EBUSY;
 			}
-			MOD_INC_USE_COUNT;
 			/*
 			 *	Activate 
 			 */
@@ -141,6 +141,7 @@ static int acq_open(struct inode *inode, struct file *file)
 
 static int acq_close(struct inode *inode, struct file *file)
 {
+	lock_kernel();
 	if(MINOR(inode->i_rdev)==WATCHDOG_MINOR)
 	{
 		spin_lock(&acq_lock);
@@ -150,7 +151,7 @@ static int acq_close(struct inode *inode, struct file *file)
 		acq_is_open=0;
 		spin_unlock(&acq_lock);
 	}
-	MOD_DEC_USE_COUNT;
+	unlock_kernel();
 	return 0;
 }
 
@@ -175,6 +176,7 @@ static int acq_notify_sys(struct notifier_block *this, unsigned long code,
  
  
 static struct file_operations acq_fops = {
+	owner:		THIS_MODULE,
 	read:		acq_read,
 	write:		acq_write,
 	ioctl:		acq_ioctl,
@@ -202,21 +204,7 @@ static struct notifier_block acq_notifier=
 	0
 };
 
-#ifdef MODULE
-
-#define acq_init init_module
-
-void cleanup_module(void)
-{
-	misc_deregister(&acq_miscdev);
-	unregister_reboot_notifier(&acq_notifier);
-	release_region(WDT_STOP,1);
-	release_region(WDT_START,1);
-}
-
-#endif
-
-int __init acq_init(void)
+static int __init acq_init(void)
 {
 	printk("WDT driver for Acquire single board computer initialising.\n");
 
@@ -227,4 +215,14 @@ int __init acq_init(void)
 	register_reboot_notifier(&acq_notifier);
 	return 0;
 }
+	
+static void __exit acq_exit(void)
+{
+	misc_deregister(&acq_miscdev);
+	unregister_reboot_notifier(&acq_notifier);
+	release_region(WDT_STOP,1);
+	release_region(WDT_START,1);
+}
 
+module_init(acq_init);
+module_exit(acq_exit);

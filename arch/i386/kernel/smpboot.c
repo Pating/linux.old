@@ -46,7 +46,7 @@
 #include <asm/pgalloc.h>
 
 /* Set if we find a B stepping CPU			*/
-static int smp_b_stepping = 0;
+static int smp_b_stepping;
 
 /* Setup configured maximum number of CPUs to activate */
 static int max_cpus = -1;
@@ -55,21 +55,21 @@ static int max_cpus = -1;
 int smp_num_cpus = 1;
 
 /* Bitmask of currently online CPUs */
-unsigned long cpu_online_map = 0;
+unsigned long cpu_online_map;
 
 /* which CPU (physical APIC ID) maps to which logical CPU number */
 volatile int x86_apicid_to_cpu[NR_CPUS];
 /* which logical CPU number maps to which CPU (physical APIC ID) */
 volatile int x86_cpu_to_apicid[NR_CPUS];
 
-static volatile unsigned long cpu_callin_map = 0;
-static volatile unsigned long cpu_callout_map = 0;
+static volatile unsigned long cpu_callin_map;
+static volatile unsigned long cpu_callout_map;
 
 /* Per CPU bogomips and other parameters */
 struct cpuinfo_x86 cpu_data[NR_CPUS];
 
 /* Set when the idlers are all forked */
-int smp_threads_ready = 0;
+int smp_threads_ready;
 
 /*
  * Setup routine for controlling SMP activation
@@ -194,7 +194,7 @@ void __init smp_commence(void)
 static atomic_t tsc_start_flag = ATOMIC_INIT(0);
 static atomic_t tsc_count_start = ATOMIC_INIT(0);
 static atomic_t tsc_count_stop = ATOMIC_INIT(0);
-static unsigned long long tsc_values[NR_CPUS] = { 0, };
+static unsigned long long tsc_values[NR_CPUS];
 
 #define NR_LOOPS 5
 
@@ -344,10 +344,20 @@ static void __init synchronize_tsc_ap (void)
 
 extern void calibrate_delay(void);
 
+static atomic_t init_deasserted;
+
 void __init smp_callin(void)
 {
 	int cpuid, phys_id;
 	unsigned long timeout;
+
+	/*
+	 * If waken up by an INIT in an 82489DX configuration
+	 * we may get here before an INIT-deassert IPI reaches
+	 * our local APIC.  We have to wait for the IPI or we'll
+	 * lock up on an APIC access.
+	 */
+	while (!atomic_read(&init_deasserted));
 
 	/*
 	 * (This works even if the APIC is not enabled.)
@@ -428,7 +438,7 @@ void __init smp_callin(void)
 		synchronize_tsc_ap();
 }
 
-int cpucount = 0;
+int cpucount;
 
 extern int cpu_idle(void);
 
@@ -445,7 +455,7 @@ int __init start_secondary(void *unused)
 	cpu_init();
 	smp_callin();
 	while (!atomic_read(&smp_commenced))
-		/* nothing */ ;
+		rep_nop();
 	/*
 	 * low-memory mappings have been cleared, flush them from
 	 * the local TLBs too.
@@ -487,7 +497,7 @@ static int __init fork_by_hand(void)
 	 * don't care about the eip and regs settings since
 	 * we'll never reschedule the forked task.
 	 */
-	return do_fork(CLONE_VM|CLONE_PID, 0, &regs);
+	return do_fork(CLONE_VM|CLONE_PID, 0, &regs, 0);
 }
 
 #if APIC_DEBUG
@@ -501,6 +511,11 @@ static inline void inquire_remote_apic(int apicid)
 
 	for (i = 0; i < sizeof(regs) / sizeof(*regs); i++) {
 		printk("... APIC #%d %s: ", apicid, names[i]);
+
+		/*
+		 * Wait for idle.
+		 */
+		apic_wait_icr_idle();
 
 		apic_write_around(APIC_ICR2, SET_APIC_DEST_FIELD(apicid));
 		apic_write_around(APIC_ICR, APIC_DM_REMRD | regs[i]);
@@ -567,6 +582,8 @@ static void __init do_boot_cpu (int apicid)
 	 * This grunge runs the startup process for
 	 * the targeted processor.
 	 */
+
+	atomic_set(&init_deasserted, 0);
 
 	Dprintk("Setting warm reset code and vector.\n");
 
@@ -637,6 +654,8 @@ static void __init do_boot_cpu (int apicid)
 		send_status = apic_read(APIC_ICR) & APIC_ICR_BUSY;
 	} while (send_status && (timeout++ < 1000));
 
+	atomic_set(&init_deasserted, 1);
+
 	/*
 	 * Should we send STARTUP IPIs ?
 	 *
@@ -674,6 +693,11 @@ static void __init do_boot_cpu (int apicid)
 		/* Kick the second */
 		apic_write_around(APIC_ICR, APIC_DM_STARTUP
 					| (start_eip >> 12));
+
+		/*
+		 * Give the other CPU some time to accept the IPI.
+		 */
+		udelay(300);
 
 		Dprintk("Startup point 1.\n");
 
@@ -755,7 +779,7 @@ static void __init do_boot_cpu (int apicid)
 }
 
 cycles_t cacheflush_time;
-extern unsigned long cpu_hz;
+extern unsigned long cpu_khz;
 
 static void smp_tune_scheduling (void)
 {
@@ -772,7 +796,7 @@ static void smp_tune_scheduling (void)
 	 *  the cache size)
 	 */
 
-	if (!cpu_hz) {
+	if (!cpu_khz) {
 		/*
 		 * this basically disables processor-affinity
 		 * scheduling on SMP without a TSC.
@@ -786,12 +810,12 @@ static void smp_tune_scheduling (void)
 			bandwidth = 100;
 		}
 
-		cacheflush_time = (cpu_hz>>20) * (cachesize<<10) / bandwidth;
+		cacheflush_time = (cpu_khz>>10) * (cachesize<<10) / bandwidth;
 	}
 
 	printk("per-CPU timeslice cutoff: %ld.%02ld usecs.\n",
-		(long)cacheflush_time/(cpu_hz/1000000),
-		((long)cacheflush_time*100/(cpu_hz/1000000)) % 100);
+		(long)cacheflush_time/(cpu_khz/1000),
+		((long)cacheflush_time*100/(cpu_khz/1000)) % 100);
 }
 
 /*
@@ -865,46 +889,35 @@ void __init smp_boot_cpus(void)
 	}
 
 	/*
+	 * If we couldn't find a local APIC, then get out of here now!
+	 */
+	if (APIC_INTEGRATED(apic_version[boot_cpu_id]) &&
+	    !test_bit(X86_FEATURE_APIC, boot_cpu_data.x86_capability)) {
+		printk(KERN_ERR "BIOS bug, local APIC #%d not detected!...\n",
+			boot_cpu_id);
+		printk(KERN_ERR "... forcing use of dummy APIC emulation. (tell your hw vendor)\n");
+#ifndef CONFIG_VISWS
+		io_apic_irqs = 0;
+#endif
+		cpu_online_map = phys_cpu_present_map = 1;
+		smp_num_cpus = 1;
+		goto smp_done;
+	}
+
+	verify_local_APIC();
+
+	/*
 	 * If SMP should be disabled, then really disable it!
 	 */
 	if (!max_cpus) {
 		smp_found_config = 0;
 		printk(KERN_INFO "SMP mode deactivated, forcing use of dummy APIC emulation.\n");
-	}
-
-	{
-		int reg;
-
-		/*
-		 * This is to verify that we're looking at
-		 * a real local APIC.  Check these against
-		 * your board if the CPUs aren't getting
-		 * started for no apparent reason.
-		 */
-
-		reg = apic_read(APIC_LVR);
-		Dprintk("Getting VERSION: %x\n", reg);
-
-		apic_write(APIC_LVR, 0);
-		reg = apic_read(APIC_LVR);
-		Dprintk("Getting VERSION: %x\n", reg);
-
-		/*
-		 * The two version reads above should print the same
-		 * NON-ZERO!!! numbers.  If the second one is zero,
-		 * there is a problem with the APIC write/read
-		 * definitions.
-		 *
-		 * The next two are just to see if we have sane values.
-		 * They're only really relevant if we're in Virtual Wire
-		 * compatibility mode, but most boxes are anymore.
-		 */
-
-		reg = apic_read(APIC_LVT0);
-		Dprintk("Getting LVT0: %x\n", reg);
-
-		reg = apic_read(APIC_LVT1);
-		Dprintk("Getting LVT1: %x\n", reg);
+#ifndef CONFIG_VISWS
+		io_apic_irqs = 0;
+#endif
+		cpu_online_map = phys_cpu_present_map = 1;
+		smp_num_cpus = 1;
+		goto smp_done;
 	}
 
 	connect_bsp_APIC();
@@ -971,11 +984,11 @@ void __init smp_boot_cpus(void)
 		unsigned long bogosum = 0;
 		for (cpu = 0; cpu < NR_CPUS; cpu++)
 			if (cpu_online_map & (1<<cpu))
-				bogosum += cpu_data[cpu].loops_per_sec;
+				bogosum += cpu_data[cpu].loops_per_jiffy;
 		printk(KERN_INFO "Total of %d processors activated (%lu.%02lu BogoMIPS).\n",
 			cpucount+1,
-			(bogosum+2500)/500000,
-			((bogosum+2500)/5000)%100);
+			bogosum/(500000/HZ),
+			(bogosum/(5000/HZ))%100);
 		Dprintk("Before bogocount - setting activated=1.\n");
 	}
 	smp_num_cpus = cpucount + 1;
@@ -993,7 +1006,6 @@ void __init smp_boot_cpus(void)
 		setup_IO_APIC();
 #endif
 
-smp_done:
 	/*
 	 * Set up all local APIC timers in the system:
 	 */
@@ -1005,6 +1017,7 @@ smp_done:
 	if (cpu_has_tsc && cpucount)
 		synchronize_tsc_bp();
 
+smp_done:
 	zap_low_mappings();
 }
 

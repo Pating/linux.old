@@ -42,7 +42,7 @@ static unsigned int pcnet32_portlist[] __initdata = {0x300, 0x320, 0x340, 0x360,
 static int pcnet32_debug = 1;
 static int tx_start = 1; /* Mapping -- 0:20, 1:64, 2:128, 3:~220 (depends on chip vers) */
 
-static struct net_device *pcnet32_dev = NULL;
+static struct net_device *pcnet32_dev;
 
 static const int max_interrupt_work = 80;
 static const int rx_copybreak = 200;
@@ -83,8 +83,8 @@ static unsigned char options_mapping[] = {
 };
 
 #define MAX_UNITS 8
-static int options[MAX_UNITS] = {0, };
-static int full_duplex[MAX_UNITS] = {0, };
+static int options[MAX_UNITS];
+static int full_duplex[MAX_UNITS];
 
 /*
  *				Theory of Operation
@@ -311,21 +311,6 @@ struct pcnet32_pci_id_info {
     int (*probe1) (unsigned long, unsigned char, int, int, struct pci_dev *);
 };
 
-static struct pcnet32_pci_id_info pcnet32_tbl[] = {
-    { "AMD PCnetPCI series",
-      PCI_VENDOR_ID_AMD, PCI_DEVICE_ID_AMD_LANCE, 0, 0,
-      PCI_USES_IO|PCI_USES_MASTER, PCNET32_TOTAL_SIZE,
-      pcnet32_probe1},
-    { "AMD PCnetPCI series (IBM)",
-      PCI_VENDOR_ID_AMD, PCI_DEVICE_ID_AMD_LANCE, 0x1014, 0x2000,
-      PCI_USES_IO|PCI_USES_MASTER, PCNET32_TOTAL_SIZE,
-      pcnet32_probe1},
-    { "AMD PCnetHome series",
-      PCI_VENDOR_ID_AMD, PCI_DEVICE_ID_AMD_PCNETHOME, 0, 0,
-      PCI_USES_IO|PCI_USES_MASTER, PCNET32_TOTAL_SIZE,
-      pcnet32_probe1},
-    {0,}
-};
 
 /*
  * PCI device identifiers for "new style" Linux PCI Device Drivers
@@ -491,14 +476,14 @@ static int __init pcnet32_probe_vlbus(int cards_found)
 static int __init
 pcnet32_probe_pci(struct pci_dev *pdev, const struct pci_device_id *ent)
 {
-    static int card_idx = 0;
+    static int card_idx;
     long ioaddr;
     int err = 0;
 
     printk(KERN_INFO "pcnet32_probe_pci: found device %#08x.%#08x\n", ent->vendor, ent->device);
 
     ioaddr = pci_resource_start (pdev, 0);
-    printk(KERN_INFO "  ioaddr=%#08lx  resource_flags=%#08lx\n", ioaddr, pci_resource_flags (pdev, 0));
+    printk(KERN_INFO "    ioaddr=%#08lx  resource_flags=%#08lx\n", ioaddr, pci_resource_flags (pdev, 0));
     if (!ioaddr) {
         printk (KERN_ERR "no PCI IO resources, aborting\n");
         return -ENODEV;
@@ -642,29 +627,29 @@ pcnet32_probe1(unsigned long ioaddr, unsigned char irq_line, int shared, int car
     /* There is a 16 byte station address PROM at the base address.
        The first six bytes are the station address. */
     for (i = 0; i < 6; i++)
-	printk( KERN_INFO " %2.2x", dev->dev_addr[i] = inb(ioaddr + i));
+	printk(" %2.2x", dev->dev_addr[i] = inb(ioaddr + i));
 
     if (((chip_version + 1) & 0xfffe) == 0x2624) { /* Version 0x2623 or 0x2624 */
 	i = a->read_csr(ioaddr, 80) & 0x0C00;  /* Check tx_start_pt */
-	printk(KERN_INFO"\n    tx_start_pt(0x%04x):",i);
+	printk("\n" KERN_INFO "    tx_start_pt(0x%04x):",i);
 	switch(i>>10) {
-	    case 0: printk(KERN_INFO "  20 bytes,"); break;
-	    case 1: printk(KERN_INFO "  64 bytes,"); break;
-	    case 2: printk(KERN_INFO " 128 bytes,"); break;
-	    case 3: printk(KERN_INFO "~220 bytes,"); break;
+	    case 0: printk("  20 bytes,"); break;
+	    case 1: printk("  64 bytes,"); break;
+	    case 2: printk(" 128 bytes,"); break;
+	    case 3: printk("~220 bytes,"); break;
 	}
 	i = a->read_bcr(ioaddr, 18);  /* Check Burst/Bus control */
-	printk(KERN_INFO" BCR18(%x):",i&0xffff);
-	if (i & (1<<5)) printk(KERN_INFO "BurstWrEn ");
-	if (i & (1<<6)) printk(KERN_INFO "BurstRdEn ");
-	if (i & (1<<7)) printk(KERN_INFO "DWordIO ");
-	if (i & (1<<11)) printk(KERN_INFO"NoUFlow ");
+	printk(" BCR18(%x):",i&0xffff);
+	if (i & (1<<5)) printk("BurstWrEn ");
+	if (i & (1<<6)) printk("BurstRdEn ");
+	if (i & (1<<7)) printk("DWordIO ");
+	if (i & (1<<11)) printk("NoUFlow ");
 	i = a->read_bcr(ioaddr, 25);
-	printk(KERN_INFO "\n    SRAMSIZE=0x%04x,",i<<8);
+	printk("\n" KERN_INFO "    SRAMSIZE=0x%04x,",i<<8);
 	i = a->read_bcr(ioaddr, 26);
-	printk(KERN_INFO " SRAM_BND=0x%04x,",i<<8);
+	printk(" SRAM_BND=0x%04x,",i<<8);
 	i = a->read_bcr(ioaddr, 27);
-	if (i & (1<<14)) printk(KERN_INFO "LowLatRx,");
+	if (i & (1<<14)) printk("LowLatRx");
     }
 
     dev->base_addr = ioaddr;
@@ -677,7 +662,7 @@ pcnet32_probe1(unsigned long ioaddr, unsigned char irq_line, int shared, int car
     memset(lp, 0, sizeof(*lp));
     lp->dma_addr = lp_dma_addr;
     lp->pci_dev = pdev;
-    printk(KERN_INFO "pcnet32: pcnet32_private lp=%p lp_dma_addr=%#08x\n", lp, lp_dma_addr);
+    printk("\n" KERN_INFO "pcnet32: pcnet32_private lp=%p lp_dma_addr=%#08x", lp, lp_dma_addr);
 
     spin_lock_init(&lp->lock);
     
@@ -698,11 +683,11 @@ pcnet32_probe1(unsigned long ioaddr, unsigned char irq_line, int shared, int car
     if (fdx && !(lp->options & PORT_ASEL) && full_duplex[card_idx])
 	lp->options |= PORT_FD;
     
-    lp->a = *a;
     if (a == NULL) {
       printk(KERN_ERR "pcnet32: No access methods\n");
       return -ENODEV;
     }
+    lp->a = *a;
     
     /* detect special T1/E1 WAN card by checking for MAC address */
     if (dev->dev_addr[0] == 0x00 && dev->dev_addr[1] == 0xe0 && dev->dev_addr[2] == 0x75)
@@ -728,7 +713,7 @@ pcnet32_probe1(unsigned long ioaddr, unsigned char irq_line, int shared, int car
     }
     
     if (dev->irq >= 2)
-	printk(KERN_INFO " assigned IRQ %d.\n", dev->irq);
+	printk(" assigned IRQ %d.\n", dev->irq);
     else {
 	unsigned long irq_mask = probe_irq_on();
 	
@@ -743,15 +728,15 @@ pcnet32_probe1(unsigned long ioaddr, unsigned char irq_line, int shared, int car
 	
 	dev->irq = probe_irq_off (irq_mask);
 	if (dev->irq)
-	    printk(KERN_INFO ", probed IRQ %d.\n", dev->irq);
+	    printk(", probed IRQ %d.\n", dev->irq);
 	else {
-	    printk(KERN_ERR ", failed to detect IRQ line.\n");
+	    printk(", failed to detect IRQ line.\n");
 	    return -ENODEV;
 	}
     }
 
     if (pcnet32_debug > 0)
-	printk(KERN_INFO, version);
+	printk(KERN_INFO "%s", version);
     
     /* The PCNET32-specific entries in the device structure. */
     dev->open = &pcnet32_open;
@@ -993,14 +978,14 @@ pcnet32_tx_timeout (struct net_device *dev)
 	       lp->dirty_tx, lp->cur_tx, lp->tx_full ? " (full)" : "",
 	       lp->cur_rx);
 	    for (i = 0 ; i < RX_RING_SIZE; i++)
-	    printk(KERN_DEBUG "%s %08x %04x %08x %04x", i & 1 ? "" : "\n ",
+	    printk("%s %08x %04x %08x %04x", i & 1 ? "" : "\n ",
 		   lp->rx_ring[i].base, -lp->rx_ring[i].buf_length,
 		   lp->rx_ring[i].msg_length, (unsigned)lp->rx_ring[i].status);
 	    for (i = 0 ; i < TX_RING_SIZE; i++)
-	    printk(KERN_DEBUG "%s %08x %04x %08x %04x", i & 1 ? "" : "\n ",
+	    printk("%s %08x %04x %08x %04x", i & 1 ? "" : "\n ",
 		   lp->tx_ring[i].base, -lp->tx_ring[i].length,
 		   lp->tx_ring[i].misc, (unsigned)lp->tx_ring[i].status);
-	    printk(KERN_DEBUG "\n");
+	    printk("\n");
 	}
 	pcnet32_restart(dev, 0x0042);
 
@@ -1257,8 +1242,7 @@ pcnet32_rx(struct net_device *dev)
 		lp->stats.rx_errors++;
 	    } else {
 		int rx_in_place = 0;
-                dma_addr_t rx_dma_addr = lp->rx_dma_addr[entry];
-			    
+
 		if (pkt_len > rx_copybreak) {
 		    struct sk_buff *newskb;
 				
@@ -1524,7 +1508,7 @@ static int __init pcnet32_init_module(void)
     /* find the PCI devices */
 #define USE_PCI_REGISTER_DRIVER
 #ifdef USE_PCI_REGISTER_DRIVER
-    if (err = pci_module_init(&pcnet32_driver) < 0 )
+    if ((err = pci_module_init(&pcnet32_driver)) < 0 )
        return err;
 #else
     {

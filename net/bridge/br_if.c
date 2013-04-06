@@ -5,7 +5,7 @@
  *	Authors:
  *	Lennert Buytenhek		<buytenh@gnu.org>
  *
- *	$Id: br_if.c,v 1.3 2000/05/05 02:17:17 davem Exp $
+ *	$Id: br_if.c,v 1.5 2000/11/08 05:16:40 davem Exp $
  *
  *	This program is free software; you can redistribute it and/or
  *	modify it under the terms of the GNU General Public License
@@ -14,6 +14,7 @@
  */
 
 #include <linux/kernel.h>
+#include <linux/if_arp.h>
 #include <linux/if_bridge.h>
 #include <linux/inetdevice.h>
 #include <linux/rtnetlink.h>
@@ -222,7 +223,7 @@ int br_add_if(struct net_bridge *br, struct net_device *dev)
 	if (dev->br_port != NULL)
 		return -EBUSY;
 
-	if (dev->flags & IFF_LOOPBACK)
+	if (dev->flags & IFF_LOOPBACK || dev->type != ARPHRD_ETHER)
 		return -EINVAL;
 
 	dev_hold(dev);
@@ -278,11 +279,7 @@ int br_get_bridge_ifindices(int *indices, int num)
 /* called under ioctl_lock */
 void br_get_port_ifindices(struct net_bridge *br, int *ifindices)
 {
-	int i;
 	struct net_bridge_port *p;
-
-	for (i=0;i<256;i++)
-		ifindices[i] = 0;
 
 	p = br->port_list;
 	while (p != NULL) {

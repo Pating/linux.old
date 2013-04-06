@@ -45,7 +45,7 @@ __load_new_mm_context(struct mm_struct *next_mm)
 	unsigned long mmc;
 
 	mmc = __get_new_mm_context(next_mm, smp_processor_id());
-	next_mm->context = mmc;
+	next_mm->context[smp_processor_id()] = mmc;
 	current->thread.asn = mmc & HARDWARE_ASN_MASK;
         current->thread.ptbr
 	  = ((unsigned long) next_mm->pgd - IDENT_ADDR) >> PAGE_SHIFT;
@@ -108,6 +108,11 @@ do_page_fault(unsigned long address, unsigned long mmcsr,
 	if (!mm || in_interrupt())
 		goto no_context;
 
+#ifdef CONFIG_ALPHA_LARGE_VMALLOC
+	if (address >= TASK_SIZE)
+		goto vmalloc_fault;
+#endif
+
 	down(&mm->mmap_sem);
 	vma = find_vma(mm, address);
 	if (!vma)
@@ -164,11 +169,13 @@ bad_area:
 
 no_context:
 	/* Are we prepared to handle this fault as an exception?  */
-	if ((fixup = search_exception_table(regs->pc)) != 0) {
+	if ((fixup = search_exception_table(regs->pc, regs->gp)) != 0) {
 		unsigned long newpc;
 		newpc = fixup_exception(dpf_reg, fixup, regs->pc);
-		printk("%s: Exception at [<%lx>] (%lx)\n",
+#if 0
+		printk("%s: Exception at [<%lx>] (%lx) handled successfully\n",
 		       current->comm, regs->pc, newpc);
+#endif
 		regs->pc = newpc;
 		return;
 	}
@@ -202,4 +209,25 @@ do_sigbus:
 	if (!user_mode(regs))
 		goto no_context;
 	return;
+
+#ifdef CONFIG_ALPHA_LARGE_VMALLOC
+vmalloc_fault:
+	if (user_mode(regs)) {
+		force_sig(SIGSEGV, current);
+		return;
+	} else {
+		/* Synchronize this task's top level page-table
+		   with the "reference" page table from init.  */
+		long offset = __pgd_offset(address);
+		pgd_t *pgd, *pgd_k;
+
+		pgd = current->active_mm->pgd + offset;
+		pgd_k = swapper_pg_dir + offset;
+		if (!pgd_present(*pgd) && pgd_present(*pgd_k)) {
+			pgd_val(*pgd) = pgd_val(*pgd_k);
+			return;
+		}
+		goto no_context;
+	}
+#endif
 }

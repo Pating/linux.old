@@ -3,7 +3,7 @@
  *
  *  This source is covered by the GNU GPL, the same as all kernel sources.
  *
- *  Version:	$Id: inetpeer.c,v 1.2 2000/05/03 06:37:06 davem Exp $
+ *  Version:	$Id: inetpeer.c,v 1.3 2000/10/03 07:29:00 anton Exp $
  *
  *  Authors:	Andrey V. Savochkin <saw@msu.ru>
  */
@@ -82,12 +82,12 @@ static struct inet_peer *peer_root = peer_avl_empty;
 static rwlock_t peer_pool_lock = RW_LOCK_UNLOCKED;
 #define PEER_MAXDEPTH 40 /* sufficient for about 2^27 nodes */
 
-static volatile int peer_total = 0;
+static volatile int peer_total;
 int inet_peer_threshold = 65536 + 128;	/* start to throw entries more
 					 * aggressively at this stage */
 int inet_peer_minttl = 120 * HZ;	/* TTL under high load: 120 sec */
 int inet_peer_maxttl = 10 * 60 * HZ;	/* usual time to live: 10 min */
-struct inet_peer *inet_peer_unused_head = NULL,
+struct inet_peer *inet_peer_unused_head,
 		**inet_peer_unused_tailp = &inet_peer_unused_head;
 spinlock_t inet_peer_unused_lock = SPIN_LOCK_UNLOCKED;
 #define PEER_MAX_CLEANUP_WORK 30

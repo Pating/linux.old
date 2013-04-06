@@ -2,43 +2,14 @@
  * Xircom CreditCard Ethernet Adapter IIps driver
  * Xircom Realport 10/100 (RE-100) driver 
  *
- * This driver originally was made by Werner Koch. Since the driver was left
- * unmaintained for some time, there have been some improvements and changes
- * since. These include supporting some of the "Realport" cards and develop-
- * ing enhancements to support the new ones.
- * It is made for CE2, CEM28, CEM33, CE33 and 
- * CEM56 cards. The CEM56 cards work both with their modem and ethernet
- * interface. The RealPort 10/100 Modem and similar cards are supported but
- * with some bugs which are being corrected as they are detected. 
+ * This driver supports various Xircom CreditCard Ethernet adapters
+ * including the CE2, CE IIps, RE-10, CEM28, CEM33, CE33, CEM56,
+ * CE3-100, CE3B, RE-100, REM10BT, and REM56G-100.
  * 
- * Code revised and maintained by Allan Baker Ortegon
- * al527261@prodigy.net.mx
  * Written originally by Werner Koch based on David Hinds' skeleton of the
- * PCMCIA driver. The code has been modified as to make the newer cards
- * available.
+ * PCMCIA driver.
  *
- * The latest code for the driver, information on the development project
- * for the Xircom RealPort and CE cards for the PCMCIA driver, and other
- * related material, can be found at the following URL, which is underway:
- * 
- * "http://xirc2ps.linuxbox.com/index.html"
- *
- * Any bugs regarding this driver, please send them to:
- * alanyuu@linuxbox.com
- *
- * The driver is still evolving and there are many cards which will benefit
- * from having alpha testers. If you have a particular card and would like
- * to be involved in this ongoing effort, please send mail to the maintainer.
- * 
- * Special thanks to David Hinds, to Xircom for the specifications and their
- * software development kit, and all others who may have colaborated in the
- * development of the driver: Koen Van Herck (Koen.Van.Herck@xircom.com),
- * 4PC GmbH Duesseldorf, David Luger, et al.
- * 
- *
- ************************************************************************
  * Copyright (c) 1997,1998 Werner Koch (dd9jn)
- * Copyright (c) 1999 Allan Baker Ortegon 
  *
  * This driver is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -87,9 +58,6 @@
  * OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-/* Enable the bug fix for CEM56 to use modem and ethernet simultaneously */
-#define CEM56_FIX
-
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/init.h>
@@ -118,15 +86,9 @@
 #include <pcmcia/cisreg.h>
 #include <pcmcia/ciscode.h>
 
-#ifndef MANFID_XIRCOM
-  #define MANFID_XIRCOM 	   0x0105
-#endif
 #ifndef MANFID_COMPAQ
   #define MANFID_COMPAQ 	   0x0138
   #define MANFID_COMPAQ2	   0x0183  /* is this correct? */
-#endif
-#ifndef MANFID_INTEL
-  #define MANFID_INTEL		   0x0089
 #endif
 
 #include <pcmcia/ds.h>
@@ -285,25 +247,16 @@ static char *version =
 /*====================================================================*/
 
 /* Parameters that can be set with 'insmod' */
-static int if_port = 0;
-MODULE_PARM(if_port, "i");
 
-/* Bit map of interrupts to choose from */
-/* This means pick from 15, 14, 12, 11, 10, 9, 7, 5, 4, and 3 */
-static u_long irq_mask = 0xdeb8;
-MODULE_PARM(irq_mask, "i");
+#define INT_MODULE_PARM(n, v) static int n = v; MODULE_PARM(n, "i")
 
 static int irq_list[4] = { -1 };
 MODULE_PARM(irq_list, "1-4i");
-
-static int do_sound = 1;
-MODULE_PARM(do_sound, "i");
-
-static int card_type = 0;
-MODULE_PARM(card_type, "i");  /* dummy, not used anymore */
-
-static int lockup_hack = 0;
-MODULE_PARM(lockup_hack, "i");  /* anti lockup hack */
+INT_MODULE_PARM(irq_mask,	0xdeb8);
+INT_MODULE_PARM(if_port,	0);
+INT_MODULE_PARM(full_duplex,	0);
+INT_MODULE_PARM(do_sound, 	1);
+INT_MODULE_PARM(lockup_hack,	0);  /* anti lockup hack */
 
 /*====================================================================*/
 
@@ -398,7 +351,7 @@ typedef struct local_info_t {
     dev_link_t link;
     struct net_device dev;
     dev_node_t node;
-    struct enet_statistics stats;
+    struct net_device_stats stats;
     int card_type;
     int probe_port;
     int silicon; /* silicon revision. 0=old CE2, 1=Scipper, 4=Mohawk */
@@ -416,7 +369,7 @@ typedef struct local_info_t {
  */
 static int do_start_xmit(struct sk_buff *skb, struct net_device *dev);
 static void do_tx_timeout(struct net_device *dev);
-static struct enet_statistics *do_get_stats(struct net_device *dev);
+static struct net_device_stats *do_get_stats(struct net_device *dev);
 static void set_addresses(struct net_device *dev);
 static void set_multicast_list(struct net_device *dev);
 static int set_card_type(dev_link_t *link, const void *s);
@@ -638,29 +591,6 @@ mii_wr(ioaddr_t ioaddr, u_char phyaddr, u_char phyreg, unsigned data, int len)
     mii_wbits(ioaddr, data, len);	/* And write the data */
     mii_idle(ioaddr);
 }
-
-#ifdef PCMCIA_DEBUG
-static void
-mii_dump(struct net_device *dev)
-{
-    ioaddr_t ioaddr = dev->base_addr;
-    int i;
-
-    /* Note that registers 14, 1d,1e and 1f are reserved and should
-     * not be read according to the DP83840A specs.
-     */
-    printk(KERN_DEBUG "%s: MII register dump:\n", dev->name);
-    for (i=0; i < 32; i++) {
-	if (!(i % 8)) {
-	    if (i)
-		printk("\n");
-	    printk(KERN_DEBUG "%s:", dev->name);
-	}
-	printk(" %04x", mii_rd(ioaddr, 0, i));
-    }
-    printk("\n");
-}
-#endif
 
 /*============= Main bulk of functions	=========================*/
 
@@ -936,26 +866,26 @@ xirc2ps_config(dev_link_t * link)
     switch(parse.manfid.manf) {
       case MANFID_XIRCOM:
 	local->manf_str = "Xircom";
-	DEBUG(0, "found xircom card\n");
 	break;
       case MANFID_ACCTON:
 	local->manf_str = "Accton";
-	DEBUG(0, "found Accton card\n");
 	break;
       case MANFID_COMPAQ:
       case MANFID_COMPAQ2:
 	local->manf_str = "Compaq";
-	DEBUG(0, "found Compaq card\n");
 	break;
       case MANFID_INTEL:
 	local->manf_str = "Intel";
-	DEBUG(0, "found Intel card\n");
+	break;
+      case MANFID_TOSHIBA:
+	local->manf_str = "Toshiba";
 	break;
       default:
 	printk(KNOT_XIRC "Unknown Card Manufacturer ID: 0x%04x\n",
 	       (unsigned)parse.manfid.manf);
 	goto failure;
     }
+    DEBUG(0, "found %s card\n", local->manf_str);
 
     if (!set_card_type(link, buf)) {
 	printk(KNOT_XIRC "this card is not supported\n");
@@ -1120,13 +1050,10 @@ xirc2ps_config(dev_link_t * link)
     }
 
     if (local->dingo) {
-      #ifdef CEM56_FIX
 	conf_reg_t reg;
-      #endif
 	win_req_t req;
 	memreq_t mem;
 
-      #ifdef CEM56_FIX
 	/* Reset the modem's BAR to the correct value
 	 * This is necessary because in the RequestConfiguration call,
 	 * the base address of the ethernet port (BasePort1) is written
@@ -1148,7 +1075,6 @@ xirc2ps_config(dev_link_t * link)
 	    cs_error(link->handle, AccessConfigurationRegister, err);
 	    goto config_error;
 	}
-     #endif
 
 	/* There is no config entry for the Ethernet part which
 	 * is at 0x0800. So we allocate a window into the attribute
@@ -1227,9 +1153,9 @@ xirc2ps_config(dev_link_t * link)
 	goto config_error;
     }
 
-    link->state &= ~DEV_CONFIG_PENDING;
     strcpy(local->node.dev_name, dev->name);
     link->dev = &local->node;
+    link->state &= ~DEV_CONFIG_PENDING;
 
     if (local->dingo)
 	do_reset(dev, 1); /* a kludge to make the cem56 work */
@@ -1648,7 +1574,7 @@ do_start_xmit(struct sk_buff *skb, struct net_device *dev)
     return 0;
 }
 
-static struct enet_statistics *
+static struct net_device_stats *
 do_get_stats(struct net_device *dev)
 {
     local_info_t *lp = dev->priv;
@@ -1748,12 +1674,6 @@ do_config(struct net_device *dev, struct ifmap *map)
 	       dev->name, if_names[dev->if_port]);
 	do_reset(dev,1);  /* not the fine way :-) */
     }
-  #ifdef PCMCIA_DEBUG
-    else if (local->mohawk) {
-	/* kludge to print the mii regsiters */
-	mii_dump(dev);
-    }
-  #endif
     return 0;
 }
 
@@ -1945,6 +1865,8 @@ do_reset(struct net_device *dev, int full)
 		PutByte(XIRCREG42_SWC1, 0x80);
 	    busy_loop(HZ/25);	/* wait 40 msec to let it complete */
 	}
+	if (full_duplex)
+	    PutByte(XIRCREG1_ECR, GetByte(XIRCREG1_ECR | FullDuplex));
     } else {  /* No MII */
 	SelectPage(0);
 	value = GetByte(XIRCREG_ESR);	 /* read the ESR */
@@ -1998,12 +1920,6 @@ init_mii(struct net_device *dev)
     ioaddr_t ioaddr = dev->base_addr;
     unsigned control, status, linkpartner;
     int i;
-
-  #ifdef PCMCIA_DEBUG
-    if (pc_debug>1) {
-	mii_dump(dev);
-    }
-  #endif
 
     status = mii_rd(ioaddr,  0, 1);
     if ((status & 0xff00) != 0x7800)
@@ -2061,11 +1977,6 @@ init_mii(struct net_device *dev)
 	}
     }
 
-  #ifdef PCMCIA_DEBUG
-    if (pc_debug)
-	mii_dump(dev);
-  #endif
-
     return 1;
 }
 
@@ -2119,8 +2030,6 @@ init_xirc2ps_cs(void)
     servinfo_t serv;
 
     printk(KERN_INFO "%s\n", version);
-    if (card_type)
-	printk(KINF_XIRC "option card_type is obsolete\n");
     if (lockup_hack)
 	printk(KINF_XIRC "lockup hack is enabled\n");
     CardServices(GetCardServicesInfo, &serv);

@@ -1,19 +1,21 @@
 /*
- * linux/arch/arm/kernel/sys_arm.c
+ *  linux/arch/arm/kernel/sys_arm.c
  *
- * Copyright (C) People who wrote linux/arch/i386/kernel/sys_i386.c
- * Copyright (C) 1995, 1996 Russell King.
- * 
- * This file contains various random system calls that
- * have a non-standard calling sequence on the Linux/arm
- * platform.
+ *  Copyright (C) People who wrote linux/arch/i386/kernel/sys_i386.c
+ *  Copyright (C) 1995, 1996 Russell King.
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ *  This file contains various random system calls that
+ *  have a non-standard calling sequence on the Linux/arm
+ *  platform.
  */
-
 #include <linux/errno.h>
 #include <linux/sched.h>
+#include <linux/malloc.h>
 #include <linux/mm.h>
-#include <linux/smp.h>
-#include <linux/smp_lock.h>
 #include <linux/sem.h>
 #include <linux/msg.h>
 #include <linux/shm.h>
@@ -39,9 +41,7 @@ asmlinkage int sys_pipe(unsigned long * fildes)
 	int fd[2];
 	int error;
 
-	lock_kernel();
 	error = do_pipe(fd);
-	unlock_kernel();
 	if (!error) {
 		if (copy_to_user(fildes, fd, 2*sizeof(int)))
 			error = -EFAULT;
@@ -66,11 +66,7 @@ inline long do_mmap2(
 	}
 
 	down(&current->mm->mmap_sem);
-	lock_kernel();
-
 	error = do_mmap_pgoff(file, addr, len, prot, flags, pgoff);
-
-	unlock_kernel();
 	up(&current->mm->mmap_sem);
 
 	if (file)
@@ -210,7 +206,7 @@ asmlinkage int sys_ipc (uint call, int first, int second, int third, void *ptr, 
  */
 asmlinkage int sys_fork(struct pt_regs *regs)
 {
-	return do_fork(SIGCHLD, regs->ARM_sp, regs);
+	return do_fork(SIGCHLD, regs->ARM_sp, regs, 0);
 }
 
 /* Clone a task - this clones the calling program thread.
@@ -220,12 +216,12 @@ asmlinkage int sys_clone(unsigned long clone_flags, unsigned long newsp, struct 
 {
 	if (!newsp)
 		newsp = regs->ARM_sp;
-	return do_fork(clone_flags, newsp, regs);
+	return do_fork(clone_flags, newsp, regs, 0);
 }
 
 asmlinkage int sys_vfork(struct pt_regs *regs)
 {
-	return do_fork(CLONE_VFORK | CLONE_VM | SIGCHLD, regs->ARM_sp, regs);
+	return do_fork(CLONE_VFORK | CLONE_VM | SIGCHLD, regs->ARM_sp, regs, 0);
 }
 
 /* sys_execve() executes a new program.
@@ -236,7 +232,6 @@ asmlinkage int sys_execve(char *filenamei, char **argv, char **envp, struct pt_r
 	int error;
 	char * filename;
 
-	lock_kernel();
 	filename = getname(filenamei);
 	error = PTR_ERR(filename);
 	if (IS_ERR(filename))
@@ -244,7 +239,6 @@ asmlinkage int sys_execve(char *filenamei, char **argv, char **envp, struct pt_r
 	error = do_execve(filename, argv, envp, regs);
 	putname(filename);
 out:
-	unlock_kernel();
 	return error;
 }
 

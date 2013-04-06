@@ -104,7 +104,8 @@ struct osf_dirent_callback {
 	int error;
 };
 
-static int osf_filldir(void *__buf, const char *name, int namlen, off_t offset, ino_t ino)
+static int osf_filldir(void *__buf, const char *name, int namlen, off_t offset,
+		       ino_t ino, unsigned int d_type)
 {
 	struct osf_dirent *dirent;
 	struct osf_dirent_callback *buf = (struct osf_dirent_callback *) __buf;
@@ -146,7 +147,6 @@ asmlinkage int osf_getdirentries(unsigned int fd, struct osf_dirent *dirent,
 	buf.count = count;
 	buf.error = 0;
 
-	lock_kernel();
 	error = vfs_readdir(file, osf_filldir, &buf);
 	if (error < 0)
 		goto out_putf;
@@ -156,7 +156,6 @@ asmlinkage int osf_getdirentries(unsigned int fd, struct osf_dirent *dirent,
 		error = count - buf.count;
 
 out_putf:
-	unlock_kernel();
 	fput(file);
 out:
 	return error;
@@ -230,8 +229,6 @@ asmlinkage unsigned long osf_mmap(unsigned long addr, unsigned long len,
 	struct file *file = NULL;
 	unsigned long ret = -EBADF;
 
-	down(&current->mm->mmap_sem);
-	lock_kernel();
 #if 0
 	if (flags & (_MAP_HASSEMAPHORE | _MAP_INHERIT | _MAP_UNALIGNED))
 		printk("%s: unimplemented OSF mmap flags %04lx\n", 
@@ -243,12 +240,12 @@ asmlinkage unsigned long osf_mmap(unsigned long addr, unsigned long len,
 			goto out;
 	}
 	flags &= ~(MAP_EXECUTABLE | MAP_DENYWRITE);
+	down(&current->mm->mmap_sem);
 	ret = do_mmap(file, addr, len, prot, flags, off);
+	up(&current->mm->mmap_sem);
 	if (file)
 		fput(file);
 out:
-	unlock_kernel();
-	up(&current->mm->mmap_sem);
 	return ret;
 }
 
@@ -320,9 +317,7 @@ asmlinkage int osf_fstatfs(unsigned long fd, struct osf_statfs *buffer, unsigned
 	retval = -EBADF;
 	file = fget(fd);
 	if (file) {
-		lock_kernel();
 		retval = do_osf_statfs(file->f_dentry, buffer, bufsiz);
-		unlock_kernel();
 		fput(file);
 	}
 	return retval;
@@ -491,14 +486,12 @@ asmlinkage int sys_pipe(int a0, int a1, int a2, int a3, int a4, int a5,
 	int fd[2];
 	int error;
 
-	lock_kernel();
 	error = do_pipe(fd);
 	if (error)
 		goto out;
 	(&regs)->r20 = fd[1];
 	error = fd[0];
 out:
-	unlock_kernel();
 	return error;
 }
 
@@ -1084,7 +1077,7 @@ osf_select(int n, fd_set *inp, fd_set *outp, fd_set *exp,
 	}
 
 	ret = -EINVAL;
-	if (n < 0 || n > KFDS_NR)
+	if (n < 0 || n > current->files->max_fdset)
 		goto out_nofds;
 
 	/*

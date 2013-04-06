@@ -21,14 +21,6 @@ struct module *ip_conntrack_ftp = THIS_MODULE;
 #define DEBUGP(format, args...)
 #endif
 
-#define IP_PARTS_NATIVE(n)			\
-(unsigned int)((n)>>24)&0xFF,			\
-(unsigned int)((n)>>16)&0xFF,			\
-(unsigned int)((n)>>8)&0xFF,			\
-(unsigned int)((n)&0xFF)
-
-#define IP_PARTS(n) IP_PARTS_NATIVE(ntohl(n))
-
 static struct {
 	const char *pattern;
 	size_t plen;
@@ -111,7 +103,7 @@ static int help(const struct iphdr *iph, size_t len,
 		struct ip_conntrack *ct,
 		enum ip_conntrack_info ctinfo)
 {
-	/* tcplen not negative guarenteed by ip_conntrack_tcp.c */
+	/* tcplen not negative guaranteed by ip_conntrack_tcp.c */
 	struct tcphdr *tcph = (void *)iph + iph->ihl * 4;
 	const char *data = (const char *)tcph + tcph->doff * 4;
 	unsigned int tcplen = len - iph->ihl * 4;
@@ -121,12 +113,8 @@ static int help(const struct iphdr *iph, size_t len,
 	u_int32_t array[6] = { 0 };
 	int dir = CTINFO2DIR(ctinfo);
 	unsigned int matchlen, matchoff;
-	struct ip_conntrack_tuple t;
+	struct ip_conntrack_tuple t, mask;
 	struct ip_ct_ftp *info = &ct->help.ct_ftp_info;
-
-	/* Can't track connections formed before we registered */
-	if (!info)
-		return NF_ACCEPT;
 
 	/* Until there's been traffic both ways, don't look in packets. */
 	if (ctinfo != IP_CT_ESTABLISHED
@@ -146,8 +134,8 @@ static int help(const struct iphdr *iph, size_t len,
 	if (tcp_v4_check(tcph, tcplen, iph->saddr, iph->daddr,
 			 csum_partial((char *)tcph, tcplen, 0))) {
 		DEBUGP("ftp_help: bad csum: %p %u %u.%u.%u.%u %u.%u.%u.%u\n",
-		       tcph, tcplen, IP_PARTS(iph->saddr),
-		       IP_PARTS(iph->daddr));
+		       tcph, tcplen, NIPQUAD(iph->saddr),
+		       NIPQUAD(iph->daddr));
 		return NF_ACCEPT;
 	}
 
@@ -185,8 +173,9 @@ static int help(const struct iphdr *iph, size_t len,
 		   connection tracking, not packet filtering.
 		   However, it is neccessary for accurate tracking in
 		   this case. */
-		DEBUGP("conntrack_ftp: partial `%.*s'\n",
-		       (int)datalen, data);
+		if (net_ratelimit())
+			printk("conntrack_ftp: partial %u+%u\n",
+			       ntohl(tcph->seq), datalen);
 		return NF_DROP;
 
 	case 0: /* no match */
@@ -200,35 +189,45 @@ static int help(const struct iphdr *iph, size_t len,
 
 	/* Update the ftp info */
 	LOCK_BH(&ip_ftp_lock);
-	info->is_ftp = 1;
-	info->seq = ntohl(tcph->seq) + matchoff;
-	info->len = matchlen;
-	info->ftptype = dir;
-	info->port = array[4] << 8 | array[5];
+	if (htonl((array[0] << 24) | (array[1] << 16) | (array[2] << 8) | array[3])
+	    == ct->tuplehash[dir].tuple.src.ip) {
+		info->is_ftp = 1;
+		info->seq = ntohl(tcph->seq) + matchoff;
+		info->len = matchlen;
+		info->ftptype = dir;
+		info->port = array[4] << 8 | array[5];
+	} else {
+		/* Enrico Scholz's passive FTP to partially RNAT'd ftp
+		   server: it really wants us to connect to a
+		   different IP address.  Simply don't record it for
+		   NAT. */
+		DEBUGP("conntrack_ftp: NOT RECORDING: %u,%u,%u,%u != %u.%u.%u.%u\n",
+		       array[0], array[1], array[2], array[3],
+		       NIPQUAD(ct->tuplehash[dir].tuple.src.ip));
+	}
 
 	t = ((struct ip_conntrack_tuple)
 		{ { ct->tuplehash[!dir].tuple.src.ip,
-		    { 0 }, 0 },
+		    { 0 } },
 		  { htonl((array[0] << 24) | (array[1] << 16)
 			  | (array[2] << 8) | array[3]),
 		    { htons(array[4] << 8 | array[5]) },
 		    IPPROTO_TCP }});
-	ip_conntrack_expect_related(ct, &t);
+	mask = ((struct ip_conntrack_tuple)
+		{ { 0xFFFFFFFF, { 0 } },
+		  { 0xFFFFFFFF, { 0xFFFF }, 0xFFFF }});
+	/* Ignore failure; should only happen with NAT */
+	ip_conntrack_expect_related(ct, &t, &mask, NULL);
 	UNLOCK_BH(&ip_ftp_lock);
 
 	return NF_ACCEPT;
 }
 
-/* Returns TRUE if it wants to help this connection (tuple is the
-   tuple of REPLY packets from server). */
-static int ftp_will_help(const struct ip_conntrack_tuple *rtuple)
-{
-	return (rtuple->dst.protonum == IPPROTO_TCP
-		&& rtuple->src.u.tcp.port == __constant_htons(21));
-}
-
 static struct ip_conntrack_helper ftp = { { NULL, NULL },
-					  ftp_will_help,
+					  { { 0, { __constant_htons(21) } },
+					    { 0, { 0 }, IPPROTO_TCP } },
+					  { { 0, { 0xFFFF } },
+					    { 0, { 0 }, 0xFFFF } },
 					  help };
 
 static int __init init(void)
@@ -240,6 +239,9 @@ static void __exit fini(void)
 {
 	ip_conntrack_helper_unregister(&ftp);
 }
+
+EXPORT_SYMBOL(ip_ftp_lock);
+EXPORT_SYMBOL(ip_conntrack_ftp);
 
 module_init(init);
 module_exit(fini);

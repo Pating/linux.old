@@ -2,6 +2,8 @@
  * Generic RTC interface.
  * This version contains the part of the user interface to the Real Time Clock
  * service. It is used with both the legacy mc146818 and also  EFI
+ * Struct rtc_time and first 12 ioctl by Paul Gortmaker, 1996 - separated out
+ * from <linux/mc146818rtc.h> to this file for 2.4 kernels.
  * 
  * Copyright (C) 1999 Hewlett-Packard Co.
  * Copyright (C) 1999 Stephane Eranian <eranian@hpl.hp.com>
@@ -49,6 +51,8 @@ struct rtc_wkalrm {
 #define RTC_UIE_OFF	_IO('p', 0x04)	/* ... off			*/
 #define RTC_PIE_ON	_IO('p', 0x05)	/* Periodic int. enable on	*/
 #define RTC_PIE_OFF	_IO('p', 0x06)	/* ... off			*/
+#define RTC_WIE_ON	_IO('p', 0x0f)  /* Watchdog int. enable on	*/
+#define RTC_WIE_OFF	_IO('p', 0x10)  /* ... off			*/
 
 #define RTC_ALM_SET	_IOW('p', 0x07, struct rtc_time) /* Set alarm time  */
 #define RTC_ALM_READ	_IOR('p', 0x08, struct rtc_time) /* Read alarm time */

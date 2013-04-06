@@ -136,6 +136,7 @@ int ufs_frag_map(struct inode *inode, int frag)
 		       ufs_block_bmap(bread(sb->s_dev, uspi->s_sbbase + i,
 					    sb->s_blocksize),
 				      frag & uspi->s_apbmask, uspi, swab));
+		goto out;
 	}
 	frag -= 1 << (uspi->s_apbshift + uspi->s_fpbshift);
 	if (frag < (1 << (uspi->s_2apbshift + uspi->s_fpbshift))) {
@@ -185,7 +186,6 @@ static struct buffer_head * ufs_inode_getfrag (struct inode *inode,
 	struct super_block * sb;
 	struct ufs_sb_private_info * uspi;
 	struct buffer_head * result;
-	unsigned long limit;
 	unsigned block, blockoff, lastfrag, lastblock, lastblockoff;
 	unsigned tmp, goal;
 	u32 * p, * p2;
@@ -217,16 +217,6 @@ repeat:
 			goto repeat;
 		} else {
 			*phys = tmp;
-			return NULL;
-		}
-	}
-	*err = -EFBIG;
-
-	limit = current->rlim[RLIMIT_FSIZE].rlim_cur;
-	if (limit < RLIM_INFINITY) {
-		limit >>= sb->s_blocksize_bits;
-		if (new_fragment >= limit) {
-			send_sig(SIGXFSZ, current, 0);
 			return NULL;
 		}
 	}
@@ -347,19 +337,7 @@ repeat:
 			goto out;
 		}
 	}
-	*err = -EFBIG;
 
-	{
-		unsigned long limit = current->rlim[RLIMIT_FSIZE].rlim_cur;
-		if (limit < RLIM_INFINITY) {
-			limit >>= sb->s_blocksize_bits;
-			if (new_fragment >= limit) {
-				brelse (bh);
-				send_sig(SIGXFSZ, current, 0);
-				return NULL;
-			}
-		}
-	}
 	if (block && (tmp = SWAB32(((u32*)bh->b_data)[block-1]) + uspi->s_fpb))
 		goal = tmp + uspi->s_fpb;
 	else
@@ -382,7 +360,7 @@ repeat:
 		*new = 1;
 	}
 
-	mark_buffer_dirty(bh, 1);
+	mark_buffer_dirty(bh);
 	if (IS_SYNC(inode)) {
 		ll_rw_block (WRITE, 1, &bh);
 		wait_on_buffer (bh);
@@ -515,7 +493,7 @@ struct buffer_head *ufs_getfrag(struct inode *inode, unsigned int fragment,
 		if (buffer_new(&dummy)) {
 			memset(bh->b_data, 0, inode->i_sb->s_blocksize);
 			mark_buffer_uptodate(bh, 1);
-			mark_buffer_dirty(bh, 1);
+			mark_buffer_dirty(bh);
 		}
 		return bh;
 	}
@@ -540,7 +518,7 @@ struct buffer_head * ufs_bread (struct inode * inode, unsigned fragment,
 	return NULL;
 }
 
-static int ufs_writepage(struct file *file, struct page *page)
+static int ufs_writepage(struct page *page)
 {
 	return block_write_full_page(page,ufs_getfrag_block);
 }
@@ -733,7 +711,7 @@ static int ufs_update_inode(struct inode * inode, int do_sync)
 	if (!inode->i_nlink)
 		memset (ufs_inode, 0, sizeof(struct ufs_inode));
 		
-	mark_buffer_dirty(bh, 1);
+	mark_buffer_dirty(bh);
 	if (do_sync) {
 		ll_rw_block (WRITE, 1, &bh);
 		wait_on_buffer (bh);
@@ -744,9 +722,11 @@ static int ufs_update_inode(struct inode * inode, int do_sync)
 	return 0;
 }
 
-void ufs_write_inode (struct inode * inode)
+void ufs_write_inode (struct inode * inode, int wait)
 {
-	ufs_update_inode (inode, 0);
+	lock_kernel();
+	ufs_update_inode (inode, wait);
+	unlock_kernel();
 }
 
 int ufs_sync_inode (struct inode *inode)
@@ -754,18 +734,15 @@ int ufs_sync_inode (struct inode *inode)
 	return ufs_update_inode (inode, 1);
 }
 
-void ufs_put_inode (struct inode * inode)
-{
-	UFSD(("ENTER & EXIT\n"))
-}
-
 void ufs_delete_inode (struct inode * inode)
 {
 	/*inode->u.ufs_i.i_dtime = CURRENT_TIME;*/
+	lock_kernel();
 	mark_inode_dirty(inode);
 	ufs_update_inode(inode, IS_SYNC(inode));
 	inode->i_size = 0;
 	if (inode->i_blocks)
 		ufs_truncate (inode);
 	ufs_free_inode (inode);
+	unlock_kernel();
 }

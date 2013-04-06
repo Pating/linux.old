@@ -2,7 +2,7 @@
 
 	Written 1993-1998 by
 	Donald Becker, becker@cesdis.gsfc.nasa.gov, (driver core) and
-	David Hinds, dhinds@pcmcia.sourceforge.org (from his PC card code).
+	David Hinds, dahinds@users.sourceforge.net (from his PC card code).
 
 	This software may be used and distributed according to the terms of
 	the GNU Public License, incorporated herein by reference.
@@ -117,7 +117,7 @@ static int irq_list[4] = { -1 };
 static int max_interrupt_work = 32;
 
 /* Force full duplex modes? */
-static int full_duplex = 0;
+static int full_duplex;
 
 /* To minimize the size of the driver source and make the driver more
    readable not all constants are symbolically defined.
@@ -327,7 +327,7 @@ static dev_link_t *tc574_attach(void)
 	dev->stop = &el3_close;
 	dev->tx_timeout = el3_tx_timeout;
 	dev->watchdog_timeo = TX_TIMEOUT;
-	
+
 	/* Register with Card Services */
 	link->next = dev_list;
 	dev_list = link;
@@ -511,11 +511,11 @@ static void tc574_config(dev_link_t *link)
 		
 		/* Roadrunner only: Turn on the MII transceiver */
 		outw(0x8040, ioaddr + Wn3_Options);
-		udelay(1000);
+		mdelay(1);
 		outw(0xc040, ioaddr + Wn3_Options);
 		wait_for_completion(dev, TxReset);
 		wait_for_completion(dev, RxReset);
-		udelay(1000);
+		mdelay(1);
 		outw(0x8040, ioaddr + Wn3_Options);
 		
 		EL3WINDOW(4);
@@ -783,11 +783,11 @@ static void tc574_reset(struct net_device *dev)
 	
 	/* Roadrunner only: Turn on the MII transceiver. */
 	outw(0x8040, ioaddr + Wn3_Options);
-	udelay(1000);
+	mdelay(1);
 	outw(0xc040, ioaddr + Wn3_Options);
 	wait_for_completion(dev, TxReset);
 	wait_for_completion(dev, RxReset);
-	udelay(1000);
+	mdelay(1);
 	outw(0x8040, ioaddr + Wn3_Options);
 
 	/* Switch to the stats window, and clear all stats by reading. */

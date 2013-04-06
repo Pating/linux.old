@@ -101,15 +101,12 @@ static int MainDaemon(void *cpu_pointer)
 	MOD_INC_USE_COUNT;
 
 	
-	current->state |= TASK_EXCLUSIVE;
-
 	CPUNR=0;
 	if (cpu_pointer!=NULL)
 	CPUNR=(int)*(int*)cpu_pointer;
 
 	sprintf(current->comm,"khttpd - %i",CPUNR);
-	lock_kernel();   /* This seems to be required for exit_mm */
-	exit_mm(current);
+	daemonize();
 	
 	init_waitqueue_head(&(DummyWQ[CPUNR]));
 	
@@ -148,7 +145,6 @@ static int MainDaemon(void *cpu_pointer)
 			changes +=AcceptConnections(CPUNR,MainSocket);
 		}
 		
-		set_current_state(TASK_INTERRUPTIBLE|TASK_EXCLUSIVE);	
 		if (changes==0) 
 		{
 			(void)interruptible_sleep_on_timeout(&(DummyWQ[CPUNR]),1);	
@@ -200,8 +196,7 @@ static int ManagementDaemon(void *unused)
 	
 	
 	sprintf(current->comm,"khttpd manager");
-	lock_kernel();   /* This seems to be required for exit_mm */
-	exit_mm(current);
+	daemonize();
 	
 
 	/* Block all signals except SIGKILL and SIGSTOP */
@@ -277,7 +272,7 @@ static int ManagementDaemon(void *unused)
 		while (I<ActualThreads)
 		{
 			atomic_set(&Running[I],1);
-			(void)kernel_thread(MainDaemon,&(CountBuf[I]),0);
+			(void)kernel_thread(MainDaemon,&(CountBuf[I]), CLONE_FS | CLONE_FILES | CLONE_SIGHAND);
 			I++;
 		}
 		
@@ -294,7 +289,7 @@ static int ManagementDaemon(void *unused)
 					if (atomic_read(&Running[I])==0)
 					{
 						atomic_set(&Running[I],1);
-						(void)kernel_thread(MainDaemon,&(CountBuf[I]),0);
+						(void)kernel_thread(MainDaemon,&(CountBuf[I]), CLONE_FS | CLONE_FILES | CLONE_SIGHAND);
 						(void)printk(KERN_CRIT "kHTTPd: Restarting daemon %i \n",I);
 					}
 					I++;
@@ -383,7 +378,7 @@ int __init khttpd_init(void)
 
 	StartSysctl();
 	
-	(void)kernel_thread(ManagementDaemon,NULL,0);
+	(void)kernel_thread(ManagementDaemon,NULL, CLONE_FS | CLONE_FILES | CLONE_SIGHAND);
 	
 	return 0;
 }

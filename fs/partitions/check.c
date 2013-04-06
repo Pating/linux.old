@@ -31,9 +31,9 @@
 #include "sgi.h"
 #include "sun.h"
 #include "ibm.h"
+#include "ultrix.h"
 
 extern void device_init(void);
-extern void md_setup_drive(void);
 extern int *blk_size[];
 extern void rd_load(void);
 extern void initrd_load(void);
@@ -75,11 +75,6 @@ static int (*check_part[])(struct gendisk *hd, kdev_t dev, unsigned long first_s
 	NULL
 };
 
-#if defined CONFIG_BLK_DEV_LVM || defined CONFIG_BLK_DEV_LVM_MODULE
-#include <linux/lvm.h>
-void (*lvm_hd_name_ptr) (char *, int) = NULL;
-#endif
-
 /*
  * disk_name() is used by genhd.c and blkpg.c.
  * It formats the devicename of the indicated disk into
@@ -106,13 +101,6 @@ char *disk_name (struct gendisk *hd, int minor, char *buf)
 	 * This requires special handling here.
 	 */
 	switch (hd->major) {
-#if defined CONFIG_BLK_DEV_LVM || defined CONFIG_BLK_DEV_LVM_MODULE
-		case LVM_BLK_MAJOR:
-			*buf = 0;
-			if ( lvm_hd_name_ptr != NULL)
-				(lvm_hd_name_ptr) ( buf, minor);
-			return buf;
-#endif
 		case IDE9_MAJOR:
 			unit += 2;
 		case IDE8_MAJOR:
@@ -135,8 +123,8 @@ char *disk_name (struct gendisk *hd, int minor, char *buf)
 			maj = "hd";
 			break;
 		case MD_MAJOR:
-			unit -= 'a'-'0';
-			break;
+			sprintf(buf, "%s%d", maj, unit - 'a');
+			return buf;
 	}
 	if (hd->major >= SCSI_DISK1_MAJOR && hd->major <= SCSI_DISK7_MAJOR) {
 		unit = unit + (hd->major - SCSI_DISK1_MAJOR + 1) * 16;
@@ -158,6 +146,16 @@ char *disk_name (struct gendisk *hd, int minor, char *buf)
  			sprintf(buf, "%s/c%dd%dp%d", maj, ctlr, disk, part);
  		return buf;
  	}
+	if (hd->major >= COMPAQ_CISS_MAJOR && hd->major <= COMPAQ_CISS_MAJOR+7) {
+                int ctlr = hd->major - COMPAQ_CISS_MAJOR;
+                int disk = minor >> hd->minor_shift;
+                int part = minor & (( 1 << hd->minor_shift) - 1);
+                if (part == 0)
+                        sprintf(buf, "%s/c%dd%d", maj, ctlr, disk);
+                else
+                        sprintf(buf, "%s/c%dd%dp%d", maj, ctlr, disk, part);
+                return buf;
+	}
 	if (hd->major >= DAC960_MAJOR && hd->major <= DAC960_MAJOR+7) {
 		int ctlr = hd->major - DAC960_MAJOR;
  		int disk = minor >> hd->minor_shift;
@@ -189,19 +187,12 @@ void add_gd_partition(struct gendisk *hd, int minor, int start, int size)
 #ifdef CONFIG_DEVFS_FS
 	printk(" p%d", (minor & ((1 << hd->minor_shift) - 1)));
 #else
-	if (hd->major >= COMPAQ_SMART2_MAJOR+0 && hd->major <= COMPAQ_SMART2_MAJOR+7)
+	if ((hd->major >= COMPAQ_SMART2_MAJOR+0 && hd->major <= COMPAQ_SMART2_MAJOR+7) ||
+	    (hd->major >= COMPAQ_CISS_MAJOR+0 && hd->major <= COMPAQ_CISS_MAJOR+7))
 		printk(" p%d", (minor & ((1 << hd->minor_shift) - 1)));
 	else
 		printk(" %s", disk_name(hd, minor, buf));
 #endif
-}
-
-int get_hardsect_size(kdev_t dev)
-{
-	if (hardsect_size[MAJOR(dev)] != NULL)
-		return hardsect_size[MAJOR(dev)][MINOR(dev)];
-	else
-		return 512;
 }
 
 unsigned int get_ptable_blocksize(kdev_t dev)
@@ -248,24 +239,35 @@ unsigned int get_ptable_blocksize(kdev_t dev)
 }
 
 #ifdef CONFIG_PROC_FS
-int get_partition_list(char * page)
+int get_partition_list(char *page, char **start, off_t offset, int count)
 {
-	struct gendisk *p;
-	char buf[64];
-	int n, len;
+	struct gendisk *dsk;
+	int len;
 
 	len = sprintf(page, "major minor  #blocks  name\n\n");
-	for (p = gendisk_head; p; p = p->next) {
-		for (n=0; n < (p->nr_real << p->minor_shift); n++) {
-			if (p->part[n].nr_sects && len < PAGE_SIZE - 80) {
-				len += sprintf(page+len,
+	for (dsk = gendisk_head; dsk; dsk = dsk->next) {
+		int n;
+
+		for (n = 0; n < (dsk->nr_real << dsk->minor_shift); n++)
+			if (dsk->part[n].nr_sects) {
+				char buf[64];
+
+				len += sprintf(page + len,
 					       "%4d  %4d %10d %s\n",
-					       p->major, n, p->sizes[n],
-					       disk_name(p, n, buf));
+					       dsk->major, n, dsk->sizes[n],
+					       disk_name(dsk, n, buf));
+				if (len < offset)
+					offset -= len, len = 0;
+				else if (len >= offset + count)
+					goto leave_loops;
 			}
-		}
 	}
-	return len;
+leave_loops:
+	*start = page + offset;
+	len -= offset;
+	if (len < 0)
+		len = 0;
+	return len > count ? count : len;
 }
 #endif
 
@@ -323,9 +325,9 @@ static void devfs_register_partition (struct gendisk *dev, int minor, int part)
 		devfs_flags |= DEVFS_FL_REMOVABLE;
 	sprintf (devname, "part%d", part);
 	dev->part[minor + part].de =
-	    devfs_register (dir, devname, 0, devfs_flags,
+	    devfs_register (dir, devname, devfs_flags,
 			    dev->major, minor + part,
-			    S_IFBLK | S_IRUSR | S_IWUSR, 0, 0,
+			    S_IFBLK | S_IRUSR | S_IWUSR,
 			    dev->fops, NULL);
 }
 
@@ -336,8 +338,8 @@ static void devfs_register_disc (struct gendisk *dev, int minor)
 	devfs_handle_t dir, slave;
 	unsigned int devfs_flags = DEVFS_FL_DEFAULT;
 	char dirname[64], symlink[16];
-	static unsigned int disc_counter = 0;
-	static devfs_handle_t devfs_handle = NULL;
+	static unsigned int disc_counter;
+	static devfs_handle_t devfs_handle;
 
 	if (dev->part[minor].de) return;
 	if ( dev->flags && (dev->flags[devnum] & GENHD_FL_REMOVABLE) )
@@ -353,16 +355,16 @@ static void devfs_register_disc (struct gendisk *dev, int minor)
 	else {
 		/*  Unaware driver: construct "real" directory  */
 		sprintf (dirname, "../%s/disc%d", dev->major_name, devnum);
-		dir = devfs_mk_dir (NULL, dirname + 3, 0, NULL);
+		dir = devfs_mk_dir (NULL, dirname + 3, NULL);
 	}
 	if (!devfs_handle)
-		devfs_handle = devfs_mk_dir (NULL, "discs", 5, NULL);
+		devfs_handle = devfs_mk_dir (NULL, "discs", NULL);
 	sprintf (symlink, "disc%u", disc_counter++);
-	devfs_mk_symlink (devfs_handle, symlink, 0, DEVFS_FL_DEFAULT,
-			  dirname + pos, 0, &slave, NULL);
+	devfs_mk_symlink (devfs_handle, symlink, DEVFS_FL_DEFAULT,
+			  dirname + pos, &slave, NULL);
 	dev->part[minor].de =
-	    devfs_register (dir, "disc", 4, devfs_flags, dev->major, minor,
-			    S_IFBLK | S_IRUSR | S_IWUSR, 0, 0, dev->fops,NULL);
+	    devfs_register (dir, "disc", devfs_flags, dev->major, minor,
+			    S_IFBLK | S_IRUSR | S_IWUSR, dev->fops, NULL);
 	devfs_auto_unregister (dev->part[minor].de, slave);
 	if (!dev->de_arr)
 		devfs_auto_unregister (slave, dir);
@@ -406,7 +408,7 @@ void register_disk(struct gendisk *gdev, kdev_t dev, unsigned minors,
 {
 	if (!gdev)
 		return;
-		grok_partitions(gdev, MINOR(dev)>>gdev->minor_shift, minors, size);
+	grok_partitions(gdev, MINOR(dev)>>gdev->minor_shift, minors, size);
 }
 
 void grok_partitions(struct gendisk *dev, int drive, unsigned minors, long size)
@@ -447,9 +449,6 @@ int __init partition_setup(void)
 	else
 #endif
 	rd_load();
-#endif
-#ifdef CONFIG_BLK_DEV_MD
-	autodetect_raid();
 #endif
 	return 0;
 }

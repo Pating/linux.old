@@ -1,4 +1,4 @@
-/* $Id: elf.h,v 1.21 2000/04/14 09:59:04 davem Exp $ */
+/* $Id: elf.h,v 1.22 2000/07/12 01:27:08 davem Exp $ */
 #ifndef __ASMSPARC_ELF_H
 #define __ASMSPARC_ELF_H
 
@@ -59,7 +59,7 @@ typedef struct {
 /*
  * This is used to ensure we don't load something for the wrong architecture.
  */
-#define elf_check_arch(x) ((x) == EM_SPARC)
+#define elf_check_arch(x) ((x)->e_machine == EM_SPARC)
 
 /*
  * These are used to set parameters in the core dumps.

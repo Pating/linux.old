@@ -24,6 +24,11 @@
 #include <linux/tqueue.h>
 #include <linux/circ_buf.h>
 #include <linux/wait.h>
+#if (LINUX_VERSION_CODE < 0x020300)
+/* Unfortunate, but Linux 2.2 needs async_icount defined here and
+ * it got moved in 2.3 */
+#include <linux/serial.h>
+#endif
 
 struct serial_state {
 	int	magic;
@@ -175,7 +180,8 @@ struct pci_board_inst {
 #define SPCI_FL_IRQBASE4       (0x0004 << 4)
 #define SPCI_FL_GET_IRQBASE(x)        ((x & SPCI_FL_IRQ_MASK) >> 4)
 
-/* Use sucessiveentries base resource table */
+/* Use sucessive BARs (PCI base address registers), 
+   else use offset into some specified BAR */
 #define SPCI_FL_BASE_TABLE	0x0100
 
 /* Use successive entries in the irq resource table */
@@ -190,6 +196,9 @@ struct pci_board_inst {
 /* Do not use irq sharing for this device */
 #define SPCI_FL_NO_SHIRQ	0x1000
 
-#define SPCI_FL_PNPDEFAULT	(SPCI_FL_IRQRESOURCE)
+/* This is a PNP device */
+#define SPCI_FL_ISPNP		0x2000
+
+#define SPCI_FL_PNPDEFAULT	(SPCI_FL_IRQRESOURCE|SPCI_FL_ISPNP)
 
 #endif /* _LINUX_SERIAL_H */

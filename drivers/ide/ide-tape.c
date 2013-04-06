@@ -402,6 +402,7 @@
 #include <linux/malloc.h>
 #include <linux/pci.h>
 #include <linux/ide.h>
+#include <linux/smp_lock.h>
 
 #include <asm/byteorder.h>
 #include <asm/irq.h>
@@ -685,7 +686,7 @@ typedef struct idetape_packet_command_s {
 	byte *current_position;			/* Pointer into the above buffer */
 	ide_startstop_t (*callback) (ide_drive_t *);	/* Called when this packet command is completed */
 	byte pc_buffer[IDETAPE_PC_BUFFER_SIZE];	/* Temporary buffer */
-	unsigned int flags;			/* Status/Action bit flags */
+	unsigned long flags;			/* Status/Action bit flags: long for set_bit */
 } idetape_pc_t;
 
 /*
@@ -907,7 +908,7 @@ typedef struct {
 	int pages_per_stage;
 	int excess_bh_size;			/* Wasted space in each stage */
 
-	unsigned int flags;			/* Status/Action flags */
+	unsigned long flags;			/* Status/Action flags: long for set_bit */
 	spinlock_t spinlock;			/* protects the ide-tape queue */
 
 	/*
@@ -1538,7 +1539,7 @@ static idetape_pc_t *idetape_next_pc_storage (ide_drive_t *drive)
  
 /**************************************************************
  *                                                            *
- *  This should get fixed to use kmalloc(GFP_ATOMIC, ..)      *
+ *  This should get fixed to use kmalloc(.., GFP_ATOMIC)      *
  *  followed later on by kfree().   -ml                       *
  *                                                            *
  **************************************************************/
@@ -3125,8 +3126,11 @@ static void idetape_create_load_unload_cmd (ide_drive_t *drive, idetape_pc_t *pc
 	idetape_init_pc (pc);
 	pc->c[0] = IDETAPE_LOAD_UNLOAD_CMD;
 	pc->c[4] = cmd;
-	if (tape->onstream)
+	if (tape->onstream) {
 		pc->c[1] = 1;
+		if (cmd == !IDETAPE_LU_LOAD_MASK)
+			pc->c[4] = 4;
+	}
 	set_bit (PC_WAIT_FOR_DSC, &pc->flags);
 	pc->callback = &idetape_pc_callback;
 }
@@ -3238,12 +3242,18 @@ static void idetape_create_locate_cmd (ide_drive_t *drive, idetape_pc_t *pc, uns
 	pc->callback = &idetape_pc_callback;
 }
 
-static void idetape_create_prevent_cmd (ide_drive_t *drive, idetape_pc_t *pc, int prevent)
+static int idetape_create_prevent_cmd (ide_drive_t *drive, idetape_pc_t *pc, int prevent)
 {
+	idetape_tape_t *tape = drive->driver_data;
+
+	if (!tape->capabilities.lock)
+		return 0;
+
 	idetape_init_pc(pc);
 	pc->c[0] = IDETAPE_PREVENT_CMD;
 	pc->c[4] = prevent;
 	pc->callback = &idetape_pc_callback;
+	return 1;
 }
 
 static int __idetape_discard_read_pipeline (ide_drive_t *drive)
@@ -3912,8 +3922,16 @@ static int idetape_get_logical_blk (ide_drive_t *drive, int logical_blk_num, int
 #endif
 				clear_bit(IDETAPE_PIPELINE_ERROR, &tape->flags);
 				position = idetape_read_position(drive);
-				printk(KERN_INFO "ide-tape: %s: blank block detected, positioning tape to block %d\n", tape->name, position + 60);
-				idetape_position_tape(drive, position + 60, 0, 1);
+				if (position >= 3000 && position < 3080)
+					position += 32;
+				if (position >= 2980 && position < 3000)
+					position = 3000;
+				else
+					position += 60;
+				if (position >= 2980 && position < 3000)
+					position = 3000;
+				printk(KERN_INFO "ide-tape: %s: blank block detected, positioning tape to block %d\n", tape->name, position);
+				idetape_position_tape(drive, position, 0, 1);
 				cnt += 40;
 				continue;
 			} else
@@ -5008,13 +5026,15 @@ static int idetape_mtioctop (ide_drive_t *drive,short mt_op,int mt_count)
 				}
 			}
 		case MTLOCK:
-			idetape_create_prevent_cmd(drive, &pc, 1);
+			if (!idetape_create_prevent_cmd(drive, &pc, 1))
+				return 0;
 			retval = idetape_queue_pc_tail (drive,&pc);
 			if (retval) return retval;
 			tape->door_locked = DOOR_EXPLICITLY_LOCKED;
 			return 0;
 		case MTUNLOCK:
-			idetape_create_prevent_cmd(drive, &pc, 0);
+			if (!idetape_create_prevent_cmd(drive, &pc, 0))
+				return 0;
 			retval = idetape_queue_pc_tail (drive,&pc);
 			if (retval) return retval;
 			tape->door_locked = DOOR_UNLOCKED;
@@ -5231,11 +5251,6 @@ static int idetape_chrdev_open (struct inode *inode, struct file *filp)
 
 	if (test_and_set_bit (IDETAPE_BUSY, &tape->flags))
 		return -EBUSY;
-	MOD_INC_USE_COUNT;
-#if ONSTREAM_DEBUG
-	if (tape->debug_level >= 6)
-		printk(KERN_INFO "ide-tape: MOD_INC_USE_COUNT in idetape_chrdev_open-1\n");
-#endif
 	if (!tape->onstream) {
 		idetape_read_position(drive);
 		if (!test_bit (IDETAPE_ADDRESS_VALID, &tape->flags))
@@ -5251,32 +5266,18 @@ static int idetape_chrdev_open (struct inode *inode, struct file *filp)
 	}
 	if (idetape_wait_ready(drive, 60 * HZ)) {
 		clear_bit(IDETAPE_BUSY, &tape->flags);
-		MOD_DEC_USE_COUNT;
-#if ONSTREAM_DEBUG
-	if (tape->debug_level >= 6)
-		printk(KERN_INFO "ide-tape: MOD_DEC_USE_COUNT in idetape_chrdev_open-1\n");
-#endif
 		printk(KERN_ERR "ide-tape: %s: drive not ready\n", tape->name);
 		return -EBUSY;
 	}
 	idetape_read_position(drive);
-	MOD_DEC_USE_COUNT;
-#if ONSTREAM_DEBUG
-	if (tape->debug_level >= 6)
-		printk(KERN_INFO "ide-tape: MOD_DEC_USE_COUNT in idetape_chrdev_open-2\n");
-#endif
 	clear_bit (IDETAPE_PIPELINE_ERROR, &tape->flags);
 
 	if (tape->chrdev_direction == idetape_direction_none) {
-		MOD_INC_USE_COUNT;
-#if ONSTREAM_DEBUG
-		if (tape->debug_level >= 6)
-			printk(KERN_INFO "ide-tape: MOD_INC_USE_COUNT in idetape_chrdev_open-2\n");
-#endif
-		idetape_create_prevent_cmd(drive, &pc, 1);
-		if (!idetape_queue_pc_tail (drive,&pc)) {
-			if (tape->door_locked != DOOR_EXPLICITLY_LOCKED)
-				tape->door_locked = DOOR_LOCKED;
+		if (idetape_create_prevent_cmd(drive, &pc, 1)) {
+			if (!idetape_queue_pc_tail (drive,&pc)) {
+				if (tape->door_locked != DOOR_EXPLICITLY_LOCKED)
+					tape->door_locked = DOOR_LOCKED;
+			}
 		}
 		idetape_analyze_headers(drive);
 	}
@@ -5292,10 +5293,12 @@ static int idetape_chrdev_open (struct inode *inode, struct file *filp)
 static int idetape_chrdev_release (struct inode *inode, struct file *filp)
 {
 	ide_drive_t *drive = get_drive_ptr (inode->i_rdev);
-	idetape_tape_t *tape = drive->driver_data;
+	idetape_tape_t *tape;
 	idetape_pc_t pc;
 	unsigned int minor=MINOR (inode->i_rdev);
-			
+
+	lock_kernel();
+	tape = drive->driver_data;
 #if IDETAPE_DEBUG_LOG
 	if (tape->debug_level >= 3)
 		printk (KERN_INFO "ide-tape: Reached idetape_chrdev_release\n");
@@ -5329,17 +5332,13 @@ static int idetape_chrdev_release (struct inode *inode, struct file *filp)
 		(void) idetape_rewind_tape (drive);
 	if (tape->chrdev_direction == idetape_direction_none) {
 		if (tape->door_locked != DOOR_EXPLICITLY_LOCKED) {
-			idetape_create_prevent_cmd(drive, &pc, 0);
-			if (!idetape_queue_pc_tail (drive,&pc))
-				tape->door_locked = DOOR_UNLOCKED;
+			if (idetape_create_prevent_cmd(drive, &pc, 0))
+				if (!idetape_queue_pc_tail (drive,&pc))
+					tape->door_locked = DOOR_UNLOCKED;
 		}
-		MOD_DEC_USE_COUNT;
-#if ONSTREAM_DEBUG
-		if (tape->debug_level >= 6)
-			printk(KERN_INFO "ide-tape: MOD_DEC_USE_COUNT in idetape_chrdev_release\n");
-#endif
 	}
 	clear_bit (IDETAPE_BUSY, &tape->flags);
+	unlock_kernel();
 	return 0;
 }
 
@@ -5915,6 +5914,7 @@ static ide_module_t idetape_module = {
  *	Our character device supporting functions, passed to register_chrdev.
  */
 static struct file_operations idetape_fops = {
+	owner:		THIS_MODULE,
 	read:		idetape_chrdev_read,
 	write:		idetape_chrdev_write,
 	ioctl:		idetape_chrdev_ioctl,
@@ -5983,14 +5983,14 @@ int idetape_init (void)
 		idetape_setup (drive, tape, minor);
 		idetape_chrdevs[minor].drive = drive;
 		tape->de_r =
-		    devfs_register (drive->de, "mt", 2, DEVFS_FL_DEFAULT,
+		    devfs_register (drive->de, "mt", DEVFS_FL_DEFAULT,
 				    HWIF(drive)->major, minor,
-				    S_IFCHR | S_IRUGO | S_IWUGO, 0, 0,
+				    S_IFCHR | S_IRUGO | S_IWUGO,
 				    &idetape_fops, NULL);
 		tape->de_n =
-		    devfs_register (drive->de, "mtn", 3, DEVFS_FL_DEFAULT,
+		    devfs_register (drive->de, "mtn", DEVFS_FL_DEFAULT,
 				    HWIF(drive)->major, minor + 128,
-				    S_IFCHR | S_IRUGO | S_IWUGO, 0, 0,
+				    S_IFCHR | S_IRUGO | S_IWUGO,
 				    &idetape_fops, NULL);
 		devfs_register_tape (tape->de_r);
 		supported++; failed--;

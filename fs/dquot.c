@@ -64,8 +64,6 @@ int max_dquots = NR_DQUOTS;
 static char quotamessage[MAX_QUOTA_MESSAGE];
 static char *quotatypes[] = INITQFNAMES;
 
-static kmem_cache_t *dquot_cachep;
-
 static inline struct quota_mount_options *sb_dqopt(struct super_block *sb)
 {
 	return &sb->s_dquot;
@@ -524,7 +522,7 @@ static inline struct dquot *find_best_free(void)
 struct dquot *get_empty_dquot(void)
 {
 	struct dquot *dquot;
-	int shrink = 1;	/* Number of times we should try to shrink dcache and icache */
+	int shrink = 8;	/* Number of times we should try to shrink dcache and icache */
 
 repeat:
 	dquot = find_best_free();
@@ -681,8 +679,6 @@ restart:
 		if (!filp->f_dentry)
 			continue;
 		inode = filp->f_dentry->d_inode;
-		if (!inode)
-			continue;
 		if (filp->f_mode & FMODE_WRITE && dqinit_needed(inode, type)) {
 			file_list_unlock();
 			sb->dq_op->initialize(inode, type);
@@ -732,7 +728,7 @@ put_it:
 /* Free list of dquots - called from inode.c */
 void put_dquot_list(struct list_head *tofree_head)
 {
-	struct list_head *act_head = tofree_head;
+	struct list_head *act_head = tofree_head->next;
 	struct dquot *dquot;
 
 	/* So now we have dquots on the list... Just free them */
@@ -1027,40 +1023,43 @@ void dquot_initialize(struct inode *inode, short type)
 	unsigned int id = 0;
 	short cnt;
 
-	if (S_ISREG(inode->i_mode) ||
-            S_ISDIR(inode->i_mode) ||
-            S_ISLNK(inode->i_mode)) {
-		/* We don't want to have quotas on quota files - nasty deadlocks possible */
-		if (is_quotafile(inode))
-			return;
-		for (cnt = 0; cnt < MAXQUOTAS; cnt++) {
-			if (type != -1 && cnt != type)
-				continue;
+	if (!S_ISREG(inode->i_mode) && !S_ISDIR(inode->i_mode) &&
+            !S_ISLNK(inode->i_mode))
+		return;
+	lock_kernel();
+	/* We don't want to have quotas on quota files - nasty deadlocks possible */
+	if (is_quotafile(inode)) {
+		unlock_kernel();
+		return;
+	}
+	for (cnt = 0; cnt < MAXQUOTAS; cnt++) {
+		if (type != -1 && cnt != type)
+			continue;
 
-			if (!sb_has_quota_enabled(inode->i_sb, cnt))
-				continue;
+		if (!sb_has_quota_enabled(inode->i_sb, cnt))
+			continue;
 
-			if (inode->i_dquot[cnt] == NODQUOT) {
-				switch (cnt) {
-					case USRQUOTA:
-						id = inode->i_uid;
-						break;
-					case GRPQUOTA:
-						id = inode->i_gid;
-						break;
-				}
-				dquot = dqget(inode->i_sb, id, cnt);
-				if (dquot == NODQUOT)
-					continue;
-				if (inode->i_dquot[cnt] != NODQUOT) {
-					dqput(dquot);
-					continue;
-				} 
-				inode->i_dquot[cnt] = dquot;
-				inode->i_flags |= S_QUOTA;
+		if (inode->i_dquot[cnt] == NODQUOT) {
+			switch (cnt) {
+				case USRQUOTA:
+					id = inode->i_uid;
+					break;
+				case GRPQUOTA:
+					id = inode->i_gid;
+					break;
 			}
+			dquot = dqget(inode->i_sb, id, cnt);
+			if (dquot == NODQUOT)
+				continue;
+			if (inode->i_dquot[cnt] != NODQUOT) {
+				dqput(dquot);
+				continue;
+			} 
+			inode->i_dquot[cnt] = dquot;
+			inode->i_flags |= S_QUOTA;
 		}
 	}
+	unlock_kernel();
 }
 
 /*
@@ -1073,6 +1072,7 @@ void dquot_drop(struct inode *inode)
 	struct dquot *dquot;
 	short cnt;
 
+	lock_kernel();
 	inode->i_flags &= ~S_QUOTA;
 	for (cnt = 0; cnt < MAXQUOTAS; cnt++) {
 		if (inode->i_dquot[cnt] == NODQUOT)
@@ -1081,6 +1081,7 @@ void dquot_drop(struct inode *inode)
 		inode->i_dquot[cnt] = NODQUOT;
 		dqput(dquot);
 	}
+	unlock_kernel();
 }
 
 /*
@@ -1208,14 +1209,8 @@ int dquot_transfer(struct dentry *dentry, struct iattr *iattr)
 	/* Arguably we could consider that as error, but... no fs - no quota */
 	if (!inode->i_sb)
 		return 0;
-	/*
-	 * Find out if this filesystem uses i_blocks.
-	 */
-	if (!inode->i_sb->s_blocksize)
-		blocks = isize_to_blocks(inode->i_size, BLOCK_SIZE_BITS);
-	else
-		blocks = (inode->i_blocks >> 1);
 
+	lock_kernel();
 	/*
 	 * Build the transfer_from and transfer_to lists and check quotas to see
 	 * if operation is permitted.
@@ -1275,10 +1270,25 @@ int dquot_transfer(struct dentry *dentry, struct iattr *iattr)
 		 * dqget() could block and so the first structure might got
 		 * invalidated or locked...
 		 */
-		if (!transfer_to[cnt]->dq_sb || !transfer_from[cnt]->dq_sb ||
-		    check_idq(transfer_to[cnt], 1) == NO_QUOTA ||
-		    check_bdq(transfer_to[cnt], blocks, 0) == NO_QUOTA) {
+		if (!transfer_to[cnt]->dq_sb || !transfer_from[cnt]->dq_sb) {
 			cnt++;
+			goto put_all;
+		}
+	}
+
+	/*
+	 * Find out if this filesystem uses i_blocks.
+	 */
+	if (!inode->i_sb->s_blocksize)
+		blocks = isize_to_blocks(inode->i_size, BLOCK_SIZE_BITS);
+	else
+		blocks = (inode->i_blocks >> 1);
+	for (cnt = 0; cnt < MAXQUOTAS; cnt++) {
+		if (!transfer_to[cnt])
+			continue;
+		if (check_idq(transfer_to[cnt], 1) == NO_QUOTA ||
+		    check_bdq(transfer_to[cnt], blocks, 0) == NO_QUOTA) {
+			cnt = MAXQUOTAS;
 			goto put_all;
 		}
 	}
@@ -1315,6 +1325,7 @@ int dquot_transfer(struct dentry *dentry, struct iattr *iattr)
 		}
 	}
 
+	unlock_kernel();
 	return 0;
 put_all:
 	for (disc = 0; disc < cnt; disc++) {
@@ -1328,6 +1339,7 @@ put_all:
 			dqput(transfer_from[disc]);
 		}
 	}
+	unlock_kernel();
 	return error;
 }
 
@@ -1335,13 +1347,6 @@ put_all:
 void __init dquot_init_hash(void)
 {
 	printk(KERN_NOTICE "VFS: Diskquotas version %s initialized\n", __DQUOT_VERSION__);
-
-	dquot_cachep = kmem_cache_create("dquot", sizeof(struct dquot),
-					 sizeof(unsigned long) * 4,
-					 SLAB_HWCACHE_ALIGN, NULL, NULL);
-
-	if (!dquot_cachep)
-		panic("Cannot create dquot SLAB cache\n");
 
 	memset(dquot_hash, 0, sizeof(dquot_hash));
 	memset((caddr_t)&dqstats, 0, sizeof(dqstats));
@@ -1469,7 +1474,7 @@ static int quota_on(struct super_block *sb, short type, char *path)
 	if (IS_ERR(f))
 		goto out_lock;
 	error = -EIO;
-	if (!f->f_op->read && !f->f_op->write)
+	if (!f->f_op || (!f->f_op->read && !f->f_op->write))
 		goto out_f;
 	inode = f->f_dentry->d_inode;
 	error = -EACCES;

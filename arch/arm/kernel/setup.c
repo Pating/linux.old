@@ -2,6 +2,10 @@
  *  linux/arch/arm/kernel/setup.c
  *
  *  Copyright (C) 1995-2000 Russell King
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
  */
 #include <linux/config.h>
 #include <linux/kernel.h>
@@ -19,9 +23,9 @@
 #include <asm/io.h>
 #include <asm/procinfo.h>
 #include <asm/setup.h>
-#include <asm/system.h>
+#include <asm/mach-types.h>
 
-#include "arch.h"
+#include <asm/mach/arch.h>
 
 #ifndef MEM_SIZE
 #define MEM_SIZE	(16*1024*1024)
@@ -31,14 +35,16 @@
 #define CONFIG_CMDLINE ""
 #endif
 
-extern void paging_init(struct meminfo *);
+extern void paging_init(struct meminfo *, struct machine_desc *desc);
 extern void bootmem_init(struct meminfo *);
 extern void reboot_setup(char *str);
 extern void disable_hlt(void);
+extern unsigned long memparse(char *ptr, char **retptr);
 extern int root_mountflags;
 extern int _stext, _text, _etext, _edata, _end;
 
 unsigned int processor_id;
+unsigned int compat;
 unsigned int __machine_arch_type;
 unsigned int system_rev;
 unsigned int system_serial_low;
@@ -124,11 +130,11 @@ static void __init setup_processor(void)
 
 #ifdef MULTI_CPU
 	processor = *list->proc;
+#endif
 
 	printk("Processor: %s %s revision %d\n",
 	       proc_info.manufacturer, proc_info.cpu_name,
 	       (int)processor_id & 15);
-#endif
 
 	sprintf(system_utsname.machine, "%s%c", list->arch_name, ENDIANNESS);
 	sprintf(elf_platform, "%s%c", list->elf_name, ENDIANNESS);
@@ -160,26 +166,13 @@ static struct machine_desc * __init setup_architecture(unsigned int nr)
 	}
 
 	printk("Architecture: %s\n", list->name);
+	if (compat)
+		printk(KERN_WARNING "Using compatibility code "
+			"scheduled for removal in v%d.%d.%d\n",
+			compat >> 24, (compat >> 12) & 0x3ff,
+			compat & 0x3ff);
 
 	return list;
-}
-
-static unsigned long __init memparse(char *ptr, char **retptr)
-{
-	unsigned long ret = simple_strtoul(ptr, retptr, 0);
-
-	switch (**retptr) {
-	case 'M':
-	case 'm':
-		ret <<= 10;
-	case 'K':
-	case 'k':
-		ret <<= 10;
-		(*retptr)++;
-	default:
-		break;
-	}
-	return ret;
 }
 
 /*
@@ -217,6 +210,7 @@ parse_cmdline(struct meminfo *mi, char **cmdline_p, char *from)
 
 			mi->bank[mi->nr_banks].start = start;
 			mi->bank[mi->nr_banks].size  = size;
+			mi->bank[mi->nr_banks].node  = 0;
 			mi->nr_banks += 1;
 		}
 		c = *from++;
@@ -321,12 +315,6 @@ void __init setup_arch(char **cmdline_p)
 
 	memset(&meminfo, 0, sizeof(meminfo));
 
-#if defined(CONFIG_ARCH_ARC)
-	__machine_arch_type = MACH_TYPE_ARCHIMEDES;
-#elif defined(CONFIG_ARCH_A5K)
-	__machine_arch_type = MACH_TYPE_A5K;
-#endif
-
 	setup_processor();
 
 	ROOT_DEV = MKDEV(0, 255);
@@ -378,6 +366,7 @@ void __init setup_arch(char **cmdline_p)
 	if (meminfo.nr_banks == 0) {
 		meminfo.nr_banks      = 1;
 		meminfo.bank[0].start = PHYS_OFFSET;
+		meminfo.bank[0].node  = 0;
 		if (params)
 			meminfo.bank[0].size = params->u1.s.nr_pages << PAGE_SHIFT;
 		else
@@ -393,8 +382,8 @@ void __init setup_arch(char **cmdline_p)
 	saved_command_line[COMMAND_LINE_SIZE-1] = '\0';
 	parse_cmdline(&meminfo, cmdline_p, from);
 	bootmem_init(&meminfo);
+	paging_init(&meminfo, mdesc);
 	request_standard_resources(&meminfo, mdesc);
-	paging_init(&meminfo);
 
 #ifdef CONFIG_VT
 #if defined(CONFIG_VGA_CONSOLE)

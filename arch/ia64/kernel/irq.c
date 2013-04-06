@@ -60,8 +60,6 @@
  * interrupt controllers, without having to do assembly magic.
  */
 
-irq_cpustat_t irq_stat [NR_CPUS];
-
 /*
  * Controller mappings for all interrupt sources:
  */
@@ -162,7 +160,7 @@ int get_irq_list(char *buf)
 	p += sprintf(p, "NMI: ");
 	for (j = 0; j < smp_num_cpus; j++)
 		p += sprintf(p, "%10u ",
-			atomic_read(&nmi_counter(cpu_logical_map(j))));
+			nmi_count(cpu_logical_map(j)));
 	p += sprintf(p, "\n");
 #if defined(CONFIG_SMP) && defined(__i386__)
 	p += sprintf(p, "LOC: ");
@@ -183,7 +181,7 @@ int get_irq_list(char *buf)
 
 #ifdef CONFIG_SMP
 unsigned int global_irq_holder = NO_PROC_ID;
-volatile unsigned int global_irq_lock;
+volatile unsigned long global_irq_lock; /* long for set_bit --RR */
 
 extern void show_stack(unsigned long* esp);
 
@@ -201,10 +199,14 @@ static void show(char * str)
 		printk(" %d",local_bh_count(i));
 
 	printk(" ]\nStack dumps:");
-#ifdef __ia64__
-	printk(" ]\nStack dumps: <unimplemented on IA-64---please fix me>");
-	/* for now we don't have stack dumping support... */
-#elif __i386__
+#if defined(__ia64__)
+	/*
+	 * We can't unwind the stack of another CPU without access to
+	 * the registers of that CPU.  And sending an IPI when we're
+	 * in a potentially wedged state doesn't sound like a smart
+	 * idea.
+	 */
+#elif defined(__i386__)
 	for(i=0;i< smp_num_cpus;i++) {
 		unsigned long esp;
 		if(i==cpu)
@@ -227,9 +229,7 @@ static void show(char * str)
 	You lose...
 #endif
 	printk("\nCPU %d:",cpu);
-#ifdef __i386__
 	show_stack(NULL);
-#endif
 	printk("\n");
 }
 	
@@ -536,10 +536,21 @@ void enable_irq(unsigned int irq)
 		desc->depth--;
 		break;
 	case 0:
-		printk("enable_irq() unbalanced from %p\n",
-		       __builtin_return_address(0));
+		printk("enable_irq() unbalanced from %p\n", (void *) __builtin_return_address(0));
 	}
 	spin_unlock_irqrestore(&desc->lock, flags);
+}
+
+void do_IRQ_per_cpu(unsigned long irq, struct pt_regs *regs)
+{
+	irq_desc_t *desc = irq_desc + irq;
+	int cpu = smp_processor_id();
+
+	kstat.irqs[cpu][irq]++;
+
+	desc->handler->ack(irq);
+	handle_IRQ_event(irq, regs, desc->action);
+	desc->handler->end(irq);
 }
 
 /*

@@ -2,14 +2,9 @@
  * linux/drivers/ide/ide-geometry.c
  */
 #include <linux/config.h>
-
-#ifdef CONFIG_IDE
 #include <linux/ide.h>
-
+#include <linux/mc146818rtc.h>
 #include <asm/io.h>
-
-extern ide_drive_t * get_info_ptr(kdev_t);
-extern unsigned long current_capacity (ide_drive_t *);
 
 /*
  * We query CMOS about hard disks : it could be that we have a SCSI/ESDI/etc
@@ -42,7 +37,7 @@ extern unsigned long current_capacity (ide_drive_t *);
  * The code below is bad. One of the problems is that drives 1 and 2
  * may be SCSI disks (even when IDE disks are present), so that
  * the geometry we read here from BIOS is attributed to the wrong disks.
- * Consequently, also the "drive->present = 1" below is a mistake.
+ * Consequently, also the former "drive->present = 1" below was a mistake.
  *
  * Eventually the entire routine below should be removed.
  */
@@ -52,13 +47,15 @@ void probe_cmos_for_drives (ide_hwif_t *hwif)
 	extern struct drive_info_struct drive_info;
 	byte cmos_disks, *BIOS = (byte *) &drive_info;
 	int unit;
+	unsigned long flags;
 
 #ifdef CONFIG_BLK_DEV_PDC4030
 	if (hwif->chipset == ide_pdc4030 && hwif->channel != 0)
 		return;
 #endif /* CONFIG_BLK_DEV_PDC4030 */
-	outb_p(0x12,0x70);		/* specify CMOS address 0x12 */
-	cmos_disks = inb_p(0x71);	/* read the data from 0x12 */
+	spin_lock_irqsave(&rtc_lock, flags);
+	cmos_disks = CMOS_READ(0x12);
+	spin_unlock_irqrestore(&rtc_lock, flags);
 	/* Extract drive geometry from CMOS+BIOS if not already setup */
 	for (unit = 0; unit < MAX_DRIVES; ++unit) {
 		ide_drive_t *drive = &hwif->drives[unit];
@@ -74,7 +71,8 @@ void probe_cmos_for_drives (ide_hwif_t *hwif)
 				drive->sect  = drive->bios_sect = sect;
 				drive->ctl   = *(BIOS+8);
 			} else {
-				printk("hd%d: C/H/S=%d/%d/%d from BIOS ignored\n", unit, cyl, head, sect);
+				printk("hd%d: C/H/S=%d/%d/%d from BIOS ignored\n",
+				       unit, cyl, head, sect);
 			}
 		}
 
@@ -83,6 +81,11 @@ void probe_cmos_for_drives (ide_hwif_t *hwif)
 #endif
 }
 
+
+#ifdef CONFIG_BLK_DEV_IDE
+
+extern ide_drive_t * get_info_ptr(kdev_t);
+extern unsigned long current_capacity (ide_drive_t *);
 
 /*
  * If heads is nonzero: find a translation with this many heads and S=63.
@@ -211,4 +214,4 @@ int ide_xlate_1024 (kdev_t i_rdev, int xparm, int ptheads, const char *msg)
 		       drive->bios_cyl, drive->bios_head, drive->bios_sect);
 	return ret;
 }
-#endif /* CONFIG_IDE */
+#endif /* CONFIG_BLK_DEV_IDE */

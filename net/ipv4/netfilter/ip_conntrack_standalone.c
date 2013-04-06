@@ -86,19 +86,19 @@ print_conntrack(char *buffer, const struct ip_conntrack *conntrack)
 	len += print_tuple(buffer + len,
 			   &conntrack->tuplehash[IP_CT_DIR_REPLY].tuple,
 			   proto);
-#if 0
+	if (conntrack->status & IPS_ASSURED)
+		len += sprintf(buffer + len, "[ASSURED] ");
 	if (!(conntrack->status & IPS_CONFIRMED))
 		len += sprintf(buffer + len, "[UNCONFIRMED] ");
 	len += sprintf(buffer + len, "use=%u ",
 		       atomic_read(&conntrack->ct_general.use));
-#endif
 	len += sprintf(buffer + len, "\n");
 
 	return len;
 }
 
 /* Returns true when finished. */
-static int
+static inline int
 conntrack_iterate(const struct ip_conntrack_tuple_hash *hash,
 		  char *buffer, off_t offset, off_t *upto,
 		  unsigned int *len, unsigned int maxlen)
@@ -169,11 +169,19 @@ static unsigned int ip_confirm(unsigned int hooknum,
 			       const struct net_device *out,
 			       int (*okfn)(struct sk_buff *))
 {
-	/* We've seen it coming out the other side: confirm */
+	/* We've seen it coming out the other side: confirm.  Beware
+           REJECT generating TCP RESET response (IP_CT_REPLY), or ICMP
+           errors (IP_CT_REPLY + IP_CT_RELATED).  But new expected
+           connections must be confirmed as well (eg. ftp data,
+           IP_CT_RELATED). */
 	if ((*pskb)->nfct) {
 		struct ip_conntrack *ct
 			= (struct ip_conntrack *)(*pskb)->nfct->master;
-		if (!(ct->status & IPS_CONFIRMED))
+		/* ctinfo is the index of the nfct inside the conntrack */
+		enum ip_conntrack_info ctinfo = (*pskb)->nfct - ct->infos;
+
+		if ((ctinfo == IP_CT_NEW || ctinfo == IP_CT_RELATED)
+		    && !(ct->status & IPS_CONFIRMED))
 			ip_conntrack_confirm(ct);
 	}
 	return NF_ACCEPT;
@@ -188,12 +196,7 @@ static unsigned int ip_refrag(unsigned int hooknum,
 	struct rtable *rt = (struct rtable *)(*pskb)->dst;
 
 	/* We've seen it coming out the other side: confirm */
-	if ((*pskb)->nfct) {
-		struct ip_conntrack *ct
-			= (struct ip_conntrack *)(*pskb)->nfct->master;
-		if (!(ct->status & IPS_CONFIRMED))
-			ip_conntrack_confirm(ct);
-	}
+	ip_confirm(hooknum, pskb, in, out, okfn);
 
 	/* Local packets are never produced too large for their
 	   interface.  We degfragment them at LOCAL_OUT, however,
@@ -329,7 +332,6 @@ static void __exit fini(void)
 module_init(init);
 module_exit(fini);
 
-#ifdef MODULE
 EXPORT_SYMBOL(ip_conntrack_protocol_register);
 EXPORT_SYMBOL(invert_tuplepr);
 EXPORT_SYMBOL(ip_conntrack_alter_reply);
@@ -343,4 +345,3 @@ EXPORT_SYMBOL(ip_ct_refresh);
 EXPORT_SYMBOL(ip_conntrack_expect_related);
 EXPORT_SYMBOL(ip_conntrack_tuple_taken);
 EXPORT_SYMBOL(ip_ct_gather_frags);
-#endif

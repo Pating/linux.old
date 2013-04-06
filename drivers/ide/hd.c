@@ -105,6 +105,24 @@ static int hd_sizes[MAX_HD<<6];
 static int hd_blocksizes[MAX_HD<<6];
 static int hd_hardsectsizes[MAX_HD<<6];
 
+static struct timer_list device_timer;
+
+#define SET_TIMER 							\
+	do {								\
+		mod_timer(&device_timer, jiffies + TIMEOUT_VALUE);	\
+	} while (0)
+
+#define CLEAR_TIMER del_timer(&device_timer);
+
+#undef SET_INTR
+
+#define SET_INTR(x) \
+if ((DEVICE_INTR = (x)) != NULL) \
+	SET_TIMER; \
+else \
+	CLEAR_TIMER;
+
+
 #if (HD_DELAY > 0)
 unsigned long last_req;
 
@@ -471,7 +489,7 @@ static void recal_intr(void)
  * This is another of the error-routines I don't know what to do with. The
  * best idea seems to just set reset, and start all over again.
  */
-static void hd_times_out(void)
+static void hd_times_out(unsigned long dummy)
 {
 	unsigned int dev;
 
@@ -527,7 +545,7 @@ static void hd_request(void)
 	if (DEVICE_INTR)
 		return;
 repeat:
-	timer_active &= ~(1<<HD_TIMER);
+	del_timer(&device_timer);
 	sti();
 	INIT_REQUEST;
 	if (reset) {
@@ -683,7 +701,7 @@ static void hd_interrupt(int irq, void *dev_id, struct pt_regs *regs)
 	void (*handler)(void) = DEVICE_INTR;
 
 	DEVICE_INTR = NULL;
-	timer_active &= ~(1<<HD_TIMER);
+	del_timer(&device_timer);
 	if (!handler)
 		handler = unexpected_hd_interrupt;
 	handler();
@@ -705,7 +723,7 @@ static struct block_device_operations hd_fops = {
  * We enable interrupts in some of the routines after making sure it's
  * safe.
  */
-static void hd_geninit(void)
+static void __init hd_geninit(void)
 {
 	int drive;
 
@@ -720,6 +738,7 @@ static void hd_geninit(void)
 	if (!NR_HD) {
 		extern struct drive_info drive_info;
 		unsigned char *BIOS = (unsigned char *) &drive_info;
+		unsigned long flags;
 		int cmos_disks;
 
 		for (drive=0 ; drive<2 ; drive++) {
@@ -755,10 +774,15 @@ static void hd_geninit(void)
 		Needless to say, a non-zero value means we have 
 		an AT controller hard disk for that drive.
 
-		
+		Currently the rtc_lock is a bit academic since this
+		driver is non-modular, but someday... ?         Paul G.
 	*/
 
-		if ((cmos_disks = CMOS_READ(0x12)) & 0xf0) {
+		spin_lock_irqsave(&rtc_lock, flags);
+		cmos_disks = CMOS_READ(0x12);
+		spin_unlock_irqrestore(&rtc_lock, flags);
+
+		if (cmos_disks & 0xf0) {
 			if (cmos_disks & 0x0f)
 				NR_HD = 2;
 			else
@@ -778,6 +802,8 @@ static void hd_geninit(void)
 #endif
 
 	for (drive=0 ; drive < NR_HD ; drive++) {
+		hd[drive<<6].nr_sects = hd_info[drive].head *
+			hd_info[drive].sect * hd_info[drive].cyl;
 		printk ("hd%c: %ldMB, CHS=%d/%d/%d\n", drive+'a',
 			hd[drive<<6].nr_sects / 2048, hd_info[drive].cyl,
 			hd_info[drive].head, hd_info[drive].sect);
@@ -812,7 +838,8 @@ int __init hd_init(void)
 	read_ahead[MAJOR_NR] = 8;		/* 8 sector (4kB) read-ahead */
 	hd_gendisk.next = gendisk_head;
 	gendisk_head = &hd_gendisk;
-	timer_table[HD_TIMER].fn = hd_times_out;
+	init_timer(&device_timer);
+	device_timer.function = hd_times_out;
 	hd_geninit();
 	return 0;
 }
@@ -887,6 +914,7 @@ static int parse_hd_setup (char *line) {
 	(void) get_options(line, ARRAY_SIZE(ints), ints);
 	hd_setup(NULL, ints);
 
-	return 0;
+	return 1;
 }
 __setup("hd=", parse_hd_setup);
+

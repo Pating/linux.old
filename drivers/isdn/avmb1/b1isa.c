@@ -1,11 +1,20 @@
 /*
- * $Id: b1isa.c,v 1.8 2000/04/03 13:29:24 calle Exp $
+ * $Id: b1isa.c,v 1.10 2000/11/23 20:45:14 kai Exp $
  * 
  * Module for AVM B1 ISA-card.
  * 
  * (c) Copyright 1999 by Carsten Paeth (calle@calle.in-berlin.de)
  * 
  * $Log: b1isa.c,v $
+ * Revision 1.10  2000/11/23 20:45:14  kai
+ * fixed module_init/exit stuff
+ * Note: compiled-in kernel doesn't work pre 2.2.18 anymore.
+ *
+ * Revision 1.9  2000/11/01 14:05:02  calle
+ * - use module_init/module_exit from linux/init.h.
+ * - all static struct variables are initialized with "membername:" now.
+ * - avm_cs.c, let it work with newer pcmcia-cs.
+ *
  * Revision 1.8  2000/04/03 13:29:24  calle
  * make Tim Waugh happy (module unload races in 2.3.99-pre3).
  * no real problem there, but now it is much cleaner ...
@@ -67,13 +76,14 @@
 #include <linux/interrupt.h>
 #include <linux/ioport.h>
 #include <linux/capi.h>
+#include <linux/init.h>
 #include <asm/io.h>
 #include "capicmd.h"
 #include "capiutil.h"
 #include "capilli.h"
 #include "avmcard.h"
 
-static char *revision = "$Revision: 1.8 $";
+static char *revision = "$Revision: 1.10 $";
 
 /* ------------------------------------------------------------- */
 
@@ -244,28 +254,23 @@ static char *b1isa_procinfo(struct capi_ctr *ctrl)
 /* ------------------------------------------------------------- */
 
 static struct capi_driver b1isa_driver = {
-    "b1isa",
-    "0.0",
-    b1_load_firmware,
-    b1_reset_ctr,
-    b1isa_remove_ctr,
-    b1_register_appl,
-    b1_release_appl,
-    b1_send_message,
+    name: "b1isa",
+    revision: "0.0",
+    load_firmware: b1_load_firmware,
+    reset_ctr: b1_reset_ctr,
+    remove_ctr: b1isa_remove_ctr,
+    register_appl: b1_register_appl,
+    release_appl: b1_release_appl,
+    send_message: b1_send_message,
 
-    b1isa_procinfo,
-    b1ctl_read_proc,
-    0,	/* use standard driver_read_proc */
+    procinfo: b1isa_procinfo,
+    ctr_read_proc: b1ctl_read_proc,
+    driver_read_proc: 0,	/* use standard driver_read_proc */
 
-    b1isa_add_card,
+    add_card: b1isa_add_card,
 };
 
-#ifdef MODULE
-#define b1isa_init init_module
-void cleanup_module(void);
-#endif
-
-int b1isa_init(void)
+static int __init b1isa_init(void)
 {
 	struct capi_driver *driver = &b1isa_driver;
 	char *p;
@@ -292,9 +297,10 @@ int b1isa_init(void)
 	return retval;
 }
 
-#ifdef MODULE
-void cleanup_module(void)
+static void __exit b1isa_exit(void)
 {
     detach_capi_driver(&b1isa_driver);
 }
-#endif
+
+module_init(b1isa_init);
+module_exit(b1isa_exit);

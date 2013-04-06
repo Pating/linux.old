@@ -5,7 +5,6 @@
  *
  * Copyright (C) 1995, 1996 Olaf Kirch <okir@monad.swb.de>
  */
-#define NFS_GETFH_NEW
 
 #include <linux/config.h>
 #include <linux/module.h>
@@ -47,7 +46,7 @@ static int	nfsctl_getfs(struct nfsctl_fsparm *, struct knfsd_fh *);
 static int	nfsctl_ugidupdate(struct nfsctl_ugidmap *data);
 #endif
 
-static int	initialized = 0;
+static int	initialized;
 
 int exp_procfs_exports(char *buffer, char **start, off_t offset,
                              int length, int *eof, void *data);
@@ -218,7 +217,7 @@ static struct {
 };
 #define CMD_MAX (sizeof(sizes)/sizeof(sizes[0])-1)
 
-int
+long
 asmlinkage handle_sys_nfsservctl(int cmd, void *opaque_argp, void *opaque_resp)
 {
 	struct nfsctl_arg *	argp = opaque_argp;
@@ -313,7 +312,9 @@ done:
 EXPORT_NO_SYMBOLS;
 MODULE_AUTHOR("Olaf Kirch <okir@monad.swb.de>");
 
-extern int (*do_nfsservctl)(int, void *, void *);
+struct nfsd_linkage nfsd_linkage_s = {
+	do_nfsservctl: handle_sys_nfsservctl,
+};
 
 /*
  * Initialize the module
@@ -322,7 +323,7 @@ int
 init_module(void)
 {
 	printk(KERN_INFO "Installing knfsd (copyright (C) 1996 okir@monad.swb.de).\n");
-	do_nfsservctl = handle_sys_nfsservctl;
+	nfsd_linkage = &nfsd_linkage_s;
 	return 0;
 }
 
@@ -332,11 +333,7 @@ init_module(void)
 void
 cleanup_module(void)
 {
-	if (MOD_IN_USE) {
-		printk("nfsd: nfsd busy, remove delayed\n");
-		return;
-	}
-	do_nfsservctl = NULL;
+	nfsd_linkage = NULL;
 	nfsd_export_shutdown();
 	nfsd_cache_shutdown();
 	remove_proc_entry("fs/nfs/exports", NULL);

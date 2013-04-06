@@ -19,6 +19,8 @@
  * 2000/01/18 - separated sb_card and sb_common -
  * Jeff Garzik <jgarzik@mandrakesoft.com>
  *
+ * 2000/09/18 - got rid of attach_uart401
+ * Arnaldo Carvalho de Melo <acme@conectiva.com.br>
  */
 
 #include <linux/config.h>
@@ -28,7 +30,6 @@
 
 #include "sound_config.h"
 #include "sound_firmware.h"
-#include "soundmodule.h"
 
 #include "mpu401.h"
 
@@ -635,7 +636,7 @@ int sb_dsp_detect(struct address_info *hw_config, int pci, int pciio, struct sb_
 	return 1;
 }
 
-int sb_dsp_init(struct address_info *hw_config)
+int sb_dsp_init(struct address_info *hw_config, struct module *owner)
 {
 	sb_devc *devc;
 	char name[100];
@@ -813,10 +814,10 @@ int sb_dsp_init(struct address_info *hw_config)
 
 	if (!(devc->caps & SB_NO_MIXER))
 		if (devc->major == 3 || devc->major == 4)
-			sb_mixer_init(devc);
+			sb_mixer_init(devc, owner);
 
 	if (!(devc->caps & SB_NO_MIDI))
-		sb_dsp_midi_init(devc);
+		sb_dsp_midi_init(devc, owner);
 
 	if (hw_config->name == NULL)
 		hw_config->name = "Sound Blaster (8 BIT/MONO ONLY)";
@@ -862,7 +863,7 @@ int sb_dsp_init(struct address_info *hw_config)
 			if (sound_alloc_dma(devc->dma16, "SoundBlaster16"))
 				printk(KERN_WARNING "Sound Blaster:  can't allocate 16 bit DMA channel %d.\n", devc->dma16);
 		}
-		sb_audio_init(devc, name);
+		sb_audio_init(devc, name, owner);
 		hw_config->slots[0]=devc->dev;
 	}
 	else
@@ -1191,24 +1192,10 @@ static int init_Jazz16_midi(sb_devc * devc, struct address_info *hw_config)
 	return 1;
 }
 
-void attach_sbmpu(struct address_info *hw_config)
-{
-	if (last_sb->model == MDL_ESS) {
-#if defined(CONFIG_SOUND_MPU401)
-		attach_mpu401(hw_config);
-		if (last_sb->irq == -hw_config->irq) {
-			last_sb->midi_irq_cookie=(void *)hw_config->slots[1];
-		}
-#endif
-		return;
-	}
-	attach_uart401(hw_config);
-	last_sb->midi_irq_cookie=midi_devs[hw_config->slots[4]]->devc;
-}
-
-int probe_sbmpu(struct address_info *hw_config)
+int probe_sbmpu(struct address_info *hw_config, struct module *owner)
 {
 	sb_devc *devc = last_devc;
+	int ret;
 
 	if (last_devc == NULL)
 		return 0;
@@ -1240,15 +1227,15 @@ int probe_sbmpu(struct address_info *hw_config)
 			return 0;
 		hw_config->name = "ESS1xxx MPU";
 		devc->midi_irq_cookie = -1;
-		return probe_mpu401(hw_config);
+		if (!probe_mpu401(hw_config))
+			return 0;
+		attach_mpu401(hw_config, owner);
+		if (last_sb->irq == -hw_config->irq)
+			last_sb->midi_irq_cookie=(void *)hw_config->slots[1];
+		return 1;
 	}
 #endif
 
-	if (check_region(hw_config->io_base, 4))
-	{
-		printk(KERN_ERR "sbmpu: I/O port conflict (%x)\n", hw_config->io_base);
-		return 0;
-	}
 	switch (devc->model)
 	{
 		case MDL_SB16:
@@ -1278,7 +1265,11 @@ int probe_sbmpu(struct address_info *hw_config)
 		default:
 			return 0;
 	}
-	return probe_uart401(hw_config);
+	
+	ret = probe_uart401(hw_config, owner);
+	if (ret)
+		last_sb->midi_irq_cookie=midi_devs[hw_config->slots[4]]->devc;
+	return ret;
 }
 
 void unload_sbmpu(struct address_info *hw_config)
@@ -1297,7 +1288,6 @@ EXPORT_SYMBOL(sb_dsp_detect);
 EXPORT_SYMBOL(sb_dsp_unload);
 EXPORT_SYMBOL(sb_dsp_disable_midi);
 EXPORT_SYMBOL(sb_be_quiet);
-EXPORT_SYMBOL(attach_sbmpu);
 EXPORT_SYMBOL(probe_sbmpu);
 EXPORT_SYMBOL(unload_sbmpu);
 EXPORT_SYMBOL(smw_free);

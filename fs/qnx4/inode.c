@@ -23,6 +23,7 @@
 #include <linux/locks.h>
 #include <linux/init.h>
 #include <linux/highuid.h>
+#include <linux/smp_lock.h>
 
 #include <asm/uaccess.h>
 
@@ -62,9 +63,11 @@ int qnx4_sync_inode(struct inode *inode)
 static void qnx4_delete_inode(struct inode *inode)
 {
 	QNX4DEBUG(("qnx4: deleting inode [%lu]\n", (unsigned long) inode->i_ino));
+	lock_kernel();
 	inode->i_size = 0;
 	qnx4_truncate(inode);
 	qnx4_free_inode(inode);
+	unlock_kernel();
 }
 
 static void qnx4_write_super(struct super_block *sb)
@@ -73,7 +76,7 @@ static void qnx4_write_super(struct super_block *sb)
 	sb->s_dirt = 0;
 }
 
-static void qnx4_write_inode(struct inode *inode)
+static void qnx4_write_inode(struct inode *inode, int unused)
 {
 	struct qnx4_inode_entry *raw_inode;
 	int block, ino;
@@ -91,9 +94,11 @@ static void qnx4_write_inode(struct inode *inode)
 	}
 	QNX4DEBUG(("qnx4: write inode 2.\n"));
 	block = ino / QNX4_INODES_PER_BLOCK;
+	lock_kernel();
 	if (!(bh = bread(inode->i_dev, block, QNX4_BLOCK_SIZE))) {
 		printk("qnx4: major problem: unable to read inode from dev "
 		       "%s\n", kdevname(inode->i_dev));
+		unlock_kernel();
 		return;
 	}
 	raw_inode = ((struct qnx4_inode_entry *) bh->b_data) +
@@ -107,8 +112,9 @@ static void qnx4_write_inode(struct inode *inode)
 	raw_inode->di_atime = cpu_to_le32(inode->i_atime);
 	raw_inode->di_ctime = cpu_to_le32(inode->i_ctime);
 	raw_inode->di_first_xtnt.xtnt_size = cpu_to_le32(inode->i_blocks);
-	mark_buffer_dirty(bh, 1);
+	mark_buffer_dirty(bh);
 	brelse(bh);
+	unlock_kernel();
 }
 
 #endif
@@ -143,7 +149,7 @@ static int qnx4_remount(struct super_block *sb, int *flags, char *data)
 	if (*flags & MS_RDONLY) {
 		return 0;
 	}
-	mark_buffer_dirty(qs->sb_buf, 1);
+	mark_buffer_dirty(qs->sb_buf);
 
 	return 0;
 }
@@ -340,7 +346,6 @@ static struct super_block *qnx4_read_super(struct super_block *s,
 	set_blocksize(dev, QNX4_BLOCK_SIZE);
 	s->s_blocksize = QNX4_BLOCK_SIZE;
 	s->s_blocksize_bits = QNX4_BLOCK_SIZE_BITS;
-	s->s_dev = dev;
 
 	/* Check the boot signature. Since the qnx4 code is
 	   dangerous, we should leave as quickly as possible
@@ -406,11 +411,11 @@ static struct super_block *qnx4_read_super(struct super_block *s,
 
 static void qnx4_put_super(struct super_block *sb)
 {
-	kfree_s( sb->u.qnx4_sb.BitMap, sizeof( struct qnx4_inode_entry ) );
+	kfree( sb->u.qnx4_sb.BitMap );
 	return;
 }
 
-static int qnx4_writepage(struct file *file, struct page *page)
+static int qnx4_writepage(struct page *page)
 {
 	return block_write_full_page(page,qnx4_get_block);
 }
@@ -421,7 +426,7 @@ static int qnx4_readpage(struct file *file, struct page *page)
 static int qnx4_prepare_write(struct file *file, struct page *page, unsigned from, unsigned to)
 {
 	return cont_prepare_write(page,from,to,qnx4_get_block,
-		&((struct inode*)page->mapping->host)->u.qnx4_i.mmu_private);
+		&page->mapping->host->u.qnx4_i.mmu_private);
 }
 static int qnx4_bmap(struct address_space *mapping, long block)
 {

@@ -14,6 +14,9 @@
  * 13-03-1999: Get DeviceID from non-IEEE 1284.3 devices too.
  * 22-02-2000: Count devices that are actually detected.
  *
+ * Any part of this program may be used in documents licensed under
+ * the GNU Free Documentation License, Version 1.1 or any later version
+ * published by the Free Software Foundation.
  */
 
 #include <linux/parport.h>
@@ -47,7 +50,7 @@ static int assign_addrs (struct parport *port);
 static void add_dev (int devnum, struct parport *port, int daisy)
 {
 	struct daisydev *newdev;
-	newdev = kmalloc (GFP_KERNEL, sizeof (struct daisydev));
+	newdev = kmalloc (sizeof (struct daisydev), GFP_KERNEL);
 	if (newdev) {
 		newdev->port = port;
 		newdev->daisy = daisy;
@@ -428,6 +431,7 @@ static int assign_addrs (struct parport *port)
 	unsigned char s, last_dev;
 	unsigned char daisy;
 	int thisdev = numdevs;
+	int detected;
 	char *deviceid;
 
 	parport_data_forward (port);
@@ -484,8 +488,9 @@ static int assign_addrs (struct parport *port)
 	}
 
 	parport_write_data (port, 0xff); udelay (2);
+	detected = numdevs - thisdev;
 	DPRINTK (KERN_DEBUG "%s: Found %d daisy-chained devices\n", port->name,
-		numdevs - thisdev);
+		 detected);
 
 	/* Ask the new devices to introduce themselves. */
 	deviceid = kmalloc (1000, GFP_KERNEL);
@@ -495,7 +500,7 @@ static int assign_addrs (struct parport *port)
 		parport_device_id (thisdev, deviceid, 1000);
 
 	kfree (deviceid);
-	return numdevs - thisdev;
+	return detected;
 }
 
 /* Find a device with a particular manufacturer and model string,

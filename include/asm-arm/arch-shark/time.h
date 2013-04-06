@@ -13,7 +13,6 @@
  * Copyright (c) 1996,1997,1998 Russell King.
  */
 
-#include <linux/config.h>
 #include <asm/leds.h>
 #include <linux/mc146818rtc.h>
 
@@ -28,15 +27,7 @@ static void timer_interrupt(int irq, void *dev_id, struct pt_regs *regs)
 
 	CMOS_READ(RTC_INTR_FLAGS);	
 
-#ifdef CONFIG_LEDS
-	{
-		static int count = 50;
-		if (--count == 0) {
-			count = 50;
-			leds_event(led_timer);
-		}
-	}
-#endif
+	do_leds();
 
 	{
 #ifdef DIVISOR
@@ -51,15 +42,6 @@ static void timer_interrupt(int irq, void *dev_id, struct pt_regs *regs)
 		}
 	}
 }
-
-static struct irqaction timerirq = {
-	timer_interrupt,
-	SA_INTERRUPT,
-	0,
-	"timer",
-	NULL,
-	NULL
-};
 
 /*
  * Set up timer interrupt, and return the current time in seconds.
@@ -97,5 +79,7 @@ extern __inline__ void setup_timer(void)
 	xtime.tv_sec = mktime(r_time.tm_year+epoch, r_time.tm_mon+1, r_time.tm_mday,
 			      r_time.tm_hour, r_time.tm_min, r_time.tm_sec);
 
-	setup_arm_irq(IRQ_TIMER, &timerirq);
+	timer_irq.handler = timer_interrupt;
+	timer_irq.flags = SA_INTERRUPT; /* FIXME: really? */
+	setup_arm_irq(IRQ_TIMER, &timer_irq);
 }

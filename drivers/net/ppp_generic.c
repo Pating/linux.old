@@ -41,6 +41,7 @@
 #include <linux/ip.h>
 #include <linux/tcp.h>
 #include <linux/spinlock.h>
+#include <linux/smp_lock.h>
 #include <net/slhc_vj.h>
 #include <asm/atomic.h>
 
@@ -312,7 +313,6 @@ static int ppp_open(struct inode *inode, struct file *file)
 	 */
 	if (!capable(CAP_NET_ADMIN))
 		return -EPERM;
-	MOD_INC_USE_COUNT;
 	return 0;
 }
 
@@ -320,6 +320,7 @@ static int ppp_release(struct inode *inode, struct file *file)
 {
 	struct ppp_file *pf = (struct ppp_file *) file->private_data;
 
+	lock_kernel();
 	if (pf != 0) {
 		file->private_data = 0;
 		if (atomic_dec_and_test(&pf->refcnt)) {
@@ -333,7 +334,7 @@ static int ppp_release(struct inode *inode, struct file *file)
 			}
 		}
 	}
-	MOD_DEC_USE_COUNT;
+	unlock_kernel();
 	return 0;
 }
 
@@ -697,6 +698,7 @@ static int ppp_unattached_ioctl(struct ppp_file *pf, struct file *file,
 }
 
 static struct file_operations ppp_device_fops = {
+	owner:		THIS_MODULE,
 	read:		ppp_read,
 	write:		ppp_write,
 	poll:		ppp_poll,
@@ -707,7 +709,7 @@ static struct file_operations ppp_device_fops = {
 
 #define PPP_MAJOR	108
 
-static devfs_handle_t devfs_handle = NULL;
+static devfs_handle_t devfs_handle;
 
 /* Called at boot time if ppp is compiled into the kernel,
    or at module load time (from init_module) if compiled as a module. */
@@ -719,9 +721,9 @@ int __init ppp_init(void)
 	err = devfs_register_chrdev(PPP_MAJOR, "ppp", &ppp_device_fops);
 	if (err)
 		printk(KERN_ERR "failed to register PPP device (%d)\n", err);
-	devfs_handle = devfs_register(NULL, "ppp", 0, DEVFS_FL_NONE,
+	devfs_handle = devfs_register(NULL, "ppp", DEVFS_FL_DEFAULT,
 				      PPP_MAJOR, 0,
-				      S_IFCHR | S_IRUSR | S_IWUSR, 0, 0,
+				      S_IFCHR | S_IRUSR | S_IWUSR,
 				      &ppp_device_fops, NULL);
 
 	return 0;
@@ -2205,7 +2207,7 @@ ppp_create_interface(int unit, int *retp)
 	dev->init = ppp_net_init;
 	sprintf(dev->name, "ppp%d", unit);
 	dev->priv = ppp;
-	dev->new_style = 1;
+	dev->features |= NETIF_F_DYNALLOC;
 
 	rtnl_lock();
 	ret = register_netdevice(dev);

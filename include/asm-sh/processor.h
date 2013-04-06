@@ -21,7 +21,7 @@
  *  CPU type and hardware bug flags. Kept separately for each CPU.
  */
 enum cpu_type {
-	CPU_SH7708,		/* Represents 7708, 7708S, 7708R, 7709 */
+	CPU_SH7708,		/* Represents 7707, 7708, 7708S, 7708R, 7709 */
 	CPU_SH7729,		/* Represents 7709A, 7729 */
 	CPU_SH7750,
 	CPU_SH_NONE
@@ -29,13 +29,14 @@ enum cpu_type {
 
 struct sh_cpuinfo {
 	enum cpu_type type;
-	unsigned long loops_per_sec;
+	unsigned long loops_per_jiffy;
 
 	char	hard_math;
 
 	unsigned long *pgd_quick;
 	unsigned long *pte_quick;
 	unsigned long pgtable_cache_sz;
+	unsigned int cpu_clock, master_clock, bus_clock, module_clock;
 };
 
 extern struct sh_cpuinfo boot_cpu_data;
@@ -153,7 +154,6 @@ extern int kernel_thread(int (*fn)(void *), void * arg, unsigned long flags);
 /* Copy and release all segment info associated with a VM */
 #define copy_segments(p, mm)	do { } while(0)
 #define release_segments(mm)	do { } while(0)
-#define forget_segments()	do { } while (0)
 
 /*
  * FPU lazy state save handling.
@@ -164,9 +164,9 @@ extern __inline__ void release_fpu(void)
 	unsigned long __dummy;
 
 	/* Set FD flag in SR */
-	__asm__ __volatile__("stc	$sr, %0\n\t"
+	__asm__ __volatile__("stc	sr, %0\n\t"
 			     "or	%1, %0\n\t"
-			     "ldc	%0, $sr"
+			     "ldc	%0, sr"
 			     : "=&r" (__dummy)
 			     : "r" (SR_FD));
 }
@@ -176,9 +176,9 @@ extern __inline__ void grab_fpu(void)
 	unsigned long __dummy;
 
 	/* Clear out FD flag in SR */
-	__asm__ __volatile__("stc	$sr, %0\n\t"
+	__asm__ __volatile__("stc	sr, %0\n\t"
 			     "and	%1, %0\n\t"
-			     "ldc	%0, $sr"
+			     "ldc	%0, sr"
 			     : "=&r" (__dummy)
 			     : "r" (~SR_FD));
 }
@@ -216,7 +216,7 @@ extern unsigned long get_wchan(struct task_struct *p);
 #define THREAD_SIZE (2*PAGE_SIZE)
 extern struct task_struct * alloc_task_struct(void);
 extern void free_task_struct(struct task_struct *);
-#define get_task_struct(tsk)      atomic_inc(&mem_map[MAP_NR(tsk)].count)
+#define get_task_struct(tsk)      atomic_inc(&virt_to_page(tsk)->count)
 
 #define init_task	(init_task_union.task)
 #define init_stack	(init_task_union.stack)

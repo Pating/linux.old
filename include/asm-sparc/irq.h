@@ -1,4 +1,4 @@
-/* $Id: irq.h,v 1.29 2000/05/09 17:40:15 davem Exp $
+/* $Id: irq.h,v 1.32 2000/08/26 02:42:28 anton Exp $
  * irq.h: IRQ registers on the Sparc.
  *
  * Copyright (C) 1995 David S. Miller (davem@caip.rutgers.edu)
@@ -20,20 +20,6 @@ BTFIXUPDEF_CALL(char *, __irq_itoa, unsigned int)
 #define __irq_itoa(irq) BTFIXUP_CALL(__irq_itoa)(irq)
 
 #define NR_IRQS    15
-
-/* IRQ handler dispatch entry and exit. */
-#ifdef CONFIG_SMP
-extern unsigned int local_irq_count[NR_CPUS];
-#define irq_enter(cpu, irq)                     \
-do {    hardirq_enter(cpu);                     \
-        spin_unlock_wait(&global_irq_lock);     \
-	} while(0)
-#define irq_exit(cpu, irq)      hardirq_exit(cpu)
-#else
-extern unsigned int local_irq_count;
-#define irq_enter(cpu, irq)     (local_irq_count++)
-#define irq_exit(cpu, irq)      (local_irq_count--)
-#endif
 
 /* Dave Redman (djhr@tadpole.co.uk)
  * changed these to function pointers.. it saves cycles and will allow

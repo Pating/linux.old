@@ -1,7 +1,11 @@
 /*
- * linux/arch/arm/drivers/scsi/fas216.c
+ *  linux/arch/arm/drivers/scsi/fas216.c
  *
- * Copyright (C) 1997-2000 Russell King
+ *  Copyright (C) 1997-2000 Russell King
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
  *
  * Based on information in qlogicfas.c by Tom Zerucha, Michael Griffith, and
  * other sources, including:
@@ -33,7 +37,6 @@
  * Todo:
  *  - allow individual devices to enable sync xfers.
  */
-
 #include <linux/module.h>
 #include <linux/blk.h>
 #include <linux/kernel.h>
@@ -2177,7 +2180,7 @@ fas216_do_abort(FAS216_Info *info, Scsi_Cmnd *SCpnt)
 {
 	enum res_abort res = res_failed;
 
-	if (queue_removecmd(&info->queues.issue, SCpnt)) {
+	if (queue_remove_cmd(&info->queues.issue, SCpnt)) {
 		/*
 		 * The command was on the issue queue, and has not been
 		 * issued yet.  We can remove the command from the queue,
@@ -2187,7 +2190,7 @@ fas216_do_abort(FAS216_Info *info, Scsi_Cmnd *SCpnt)
 		printk("on issue queue ");
 
 		res = res_success;
-	} else if (queue_removecmd(&info->queues.disconnected, SCpnt)) {
+	} else if (queue_remove_cmd(&info->queues.disconnected, SCpnt)) {
 		/*
 		 * The command was on the disconnected queue.  We must
 		 * reconnect with the device if possible, and send it
@@ -2463,7 +2466,7 @@ int fas216_eh_host_reset(Scsi_Cmnd *SCpnt)
 	 * IRQs after the sleep.
 	 */
 	spin_unlock_irq(&io_request_lock);
-	scsi_sleep(5);
+	scsi_sleep(25*HZ/100);
 	spin_lock_irq(&io_request_lock);
 
 	/*
@@ -2628,7 +2631,7 @@ int fas216_init(struct Scsi_Host *instance)
 	 * scsi standard says wait 250ms
 	 */
 	spin_unlock_irq(&io_request_lock);
-	scsi_sleep(5);
+	scsi_sleep(25*HZ/100);
 	spin_lock_irq(&io_request_lock);
 
 	outb(info->scsi.cfg[0], REG_CNTL1(info));

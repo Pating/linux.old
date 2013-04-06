@@ -1,5 +1,4 @@
-/* $Id: irixelf.c,v 1.28 2000/03/23 02:25:42 ralf Exp $
- *
+/*
  * irixelf.c: Code to load IRIX ELF executables which conform to
  *            the MIPS ABI.
  *
@@ -256,7 +255,7 @@ static unsigned int load_irix_interp(struct elfhdr * interp_elf_ex,
 	/* First of all, some simple consistency checks */
 	if ((interp_elf_ex->e_type != ET_EXEC &&
 	     interp_elf_ex->e_type != ET_DYN) ||
-	     !elf_check_arch(interp_elf_ex->e_machine) ||
+	     !irix_elf_check_arch(interp_elf_ex) ||
 	     !interpreter->f_op->mmap) {
 		printk("IRIX interp has bad e_type %d\n", interp_elf_ex->e_type);
 		return 0xffffffff;
@@ -315,10 +314,12 @@ static unsigned int load_irix_interp(struct elfhdr * interp_elf_ex,
 		   (unsigned long) elf_prot, (unsigned long) elf_type,
 		   (unsigned long) (eppnt->p_offset & 0xfffff000));
 #endif
+	    down(&current->mm->mmap_sem);
 	    error = do_mmap(interpreter, vaddr,
 			    eppnt->p_filesz + (eppnt->p_vaddr & 0xfff),
 			    elf_prot, elf_type,
 			    eppnt->p_offset & 0xfffff000);
+	    up(&current->mm->mmap_sem);
 
 	    if(error < 0 && error > -1024) {
 		    printk("Aieee IRIX interp mmap error=%d\n", error);
@@ -394,7 +395,7 @@ static int verify_binary(struct elfhdr *ehp, struct linux_binprm *bprm)
 
 	/* First of all, some simple consistency checks */
 	if((ehp->e_type != ET_EXEC && ehp->e_type != ET_DYN) || 
-	    !elf_check_arch(ehp->e_machine) || !bprm->file->f_op->mmap) {
+	    !irix_elf_check_arch(ehp) || !bprm->file->f_op->mmap) {
 		return -ENOEXEC;
 	}
 
@@ -497,10 +498,12 @@ static inline void map_executable(struct file *fp, struct elf_phdr *epp, int pnu
 		prot  = (epp->p_flags & PF_R) ? PROT_READ : 0;
 		prot |= (epp->p_flags & PF_W) ? PROT_WRITE : 0;
 		prot |= (epp->p_flags & PF_X) ? PROT_EXEC : 0;
+	        down(&current->mm->mmap_sem);
 		(void) do_mmap(fp, (epp->p_vaddr & 0xfffff000),
 			       (epp->p_filesz + (epp->p_vaddr & 0xfff)),
 			       prot, EXEC_MAP_FLAGS,
 			       (epp->p_offset & 0xfffff000));
+	        up(&current->mm->mmap_sem);
 
 		/* Fixup location tracking vars. */
 		if((epp->p_vaddr & 0xfffff000) < *estack)
@@ -759,18 +762,21 @@ static int load_irix_binary(struct linux_binprm * bprm, struct pt_regs * regs)
 	 * Since we do not have the power to recompile these, we
 	 * emulate the SVr4 behavior.  Sigh.
 	 */
+	down(&current->mm->mmap_sem);
 	(void) do_mmap(NULL, 0, 4096, PROT_READ | PROT_EXEC,
 		       MAP_FIXED | MAP_PRIVATE, 0);
+	up(&current->mm->mmap_sem);
 #endif
 
 	start_thread(regs, elf_entry, bprm->p);
-	if (current->flags & PF_PTRACED)
+	if (current->ptrace & PT_PTRACED)
 		send_sig(SIGTRAP, current, 0);
 	return 0;
 out:
 	return retval;
 
 out_free_dentry:
+	allow_write_access(interpreter);
 	fput(interpreter);
 out_free_interp:
 	if (elf_interpreter)
@@ -804,7 +810,7 @@ static int load_irix_library(struct file *file)
 
 	/* First of all, some simple consistency checks. */
 	if(elf_ex.e_type != ET_EXEC || elf_ex.e_phnum > 2 ||
-	   !elf_check_arch(elf_ex.e_machine) || !file->f_op->mmap)
+	   !irix_elf_check_arch(&elf_ex) || !file->f_op->mmap)
 		return -ENOEXEC;
 	
 	/* Now read in all of the header information. */
@@ -910,10 +916,12 @@ unsigned long irix_mapelf(int fd, struct elf_phdr *user_phdrp, int cnt)
 		prot  = (hp->p_flags & PF_R) ? PROT_READ : 0;
 		prot |= (hp->p_flags & PF_W) ? PROT_WRITE : 0;
 		prot |= (hp->p_flags & PF_X) ? PROT_EXEC : 0;
+		down(&current->mm->mmap_sem);
 		retval = do_mmap(filp, (hp->p_vaddr & 0xfffff000),
 				 (hp->p_filesz + (hp->p_vaddr & 0xfff)),
 				 prot, (MAP_FIXED | MAP_PRIVATE | MAP_DENYWRITE),
 				 (hp->p_offset & 0xfffff000));
+		up(&current->mm->mmap_sem);
 
 		if(retval != (hp->p_vaddr & 0xfffff000)) {
 			printk("irix_mapelf: do_mmap fails with %d!\n", retval);
@@ -1119,7 +1127,7 @@ static int irix_core_dump(long signr, struct pt_regs * regs, struct file *file)
 	notes[0].datasz = sizeof(prstatus);
 	notes[0].data = &prstatus;
 	prstatus.pr_info.si_signo = prstatus.pr_cursig = signr;
-	prstatus.pr_sigpend = current->signal.sig[0];
+	prstatus.pr_sigpend = current->pending.signal.sig[0];
 	prstatus.pr_sighold = current->blocked.sig[0];
 	psinfo.pr_pid = prstatus.pr_pid = current->pid;
 	psinfo.pr_ppid = prstatus.pr_ppid = current->p_pptr->pid;
@@ -1148,7 +1156,7 @@ static int irix_core_dump(long signr, struct pt_regs * regs, struct file *file)
 	psinfo.pr_state = i;
 	psinfo.pr_sname = (i < 0 || i > 5) ? '.' : "RSDZTD"[i];
 	psinfo.pr_zomb = psinfo.pr_sname == 'Z';
-	psinfo.pr_nice = current->priority-15;
+	psinfo.pr_nice = current->nice;
 	psinfo.pr_flag = current->flags;
 	psinfo.pr_uid = current->uid;
 	psinfo.pr_gid = current->gid;
@@ -1274,7 +1282,7 @@ static int __init init_irix_binfmt(void)
 	return register_binfmt(&irix_format);
 }
 
-static void __exit cleanup_module(void)
+static void __exit exit_irix_binfmt(void)
 {
 	/* Remove the IRIX ELF loaders. */
 	unregister_binfmt(&irix_format);

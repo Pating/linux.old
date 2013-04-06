@@ -9,6 +9,8 @@
 
 struct request_queue;
 typedef struct request_queue request_queue_t;
+struct elevator_s;
+typedef struct elevator_s elevator_t;
 
 /*
  * Ok, this is an expanded form so that we can use the same
@@ -19,6 +21,9 @@ typedef struct request_queue request_queue_t;
 struct request {
 	struct list_head queue;
 	int elevator_sequence;
+	struct list_head table;
+
+	struct list_head *free_list;
 
 	volatile int rq_status;	/* should split this into a few status bits */
 #define RQ_INACTIVE		(-1)
@@ -41,7 +46,8 @@ struct request {
 	struct semaphore * sem;
 	struct buffer_head * bh;
 	struct buffer_head * bhtail;
-	request_queue_t * q;
+	request_queue_t *q;
+	elevator_t *e;
 };
 
 #include <linux/elevator.h>
@@ -60,11 +66,23 @@ typedef int (make_request_fn) (request_queue_t *q, int rw, struct buffer_head *b
 typedef void (plug_device_fn) (request_queue_t *q, kdev_t device);
 typedef void (unplug_device_fn) (void *q);
 
+/*
+ * Default nr free requests per queue
+ */
+#define QUEUE_NR_REQUESTS	256
+
 struct request_queue
 {
-	struct list_head queue_head;
-	/* together with queue_head for cacheline sharing */
-	elevator_t elevator;
+	/*
+	 * the queue request freelist, one for reads and one for writes
+	 */
+	struct list_head	request_freelist[2];
+
+	/*
+	 * Together with queue_head for cacheline sharing
+	 */
+	struct list_head	queue_head;
+	elevator_t		elevator;
 
 	request_fn_proc		* request_fn;
 	merge_request_fn	* back_merge_fn;
@@ -76,22 +94,34 @@ struct request_queue
 	 * The queue owner gets to use this for whatever they like.
 	 * ll_rw_blk doesn't touch it.
 	 */
-	void                    * queuedata;
+	void			* queuedata;
 
 	/*
 	 * This is used to remove the plug when tq_disk runs.
 	 */
-	struct tq_struct          plug_tq;
+	struct tq_struct	plug_tq;
+
 	/*
 	 * Boolean that indicates whether this queue is plugged or not.
 	 */
-	char			  plugged;
+	char			plugged;
 
 	/*
 	 * Boolean that indicates whether current_request is active or
 	 * not.
 	 */
-	char			  head_active;
+	char			head_active;
+
+	/*
+	 * Is meant to protect the queue in the future instead of
+	 * io_request_lock
+	 */
+	spinlock_t		request_lock;
+
+	/*
+	 * Tasks wait here for free request
+	 */
+	wait_queue_head_t	wait_for_request;
 };
 
 struct blk_dev_struct {
@@ -118,13 +148,11 @@ struct sec_size {
 
 extern struct sec_size * blk_sec[MAX_BLKDEV];
 extern struct blk_dev_struct blk_dev[MAX_BLKDEV];
-extern wait_queue_head_t wait_for_request;
 extern void grok_partitions(struct gendisk *dev, int drive, unsigned minors, long size);
 extern void register_disk(struct gendisk *dev, kdev_t first, unsigned minors, struct block_device_operations *ops, long size);
-extern void generic_unplug_device(void * data);
-extern int generic_make_request(request_queue_t *q, int rw,
-						struct buffer_head * bh);
-extern request_queue_t * blk_get_queue(kdev_t dev);
+extern void generic_make_request(int rw, struct buffer_head * bh);
+extern request_queue_t *blk_get_queue(kdev_t dev);
+extern void blkdev_release_request(struct request *);
 
 /*
  * Access functions for manipulating queue properties
@@ -147,7 +175,7 @@ extern int * max_sectors[MAX_BLKDEV];
 
 extern int * max_segments[MAX_BLKDEV];
 
-#define MAX_SECTORS 128
+#define MAX_SECTORS 254
 
 #define MAX_SEGMENTS MAX_SECTORS
 
@@ -165,5 +193,15 @@ extern int * max_segments[MAX_BLKDEV];
 
 extern void drive_stat_acct (kdev_t dev, int rw,
 					unsigned long nr_sectors, int new_io);
+
+static inline int get_hardsect_size(kdev_t dev)
+{
+	extern int *hardsect_size[];
+	if (hardsect_size[MAJOR(dev)] != NULL)
+		return hardsect_size[MAJOR(dev)][MINOR(dev)];
+	else
+		return 512;
+}
+
 
 #endif

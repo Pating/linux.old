@@ -61,7 +61,7 @@ extern __inline__ int scsi_to_pci_dma_dir(unsigned char scsi_dir)
 #endif
 #endif
 
-#ifdef CONFIG_SBUS
+#if defined(CONFIG_SBUS) && !defined(CONFIG_SUN3)
 #include <asm/sbus.h>
 #if ((SCSI_DATA_UNKNOWN == SBUS_DMA_BIDIRECTIONAL) && (SCSI_DATA_WRITE == SBUS_DMA_TODEVICE) && (SCSI_DATA_READ == SBUS_DMA_FROMDEVICE) && (SCSI_DATA_NONE == SBUS_DMA_NONE))
 #define scsi_to_sbus_dma_dir(scsi_dir)	((int)(scsi_dir))
@@ -492,6 +492,7 @@ extern void scsi_done(Scsi_Cmnd * SCpnt);
 extern void scsi_finish_command(Scsi_Cmnd *);
 extern int scsi_retry_command(Scsi_Cmnd *);
 extern Scsi_Cmnd *scsi_allocate_device(Scsi_Device *, int, int);
+extern void __scsi_release_command(Scsi_Cmnd *);
 extern void scsi_release_command(Scsi_Cmnd *);
 extern void scsi_do_cmd(Scsi_Cmnd *, const void *cmnd,
 			void *buffer, unsigned bufflen,

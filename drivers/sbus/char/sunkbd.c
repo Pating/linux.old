@@ -25,6 +25,7 @@
 #include <linux/init.h>
 #include <linux/sysrq.h>
 #include <linux/spinlock.h>
+#include <linux/smp_lock.h>
 #include <linux/devfs_fs_kernel.h>
 
 #include <asm/kbio.h>
@@ -79,7 +80,7 @@ extern void reset_vc(unsigned int new_console);
 extern void scrollback(int);
 extern void scrollfront(int);
 
-struct l1a_kbd_state l1a_state = { 0, 0 };
+struct l1a_kbd_state l1a_state;
 
 #ifndef CONFIG_PCI
 DECLARE_WAIT_QUEUE_HEAD(keypress_wait);
@@ -100,30 +101,30 @@ static spinlock_t sunkbd_lock = SPIN_LOCK_UNLOCKED;
  */
 
 /* shift state counters.. */
-static unsigned char k_down[NR_SHIFT] = {0, };
+static unsigned char k_down[NR_SHIFT];
 /* keyboard key bitmap */
-static unsigned long key_down[256/BITS_PER_LONG] = { 0, };
+static unsigned long key_down[256/BITS_PER_LONG];
 
 void push_kbd (int scan);
-int kbd_redirected = 0;
+int kbd_redirected;
 
-static int dead_key_next = 0;
+static int dead_key_next;
 /* 
  * In order to retrieve the shift_state (for the mouse server), either
  * the variable must be global, or a new procedure must be created to 
  * return the value. I chose the former way.
  */
 #ifndef CONFIG_PCI
-/*static*/ int shift_state = 0;
+/*static*/ int shift_state;
 #endif
 static int npadch = -1;			/* -1 or number assembled on pad */
-static unsigned char diacr = 0;
-static char rep = 0;			/* flag telling character repeat */
+static unsigned char diacr;
+static char rep;			/* flag telling character repeat */
 struct kbd_struct kbd_table[MAX_NR_CONSOLES];
 static struct tty_struct **ttytab;
 static struct kbd_struct * kbd = kbd_table;
-static struct tty_struct * tty = NULL;
-static int compose_led_on = 0;
+static struct tty_struct * tty;
+static int compose_led_on;
 static int kbd_delay_ticks = HZ / 5;
 static int kbd_rate_ticks = HZ / 20;
 
@@ -176,9 +177,6 @@ static unsigned char handle_diacr(unsigned char);
 static struct pt_regs * pt_regs;
 
 #ifdef CONFIG_MAGIC_SYSRQ
-#ifndef CONFIG_PCI
-int sysrq_enabled = 1;
-#endif
 unsigned char sun_sysrq_xlate[128] =
 	"\0\0\0\0\0\201\202\212\203\213\204\214\205\0\206\0"	/* 0x00 - 0x0f */
 	"\207\210\211\0\0\0\0\0\0\0\0\0\0\03312"		/* 0x10 - 0x1f */
@@ -555,7 +553,7 @@ static void __sunkbd_inchar(unsigned char ch, struct pt_regs *regs)
 
 #ifdef CONFIG_MAGIC_SYSRQ			/* Handle the SysRq hack */
 	if (l1a_state.l1_down) {
-		if (!up_flag && sysrq_enabled)
+		if (!up_flag)
 			handle_sysrq(sun_sysrq_xlate[keycode], pt_regs, kbd, tty);
 		goto out;
 	}
@@ -1310,8 +1308,7 @@ push_kbd (int scan)
 	}
 	spin_unlock_irqrestore(&kbd_queue_lock, flags);
 
-	if (kb_fasync)
-		kill_fasync (kb_fasync, SIGIO, POLL_IN);
+	kill_fasync (&kb_fasync, SIGIO, POLL_IN);
 	wake_up_interruptible (&kbd_wait);
 }
 
@@ -1349,19 +1346,22 @@ repeat:
 
 #ifdef CONFIG_SPARC32_COMPAT
 		if (current->thread.flags & SPARC_FLAG_32BIT) {
-			copy_to_user_ret((Firm_event *)p, &this_event,
-					 sizeof(Firm_event)-sizeof(struct timeval),
-					 -EFAULT);
+			if (copy_to_user((Firm_event *)p, &this_event,
+					 sizeof(Firm_event)-sizeof(struct timeval)))
+				return -EFAULT;
 			p += sizeof(Firm_event)-sizeof(struct timeval);
-			__put_user_ret(this_event.time.tv_sec, (u32 *)p, -EFAULT);
+			if (__put_user(this_event.time.tv_sec, (u32 *)p))
+				return -EFAULT;
 			p += sizeof(u32);
-			__put_user_ret(this_event.time.tv_usec, (u32 *)p, -EFAULT);
+			if (__put_user(this_event.time.tv_usec, (u32 *)p))
+				return -EFAULT;
 			p += sizeof(u32);
 		} else
 #endif
 		{
-			copy_to_user_ret((Firm_event *)p, &this_event, 
-					 sizeof(Firm_event), -EFAULT);
+			if (copy_to_user((Firm_event *)p, &this_event, 
+					 sizeof(Firm_event)))
+				return -EFAULT;
 			p += sizeof (Firm_event);
 		}
 #ifdef KBD_DEBUG
@@ -1404,22 +1404,27 @@ kbd_ioctl (struct inode *i, struct file *f, unsigned int cmd, unsigned long arg)
 
 	switch (cmd){
 	case KIOCTYPE:		  /* return keyboard type */
-		put_user_ret(sunkbd_type, (int *) arg, -EFAULT);
+		if (put_user(sunkbd_type, (int *) arg))
+			return -EFAULT;
 		break;
 	case KIOCGTRANS:
-		put_user_ret(TR_UNTRANS_EVENT, (int *) arg, -EFAULT);
+		if (put_user(TR_UNTRANS_EVENT, (int *) arg))
+			return -EFAULT;
 		break;
 	case KIOCTRANS:
-		get_user_ret(value, (int *) arg, -EFAULT);
+		if (get_user(value, (int *) arg))
+			return -EFAULT;
 		if (value != TR_UNTRANS_EVENT)
 			return -EINVAL;
 		break;
 	case KIOCLAYOUT:
-		put_user_ret(sunkbd_layout, (int *) arg, -EFAULT);
+		if (put_user(sunkbd_layout, (int *) arg))
+			return -EFAULT;
 		break;
 	case KIOCSDIRECT:
 #ifndef CODING_NEW_DRIVER
-		get_user_ret(value, (int *) arg, -EFAULT);
+		if (get_user(value, (int *) arg))
+			return -EFAULT;
 		if(value)
 			kbd_redirected = fg_console + 1;
 		else
@@ -1428,7 +1433,8 @@ kbd_ioctl (struct inode *i, struct file *f, unsigned int cmd, unsigned long arg)
 #endif
 		break;
 	case KIOCCMD:
-		get_user_ret(value, (int *) arg, -EFAULT);
+		if (get_user(value, (int *) arg))
+			return -EFAULT;
 		c = (unsigned char) value;
 		switch (c) {
 			case SKBDCMD_CLICK:
@@ -1447,8 +1453,9 @@ kbd_ioctl (struct inode *i, struct file *f, unsigned int cmd, unsigned long arg)
 				return -EINVAL;
 		}
 	case KIOCSLED:
-		get_user_ret(c, (unsigned char *) arg, -EFAULT);
-			
+		if (get_user(c, (unsigned char *) arg))
+			return -EFAULT;
+
 		if (c & LED_SCRLCK) leds |= (1 << VC_SCROLLOCK);
 		if (c & LED_NLOCK) leds |= (1 << VC_NUMLOCK);
 		if (c & LED_CLOCK) leds |= (1 << VC_CAPSLOCK);
@@ -1456,7 +1463,8 @@ kbd_ioctl (struct inode *i, struct file *f, unsigned int cmd, unsigned long arg)
 		sun_setledstate(kbd_table + fg_console, leds);
 		break;
 	case KIOCGLED:
-		put_user_ret(vcleds_to_sunkbd(getleds()), (unsigned char *) arg, -EFAULT);
+		if (put_user(vcleds_to_sunkbd(getleds()), (unsigned char *) arg))
+			return -EFAULT;
 		break;
 	case KIOCGRATE:
 	{
@@ -1468,8 +1476,9 @@ kbd_ioctl (struct inode *i, struct file *f, unsigned int cmd, unsigned long arg)
 		else
 			rate.rate = 0;
 
-		copy_to_user_ret((struct kbd_rate *)arg, &rate,
-				 sizeof(struct kbd_rate), -EFAULT);
+		if (copy_to_user((struct kbd_rate *)arg, &rate,
+				 sizeof(struct kbd_rate)))
+			return -EFAULT;
 
 		return 0;
 	}
@@ -1498,7 +1507,8 @@ kbd_ioctl (struct inode *i, struct file *f, unsigned int cmd, unsigned long arg)
 		int count;
 		
 		count = kbd_head - kbd_tail;
-		put_user_ret((count < 0) ? KBD_QSIZE - count : count, (int *) arg, -EFAULT);
+		if (put_user((count < 0) ? KBD_QSIZE - count : count, (int *) arg))
+			return -EFAULT;
 		return 0;
 	}
 	default:
@@ -1528,16 +1538,15 @@ kbd_open (struct inode *i, struct file *f)
 static int
 kbd_close (struct inode *i, struct file *f)
 {
-	if (--kbd_active)
-		return 0;
-
-	if (kbd_redirected)
-		kbd_table [kbd_redirected-1].kbdmode = VC_XLATE;
-
-	kbd_redirected = 0;
-	kbd_opened = 0;
-
-	kbd_fasync (-1, f, 0);
+	lock_kernel();
+	if (!--kbd_active) {
+		if (kbd_redirected)
+			kbd_table [kbd_redirected-1].kbdmode = VC_XLATE;
+		kbd_redirected = 0;
+		kbd_opened = 0;
+		kbd_fasync (-1, f, 0);
+	}
+	unlock_kernel();
 	return 0;
 }
 
@@ -1606,9 +1615,9 @@ void __init keyboard_zsinit(void (*put_char)(unsigned char))
 	spin_unlock_irq(&sunkbd_lock);
 
 	/* Register the /dev/kbd interface */
-	devfs_register (NULL, "kbd", 0, DEVFS_FL_NONE,
+	devfs_register (NULL, "kbd", DEVFS_FL_DEFAULT,
 			KBD_MAJOR, 0,
-			S_IFCHR | S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH, 0, 0,
+			S_IFCHR | S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH,
 			&kbd_fops, NULL);
 	if (devfs_register_chrdev (KBD_MAJOR, "kbd", &kbd_fops)){
 		printk ("Could not register /dev/kbd device\n");

@@ -100,10 +100,11 @@
  *						with only 6 digipeaters and sockaddr_ax25 in ax25_bind(),
  *						ax25_connect() and ax25_sendmsg()
  *			Joerg(DL1BKE)		Added support for SO_BINDTODEVICE
+ *			Arnaldo C. Melo		s/suser/capable(CAP_NET_ADMIN)/, some more cleanups
+ *			Michal Ostrowski	Module initialization cleanup.
  */
 
 #include <linux/config.h>
-#if defined(CONFIG_AX25) || defined(CONFIG_AX25_MODULE)
 #include <linux/module.h>
 #include <linux/errno.h>
 #include <linux/types.h>
@@ -136,7 +137,9 @@
 #include <net/ip.h>
 #include <net/arp.h>
 
-ax25_cb *volatile ax25_list = NULL;
+
+
+ax25_cb *volatile ax25_list;
 
 static struct proto_ops ax25_proto_ops;
 
@@ -817,10 +820,7 @@ static int ax25_getsockopt(struct socket *sock, int level, int optname, char *op
 	if (put_user(length, optlen))
 		return -EFAULT;
 
-	if (copy_to_user(optval, valptr, length))
-		return -EFAULT;
-
-	return 0;
+	return copy_to_user(optval, valptr, length) ? -EFAULT : 0;
 }
 
 static int ax25_listen(struct socket *sock, int backlog)
@@ -964,7 +964,7 @@ struct sock *ax25_make_new(struct sock *osk, struct ax25_dev *ax25_dev)
 			return NULL;
 		}
 
-		*ax25->digipeat = *osk->protinfo.ax25->digipeat;
+		memcpy(ax25->digipeat, osk->protinfo.ax25->digipeat, sizeof(ax25_digi));
 	}
 
 	sk->protinfo.ax25 = ax25;
@@ -1070,7 +1070,7 @@ static int ax25_bind(struct socket *sock, struct sockaddr *uaddr, int addr_len)
 		return -EINVAL;
 
 	call = ax25_findbyuid(current->euid);
-	if (call == NULL && ax25_uid_policy && !suser())
+	if (call == NULL && ax25_uid_policy && !capable(CAP_NET_ADMIN))
 		return -EACCES;
 
 	if (call == NULL)
@@ -1195,7 +1195,7 @@ static int ax25_connect(struct socket *sock, struct sockaddr *uaddr, int addr_le
 	 */
 	if (sk->zapped) {
 		/* check if we can remove this feature. It is broken. */
-		printk(KERN_WARNING "ax25_connect(): %s uses autobind, please contact jreuter@poboxes.com\n",
+		printk(KERN_WARNING "ax25_connect(): %s uses autobind, please contact jreuter@yaina.de\n",
 			current->comm);
 		if ((err = ax25_rt_autobind(sk->protinfo.ax25, &fsa->fsa_ax25.sax25_call)) < 0)
 			return err;
@@ -1584,9 +1584,7 @@ static int ax25_ioctl(struct socket *sock, unsigned int cmd, unsigned long arg)
 			amount = sk->sndbuf - atomic_read(&sk->wmem_alloc);
 			if (amount < 0)
 				amount = 0;
-			if (put_user(amount, (int *)arg))
-				return -EFAULT;
-			return 0;
+			return put_user(amount, (int *)arg);
 		}
 
 		case TIOCINQ: {
@@ -1595,19 +1593,15 @@ static int ax25_ioctl(struct socket *sock, unsigned int cmd, unsigned long arg)
 			/* These two are safe on a single CPU system as only user tasks fiddle here */
 			if ((skb = skb_peek(&sk->receive_queue)) != NULL)
 				amount = skb->len;
-			if (put_user(amount, (int *)arg))
-				return -EFAULT;
-			return 0;
+			return put_user(amount, (int *)arg);
 		}
 
 		case SIOCGSTAMP:
 			if (sk != NULL) {
 				if (sk->stamp.tv_sec == 0)
 					return -ENOENT;
-				if (copy_to_user((void *)arg, &sk->stamp, sizeof(struct timeval)))
-					return -EFAULT;
-				return 0;
-			}
+				return copy_to_user((void *)arg, &sk->stamp, sizeof(struct timeval)) ? -EFAULT : 0;
+	 		}
 			return -EINVAL;
 
 		case SIOCAX25ADDUID:	/* Add a uid to the uid/call map table */
@@ -1621,7 +1615,7 @@ static int ax25_ioctl(struct socket *sock, unsigned int cmd, unsigned long arg)
 
 		case SIOCAX25NOUID: {	/* Set the default policy (default/bar) */
 			long amount;
-			if (!suser())
+			if (!capable(CAP_NET_ADMIN))
 				return -EPERM;
 			if (get_user(amount, (long *)arg))
 				return -EFAULT;
@@ -1634,12 +1628,12 @@ static int ax25_ioctl(struct socket *sock, unsigned int cmd, unsigned long arg)
 		case SIOCADDRT:
 		case SIOCDELRT:
 		case SIOCAX25OPTRT:
-			if (!suser())
+			if (!capable(CAP_NET_ADMIN))
 				return -EPERM;
 			return ax25_rt_ioctl(cmd, (void *)arg);
 
 		case SIOCAX25CTLCON:
-			if (!suser())
+			if (!capable(CAP_NET_ADMIN))
 				return -EPERM;
 			return ax25_ctl_ioctl(cmd, (void *)arg);
 
@@ -1688,7 +1682,7 @@ static int ax25_ioctl(struct socket *sock, unsigned int cmd, unsigned long arg)
 		case SIOCAX25ADDFWD:
 		case SIOCAX25DELFWD: {
 			struct ax25_fwd_struct ax25_fwd;
-			if (!suser())
+			if (!capable(CAP_NET_ADMIN))
 				return -EPERM;
 			if (copy_from_user(&ax25_fwd, (void *)arg, sizeof(ax25_fwd)))
 				return -EFAULT;
@@ -1852,50 +1846,37 @@ EXPORT_SYMBOL(asc2ax);
 EXPORT_SYMBOL(null_ax25_address);
 EXPORT_SYMBOL(ax25_display_timer);
 
-void __init ax25_proto_init(struct net_proto *pro)
+static int __init ax25_init(void)
 {
 	sock_register(&ax25_family_ops);
 	ax25_packet_type.type = htons(ETH_P_AX25);
 	dev_add_pack(&ax25_packet_type);
 	register_netdevice_notifier(&ax25_dev_notifier);
-#ifdef CONFIG_SYSCTL
 	ax25_register_sysctl();
-#endif
 
-#ifdef CONFIG_PROC_FS
 	proc_net_create("ax25_route", 0, ax25_rt_get_info);
 	proc_net_create("ax25", 0, ax25_get_info);
 	proc_net_create("ax25_calls", 0, ax25_uid_get_info);
-#endif
 
 	printk(KERN_INFO "NET4: G4KLX/GW4PTS AX.25 for Linux. Version 0.37 for Linux NET4.0\n");
+	return 0;
 }
+module_init(ax25_init);
 
-#ifdef MODULE
+
 MODULE_AUTHOR("Jonathan Naylor G4KLX <g4klx@g4klx.demon.co.uk>");
 MODULE_DESCRIPTION("The amateur radio AX.25 link layer protocol");
 
-int init_module(void)
+static void __exit ax25_exit(void)
 {
-	ax25_proto_init(NULL);
-
-	return 0;
-}
-
-void cleanup_module(void)
-{
-#ifdef CONFIG_PROC_FS
 	proc_net_remove("ax25_route");
 	proc_net_remove("ax25");
 	proc_net_remove("ax25_calls");
-#endif
 	ax25_rt_free();
 	ax25_uid_free();
 	ax25_dev_free();
 
-#ifdef CONFIG_SYSCTL
 	ax25_unregister_sysctl();
-#endif
 	unregister_netdevice_notifier(&ax25_dev_notifier);
 
 	ax25_packet_type.type = htons(ETH_P_AX25);
@@ -1903,6 +1884,4 @@ void cleanup_module(void)
 
 	sock_unregister(PF_AX25);
 }
-#endif
-
-#endif
+module_exit(ax25_exit);

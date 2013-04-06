@@ -1,3 +1,4 @@
+#ifdef __KERNEL__
 #ifndef _PPC_PGTABLE_H
 #define _PPC_PGTABLE_H
 
@@ -69,10 +70,12 @@ extern inline void flush_tlb_pgtables(struct mm_struct *mm,
 
 extern void flush_icache_range(unsigned long, unsigned long);
 extern void __flush_page_to_ram(unsigned long page_va);
-#define flush_page_to_ram(page)	__flush_page_to_ram(page_address(page))
+extern void flush_page_to_ram(struct page *page);
+
+#define flush_dcache_page(page)			do { } while (0)
 
 extern unsigned long va_to_phys(unsigned long address);
-extern pte_t *va_to_pte(struct task_struct *tsk, unsigned long address);
+extern pte_t *va_to_pte(unsigned long address);
 extern unsigned long ioremap_bot, ioremap_base;
 #endif /* __ASSEMBLY__ */
 
@@ -272,7 +275,7 @@ extern unsigned long ioremap_bot, ioremap_base;
  * for zero-mapped memory areas etc..
  */
 extern unsigned long empty_zero_page[1024];
-#define ZERO_PAGE(vaddr) (mem_map + MAP_NR(empty_zero_page))
+#define ZERO_PAGE(vaddr) (virt_to_page(empty_zero_page))
 
 /*
  * BAD_PAGETABLE is used when we need a bogus page-table, while
@@ -301,7 +304,6 @@ extern pte_t * __bad_pagetable(void);
 #define pte_none(pte)		(!pte_val(pte))
 #define pte_present(pte)	(pte_val(pte) & _PAGE_PRESENT)
 #define pte_clear(ptep)		do { pte_val(*(ptep)) = 0; } while (0)
-#define pte_pagenr(x)		((unsigned long)((pte_val(x) >> PAGE_SHIFT)))
 
 #define pmd_none(pmd)		(!pmd_val(pmd))
 #define	pmd_bad(pmd)		((pmd_val(pmd) & ~PAGE_MASK) != 0)
@@ -311,9 +313,9 @@ extern pte_t * __bad_pagetable(void);
 /*
  * Permanent address of a page.
  */
-#define page_address(page)  ({ if (!(page)->virtual) BUG(); (page)->virtual; })
+#define page_address(page)  ((page)->virtual)
 #define pages_to_mb(x)		((x) >> (20-PAGE_SHIFT))
-#define pte_page(x)		(mem_map+pte_pagenr(x))
+#define pte_page(x)		(mem_map+(unsigned long)((pte_val(x) >> PAGE_SHIFT)))
 
 #ifndef __ASSEMBLY__
 /*
@@ -450,9 +452,6 @@ extern void flush_hash_page(unsigned context, unsigned long va);
 #define pte_to_swp_entry(pte)		((swp_entry_t) { pte_val(pte) })
 #define swp_entry_to_pte(x)		((pte_t) { (x).val })
 
-#define module_map      vmalloc
-#define module_unmap    vfree
-
 /* CONFIG_APUS */
 /* For virtual address to physical address conversion */
 extern void cache_clear(__u32 addr, int length);
@@ -487,6 +486,8 @@ extern void kernel_set_cachemode (unsigned long address, unsigned long size,
 
 #define io_remap_page_range remap_page_range 
 
+#include <asm-generic/pgtable.h>
 
 #endif __ASSEMBLY__
 #endif /* _PPC_PGTABLE_H */
+#endif /* __KERNEL__ */

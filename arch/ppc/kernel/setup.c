@@ -23,6 +23,7 @@
 #include <asm/setup.h>
 #include <asm/amigappc.h>
 #include <asm/smp.h>
+#include <asm/elf.h>
 #ifdef CONFIG_8xx
 #include <asm/mpc8xx.h>
 #include <asm/8xx_immap.h>
@@ -34,6 +35,8 @@
 #include <asm/bootx.h>
 #include <asm/machdep.h>
 #include <asm/feature.h>
+#include <asm/uaccess.h>
+
 #ifdef CONFIG_OAK
 #include "oak_setup.h"
 #endif /* CONFIG_OAK */
@@ -74,9 +77,6 @@ extern void gemini_init(unsigned long r3,
                       unsigned long r6,
                       unsigned long r7);
 
-#ifdef CONFIG_BOOTX_TEXT
-extern void map_bootx_text(void);
-#endif
 #ifdef CONFIG_XMON
 extern void xmon_map_scc(void);
 #endif
@@ -107,6 +107,14 @@ unsigned long SYSRQ_KEY;
 #endif /* CONFIG_MAGIC_SYSRQ */
 
 struct machdep_calls ppc_md;
+
+/*
+ * These are used in binfmt_elf.c to put aux entries on the stack
+ * for each elf executable being started.
+ */
+int dcache_bsize;
+int icache_bsize;
+int ucache_bsize;
 
 /*
  * Perhaps we can put the pmac screen_info[] here
@@ -275,7 +283,11 @@ int get_cpuinfo(char *buffer)
 			}
 			break;
 		case 0x000C:
-			len += sprintf(len+buffer, "7400 (G4)\n");
+			len += sprintf(len+buffer, "7400 (G4");
+#ifdef CONFIG_ALTIVEC
+			len += sprintf(len+buffer, ", altivec supported");
+#endif /* CONFIG_ALTIVEC */
+			len += sprintf(len+buffer, ")\n");
 			break;
 		case 0x0020:
 			len += sprintf(len+buffer, "403G");
@@ -287,6 +299,15 @@ int get_cpuinfo(char *buffer)
 				len += sprintf(len+buffer, "CX\n");
 				break;
 			}
+			break;
+		case 0x0035:
+			len += sprintf(len+buffer, "POWER4\n");
+			break;
+		case 0x0040:
+			len += sprintf(len+buffer, "POWER3 (630)\n");
+			break;
+		case 0x0041:
+			len += sprintf(len+buffer, "POWER3 (630+)\n");
 			break;
 		case 0x0050:
 			len += sprintf(len+buffer, "8xx\n");
@@ -458,7 +479,6 @@ identify_machine(unsigned long r3, unsigned long r4, unsigned long r5,
 			intuit_machine_type();
 #endif /* CONFIG_MACH_SPECIFIC */
 		finish_device_tree();
-
 		/*
 		 * If we were booted via quik, r3 points to the physical
 		 * address of the command-line parameters.
@@ -494,6 +514,8 @@ identify_machine(unsigned long r3, unsigned long r4, unsigned long r5,
 #ifdef CONFIG_BLK_DEV_INITRD
 			if (r3 && r4 && r4 != 0xdeadbeef)
 			{
+				if (r3 < KERNELBASE)
+					r3 += KERNELBASE;
 				initrd_start = r3;
 				initrd_end = r3 + r4;
 				ROOT_DEV = MKDEV(RAMDISK_MAJOR, 0);
@@ -574,7 +596,7 @@ identify_machine(unsigned long r3, unsigned long r4, unsigned long r5,
 		}
 		__max_memory = maxmem;
 	}
-	
+
 	/* this is for modules since _machine can be a define -- Cort */
 	ppc_md.ppc_machine = _machine;
 
@@ -635,16 +657,18 @@ int parse_bootinfo(void)
 }
 
 /* Checks "l2cr=xxxx" command-line option */
-void ppc_setup_l2cr(char *str, int *ints)
+int ppc_setup_l2cr(char *str)
 {
 	if ( ((_get_PVR() >> 16) == 8) || ((_get_PVR() >> 16) == 12) )
 	{
 		unsigned long val = simple_strtoul(str, NULL, 0);
 		printk(KERN_INFO "l2cr set to %lx\n", val);
-		_set_L2CR(0);
-		_set_L2CR(val);
+                _set_L2CR(0);           /* force invalidate by disable cache */
+                _set_L2CR(val);         /* and enable it */
 	}
+	return 1;
 }
+__setup("l2cr=", ppc_setup_l2cr);
 
 void __init ppc_init(void)
 {
@@ -663,14 +687,12 @@ void __init setup_arch(char **cmdline_p)
 	extern char *klimit;
 	extern void do_init_bootmem(void);
 
-#ifdef CONFIG_BOOTX_TEXT
-	map_bootx_text();
-#endif
+	/* so udelay does something sensible, assume <= 1000 bogomips */
+	loops_per_sec = 500000000;
 
 #ifdef CONFIG_ALL_PPC
 	feature_init();
 #endif
-
 #ifdef CONFIG_XMON
 	xmon_map_scc();
 	if (strstr(cmd_line, "xmon"))
@@ -683,6 +705,24 @@ void __init setup_arch(char **cmdline_p)
 	set_debug_traps();
 	breakpoint();
 #endif
+
+	/*
+	 * Set cache line size based on type of cpu as a default.
+	 * Systems with OF can look in the properties on the cpu node(s)
+	 * for a possibly more accurate value.
+	 */
+	dcache_bsize = icache_bsize = 32;	/* most common value */
+	switch (_get_PVR() >> 16) {
+	case 1:		/* 601, with unified cache */
+		ucache_bsize = 32;
+		break;
+	/* XXX need definitions in here for 8xx etc. */
+	case 0x40:
+	case 0x41:
+	case 0x35:	/* 64-bit POWER3, POWER3+, POWER4 */
+		dcache_bsize = icache_bsize = 128;
+		break;
+	}
 
 	/* reboot on panic */
 	panic_timeout = 180;
@@ -704,6 +744,7 @@ void __init setup_arch(char **cmdline_p)
 	if ( ppc_md.progress ) ppc_md.progress("arch: exit", 0x3eab);
 
 	paging_init();
+	sort_exception_table();
 }
 
 void ppc_generic_ide_fix_driveid(struct hd_driveid *id)
@@ -779,7 +820,7 @@ void ppc_generic_ide_fix_driveid(struct hd_driveid *id)
 	for (i = 0; i < 26; i++)
 		id->words130_155[i] = __le16_to_cpu(id->words130_155[i]);
 	id->word156        = __le16_to_cpu(id->word156);
-	for (i = 0; i < 4; i++)
+	for (i = 0; i < 3; i++)
 		id->words157_159[i] = __le16_to_cpu(id->words157_159[i]);
 	for (i = 0; i < 96; i++)
 		id->words160_255[i] = __le16_to_cpu(id->words160_255[i]);

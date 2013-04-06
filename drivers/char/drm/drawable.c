@@ -2,6 +2,7 @@
  * Created: Tue Feb  2 08:37:54 1999 by faith@precisioninsight.com
  *
  * Copyright 1999 Precision Insight, Inc., Cedar Park, Texas.
+ * Copyright 2000 VA Linux Systems, Inc., Sunnyvale, California.
  * All Rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
@@ -24,7 +25,7 @@
  * DEALINGS IN THE SOFTWARE.
  * 
  * Authors:
- *    Rickard E. (Rik) Faith <faith@precisioninsight.com>
+ *    Rickard E. (Rik) Faith <faith@valinux.com>
  *
  */
 
@@ -38,7 +39,8 @@ int drm_adddraw(struct inode *inode, struct file *filp, unsigned int cmd,
 
 	draw.handle = 0;	/* NOOP */
 	DRM_DEBUG("%d\n", draw.handle);
-	copy_to_user_ret((drm_draw_t *)arg, &draw, sizeof(draw), -EFAULT);
+	if (copy_to_user((drm_draw_t *)arg, &draw, sizeof(draw)))
+		return -EFAULT;
 	return 0;
 }
 

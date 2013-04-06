@@ -29,8 +29,8 @@
 #define NLM_HOST_ADDR(sv)	(&(sv)->s_nlmclnt->cl_xprt->addr)
 
 static struct nlm_host *	nlm_hosts[NLM_HOST_NRHASH];
-static unsigned long		next_gc = 0;
-static int			nrhosts = 0;
+static unsigned long		next_gc;
+static int			nrhosts;
 static DECLARE_MUTEX(nlm_host_sema);
 
 
@@ -328,7 +328,7 @@ nlm_gc_hosts(void)
 			if (host->h_monitored)
 				nsm_unmonitor(host);
 			if ((clnt = host->h_rpcclnt) != NULL) {
-				if (clnt->cl_users) {
+				if (atomic_read(&clnt->cl_users)) {
 					printk(KERN_WARNING
 						"lockd: active RPC handle\n");
 					clnt->cl_dead = 1;

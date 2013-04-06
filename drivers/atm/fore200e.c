@@ -56,9 +56,7 @@
 #include <asm/pgtable.h>
 #endif
 
-#ifdef MODULE
 #include <linux/module.h>
-#endif
 
 #include "fore200e.h"
 #include "suni.h"
@@ -1464,10 +1462,6 @@ fore200e_open(struct atm_vcc *vcc, short vpi, int vci)
 	return -EBUSY;
     }
     
-#ifdef MODULE
-    MOD_INC_USE_COUNT;
-#endif
-
     /* compute rate control parameters */
     if ((vcc->qos.txtp.traffic_class == ATM_CBR) && (vcc->qos.txtp.max_pcr > 0)) {
 	
@@ -1497,10 +1491,6 @@ fore200e_close(struct atm_vcc* vcc)
     
     fore200e_activate_vcin(fore200e, 0, vcc, 0);
     
-#ifdef MODULE
-    MOD_DEC_USE_COUNT;
-#endif
-	
     kfree(FORE200E_VCC(vcc));
 	
     if ((vcc->qos.txtp.traffic_class == ATM_CBR) && (vcc->qos.txtp.max_pcr > 0)) {
@@ -2623,13 +2613,6 @@ fore200e_detect(void)
 	}
     }
 
-#if 0 /* XXX uncomment this to forbid module unloading */
-#ifdef MODULE
-    if (link > 0)
-	MOD_INC_USE_COUNT;
-#endif
-#endif
-
     return link;
 }
 
@@ -2921,7 +2904,7 @@ fore200e_proc_read(struct atm_dev *dev,loff_t* pos,char* page)
 
 
 #ifdef MODULE
-static unsigned int __init
+static int __init
 fore200e_module_init(void)
 {
     DPRINTK(1, "module loaded\n");
@@ -2944,21 +2927,15 @@ module_exit(fore200e_module_cleanup);
 
 static const struct atmdev_ops fore200e_ops =
 {
-    NULL, /* fore200e_dev_close   */
-    fore200e_open,
-    fore200e_close,
-    fore200e_ioctl,
-    fore200e_getsockopt,
-    fore200e_setsockopt,
-    fore200e_send,
-    NULL, /* fore200e_sg_send,    */
-    NULL, /* fore200e_send_oam,   */
-    NULL, /* fore200e_phy_put,    */
-    NULL, /* fore200e_phy_get,    */
-    NULL, /* fore200e_feedback,   */
-    fore200e_change_qos,
-    NULL, /* fore200e_free_rx_skb */
-    fore200e_proc_read
+	open:         fore200e_open,
+	close:        fore200e_close,
+	ioctl:        fore200e_ioctl,
+	getsockopt:   fore200e_getsockopt,
+	setsockopt:   fore200e_setsockopt,
+	send:         fore200e_send,
+	change_qos:   fore200e_change_qos,
+	proc_read:    fore200e_proc_read,
+	owner:        THIS_MODULE,
 };
 
 

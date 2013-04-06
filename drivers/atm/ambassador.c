@@ -290,10 +290,12 @@ static inline void __init show_version (void) {
 /********** microcode **********/
 
 #ifdef AMB_NEW_MICROCODE
-#define UCODE(x) "atmsar12" "." #x
+#define UCODE(x) UCODE1(atmsar12.,x)
 #else
-#define UCODE(x) "atmsar11" "." #x
+#define UCODE(x) UCODE1(atmsar11.,x)
 #endif
+#define UCODE2(x) #x
+#define UCODE1(x,y) UCODE2(x ## y)
 
 static const u32 __initdata ucode_start = 
 #include UCODE(start)
@@ -326,45 +328,43 @@ static const unsigned long onegigmask = -1 << 30;
 
 /********** access to adapter **********/
 
-static inline void wr_plain (const amb_dev * dev, const u32 * addr, u32 data) {
-  PRINTD (DBG_FLOW|DBG_REGS, "wr: %p <- %08x", addr, data);
+static inline void wr_plain (const amb_dev * dev, size_t addr, u32 data) {
+  PRINTD (DBG_FLOW|DBG_REGS, "wr: %08x <- %08x", addr, data);
 #ifdef AMB_MMIO
-  dev->membase[addr - (u32 *) 0] = data;
+  dev->membase[addr / sizeof(u32)] = data;
 #else
-  outl (data, dev->iobase + (addr - (u32 *) 0) * sizeof(u32));
+  outl (data, dev->iobase + addr);
 #endif
 }
 
-static inline u32 rd_plain (const amb_dev * dev, const u32 * addr) {
+static inline u32 rd_plain (const amb_dev * dev, size_t addr) {
 #ifdef AMB_MMIO
-  u32 data = dev->membase[addr - (u32 *) 0];
+  u32 data = dev->membase[addr / sizeof(u32)];
 #else
-  u32 data = inl (dev->iobase + (addr - (u32 *) 0) * sizeof(u32));
+  u32 data = inl (dev->iobase + addr);
 #endif
-  PRINTD (DBG_FLOW|DBG_REGS, "rd: %p -> %08x", addr, data);
+  PRINTD (DBG_FLOW|DBG_REGS, "rd: %08x -> %08x", addr, data);
   return data;
 }
 
-static const amb_mem * const mem = 0;
-
-static inline void wr_mem (const amb_dev * dev, const u32 * addr, u32 data) {
+static inline void wr_mem (const amb_dev * dev, size_t addr, u32 data) {
   u32 be = cpu_to_be32 (data);
-  PRINTD (DBG_FLOW|DBG_REGS, "wr: %p <- %08x b[%08x]", addr, data, be);
+  PRINTD (DBG_FLOW|DBG_REGS, "wr: %08x <- %08x b[%08x]", addr, data, be);
 #ifdef AMB_MMIO
-  dev->membase[addr - (u32 *) 0] = be;
+  dev->membase[addr / sizeof(u32)] = be;
 #else
-  outl (be, dev->iobase + (addr - (u32 *) 0) * sizeof(u32));
+  outl (be, dev->iobase + addr);
 #endif
 }
 
-static inline u32 rd_mem (const amb_dev * dev, const u32 * addr) {
+static inline u32 rd_mem (const amb_dev * dev, size_t addr) {
 #ifdef AMB_MMIO
-  u32 be = dev->membase[addr - (u32 *) 0];
+  u32 be = dev->membase[addr / sizeof(u32)];
 #else
-  u32 be = inl (dev->iobase + (addr - (u32 *) 0) * sizeof(u32));
+  u32 be = inl (dev->iobase + addr);
 #endif
   u32 data = be32_to_cpu (be);
-  PRINTD (DBG_FLOW|DBG_REGS, "rd: %p -> %08x b[%08x]", addr, data, be);
+  PRINTD (DBG_FLOW|DBG_REGS, "rd: %08x -> %08x b[%08x]", addr, data, be);
   return data;
 }
 
@@ -373,15 +373,15 @@ static inline u32 rd_mem (const amb_dev * dev, const u32 * addr) {
 static inline void dump_registers (const amb_dev * dev) {
 #ifdef DEBUG_AMBASSADOR
   if (debug & DBG_REGS) {
-    u32 * i;
+    size_t i;
     PRINTD (DBG_REGS, "reading PLX control: ");
-    for (i = (u32 *) 0x00; i < (u32 *) 0x30; ++i)
+    for (i = 0x00; i < 0x30; i += sizeof(u32))
       rd_mem (dev, i);
     PRINTD (DBG_REGS, "reading mailboxes: ");
-    for (i = (u32 *) 0x40; i < (u32 *) 0x60; ++i)
+    for (i = 0x40; i < 0x60; i += sizeof(u32))
       rd_mem (dev, i);
     PRINTD (DBG_REGS, "reading doorb irqev irqen reset:");
-    for (i = (u32 *) 0x60; i < (u32 *) 0x70; ++i)
+    for (i = 0x60; i < 0x70; i += sizeof(u32))
       rd_mem (dev, i);
   }
 #else
@@ -600,7 +600,7 @@ static int command_do (amb_dev * dev, command * cmd) {
     ptrs->in = NEXTQ (ptrs->in, ptrs->start, ptrs->limit);
     
     // mail the command
-    wr_mem (dev, &mem->mb.adapter.cmd_address, virt_to_bus (ptrs->in));
+    wr_mem (dev, offsetof(amb_mem, mb.adapter.cmd_address), virt_to_bus (ptrs->in));
     
     // prepare to wait for cq->pending milliseconds
     // effectively one centisecond on i386
@@ -667,8 +667,8 @@ static inline int tx_give (amb_dev * dev, tx_in * tx) {
     txq->pending++;
     txq->in.ptr = NEXTQ (txq->in.ptr, txq->in.start, txq->in.limit);
     // hand over the TX and ring the bell
-    wr_mem (dev, &mem->mb.adapter.tx_address, virt_to_bus (txq->in.ptr));
-    wr_mem (dev, &mem->doorbell, TX_FRAME);
+    wr_mem (dev, offsetof(amb_mem, mb.adapter.tx_address), virt_to_bus (txq->in.ptr));
+    wr_mem (dev, offsetof(amb_mem, doorbell), TX_FRAME);
     
     if (txq->pending > txq->high)
       txq->high = txq->pending;
@@ -724,7 +724,7 @@ static inline int rx_give (amb_dev * dev, rx_in * rx, unsigned char pool) {
     rxq->pending++;
     rxq->in.ptr = NEXTQ (rxq->in.ptr, rxq->in.start, rxq->in.limit);
     // hand over the RX buffer
-    wr_mem (dev, &mem->mb.adapter.rx_address[pool], virt_to_bus (rxq->in.ptr));
+    wr_mem (dev, offsetof(amb_mem, mb.adapter.rx_address[pool]), virt_to_bus (rxq->in.ptr));
     
     spin_unlock_irqrestore (&rxq->lock, flags);
     return 0;
@@ -855,16 +855,16 @@ static void fill_rx_pools (amb_dev * dev) {
 /********** enable host interrupts **********/
 
 static inline void interrupts_on (amb_dev * dev) {
-  wr_plain (dev, &mem->interrupt_control,
-	    rd_plain (dev, &mem->interrupt_control)
+  wr_plain (dev, offsetof(amb_mem, interrupt_control),
+	    rd_plain (dev, offsetof(amb_mem, interrupt_control))
 	    | AMB_INTERRUPT_BITS);
 }
 
 /********** disable host interrupts **********/
 
 static inline void interrupts_off (amb_dev * dev) {
-  wr_plain (dev, &mem->interrupt_control,
-	    rd_plain (dev, &mem->interrupt_control)
+  wr_plain (dev, offsetof(amb_mem, interrupt_control),
+	    rd_plain (dev, offsetof(amb_mem, interrupt_control))
 	    &~ AMB_INTERRUPT_BITS);
 }
 
@@ -900,7 +900,7 @@ static void interrupt_handler (int irq, void * dev_id, struct pt_regs * pt_regs)
   }
   
   {
-    u32 interrupt = rd_plain (dev, &mem->interrupt);
+    u32 interrupt = rd_plain (dev, offsetof(amb_mem, interrupt));
   
     // for us or someone else sharing the same interrupt
     if (!interrupt) {
@@ -910,7 +910,7 @@ static void interrupt_handler (int irq, void * dev_id, struct pt_regs * pt_regs)
     
     // definitely for us
     PRINTD (DBG_IRQ, "FYI: interrupt was %08x", interrupt);
-    wr_plain (dev, &mem->interrupt, -1);
+    wr_plain (dev, offsetof(amb_mem, interrupt), -1);
   }
   
   {
@@ -959,8 +959,8 @@ static void dont_panic (amb_dev * dev) {
   cli();
   
   PRINTK (KERN_INFO, "don't panic - putting adapter into reset");
-  wr_plain (dev, &mem->reset_control,
-	    rd_plain (dev, &mem->reset_control) | AMB_RESET_BITS);
+  wr_plain (dev, offsetof(amb_mem, reset_control),
+	    rd_plain (dev, offsetof(amb_mem, reset_control)) | AMB_RESET_BITS);
   
   PRINTK (KERN_INFO, "marking all commands complete");
   for (cmd = ptrs->start; cmd < ptrs->limit; ++cmd)
@@ -1251,15 +1251,10 @@ static int amb_open (struct atm_vcc * atm_vcc, short vpi, int vci) {
     }
   }
   
-  // prevent module unload while sleeping (kmalloc/down)
-  // doing this any earlier would complicate more error return paths
-  MOD_INC_USE_COUNT;
-  
   // get space for our vcc stuff
   vcc = kmalloc (sizeof(amb_vcc), GFP_KERNEL);
   if (!vcc) {
     PRINTK (KERN_ERR, "out of memory!");
-    MOD_DEC_USE_COUNT;
     return -ENOMEM;
   }
   atm_vcc->dev_data = (void *) vcc;
@@ -1425,7 +1420,6 @@ static void amb_close (struct atm_vcc * atm_vcc) {
   // say the VPI/VCI is free again
   clear_bit(ATM_VF_ADDR,&atm_vcc->flags);
 
-  MOD_DEC_USE_COUNT;
   return;
 }
 
@@ -1703,7 +1697,8 @@ static const struct atmdev_ops amb_ops = {
   close:	amb_close,
   send:		amb_send,
   sg_send:	amb_sg_send,
-  proc_read:	amb_proc_read
+  proc_read:	amb_proc_read,
+  owner:	THIS_MODULE,
 };
 
 /********** housekeeping **********/
@@ -1985,7 +1980,7 @@ static int __init do_loader_command (volatile loader_block * lb,
   lb->valid = cpu_to_be32 (DMA_VALID);
   // dump_registers (dev);
   // dump_loader_block (lb);
-  wr_mem (dev, &mem->doorbell, virt_to_bus (lb) & ~onegigmask);
+  wr_mem (dev, offsetof(amb_mem, doorbell), virt_to_bus (lb) & ~onegigmask);
   
   timeout = command_timeouts[cmd] * HZ/100;
   
@@ -2002,7 +1997,7 @@ static int __init do_loader_command (volatile loader_block * lb,
   if (cmd == adapter_start) {
     // wait for start command to acknowledge...
     timeout = HZ/10;
-    while (rd_plain (dev, &mem->doorbell))
+    while (rd_plain (dev, offsetof(amb_mem, doorbell)))
       if (timeout) {
 	timeout = schedule_timeout (timeout);
       } else {
@@ -2095,21 +2090,21 @@ static int amb_reset (amb_dev * dev, int diags) {
   
   PRINTD (DBG_FLOW|DBG_LOAD, "amb_reset");
   
-  word = rd_plain (dev, &mem->reset_control);
+  word = rd_plain (dev, offsetof(amb_mem, reset_control));
   // put card into reset state
-  wr_plain (dev, &mem->reset_control, word | AMB_RESET_BITS);
+  wr_plain (dev, offsetof(amb_mem, reset_control), word | AMB_RESET_BITS);
   // wait a short while
   udelay (10);
 #if 1
   // put card into known good state
-  wr_plain (dev, &mem->interrupt_control, AMB_DOORBELL_BITS);
+  wr_plain (dev, offsetof(amb_mem, interrupt_control), AMB_DOORBELL_BITS);
   // clear all interrupts just in case
-  wr_plain (dev, &mem->interrupt, -1);
+  wr_plain (dev, offsetof(amb_mem, interrupt), -1);
 #endif
   // clear self-test done flag
-  wr_plain (dev, &mem->mb.loader.ready, 0);
+  wr_plain (dev, offsetof(amb_mem, mb.loader.ready), 0);
   // take card out of reset state
-  wr_plain (dev, &mem->reset_control, word &~ AMB_RESET_BITS);
+  wr_plain (dev, offsetof(amb_mem, reset_control), word &~ AMB_RESET_BITS);
   
   if (diags) { 
     unsigned long timeout;
@@ -2119,7 +2114,7 @@ static int amb_reset (amb_dev * dev, int diags) {
       timeout = schedule_timeout (timeout);
     // half second time-out
     timeout = HZ/2;
-    while (!rd_plain (dev, &mem->mb.loader.ready))
+    while (!rd_plain (dev, offsetof(amb_mem, mb.loader.ready)))
       if (timeout) {
 	timeout = schedule_timeout (timeout);
       } else {
@@ -2129,7 +2124,7 @@ static int amb_reset (amb_dev * dev, int diags) {
     
     // get results of self-test
     // XXX double check byte-order
-    word = rd_mem (dev, &mem->mb.loader.result);
+    word = rd_mem (dev, offsetof(amb_mem, mb.loader.result));
     if (word & SELF_TEST_FAILURE) {
       void sf (const char * msg) {
 	PRINTK (KERN_ERR, "self-test failed: %s", msg);
@@ -2235,7 +2230,7 @@ static int __init amb_talk (amb_dev * dev) {
 #endif
   
   // pass the structure
-  wr_mem (dev, &mem->doorbell, virt_to_bus (&a));
+  wr_mem (dev, offsetof(amb_mem, doorbell), virt_to_bus (&a));
   
   // 2.2 second wait (must not touch doorbell during 2 second DMA test)
   timeout = HZ*22/10;
@@ -2243,7 +2238,7 @@ static int __init amb_talk (amb_dev * dev) {
     timeout = schedule_timeout (timeout);
   // give the adapter another half second?
   timeout = HZ/2;
-  while (rd_plain (dev, &mem->doorbell))
+  while (rd_plain (dev, offsetof(amb_mem, doorbell)))
     if (timeout) {
       timeout = schedule_timeout (timeout);
     } else {
@@ -2318,10 +2313,10 @@ static int __init amb_init (amb_dev * dev) {
     u32 mapreg;
     blb = virt_to_bus (&lb);
     // the kernel stack had better not ever cross a 1Gb boundary!
-    mapreg = rd_plain (dev, &mem->stuff[10]);
+    mapreg = rd_plain (dev, offsetof(amb_mem, stuff[10]));
     mapreg &= ~onegigmask;
     mapreg |= blb & onegigmask;
-    wr_plain (dev, &mem->stuff[10], mapreg);
+    wr_plain (dev, offsetof(amb_mem, stuff[10]), mapreg);
     return;
   }
   
@@ -2397,7 +2392,7 @@ static int __init amb_probe (void) {
       
 #ifdef FILL_RX_POOLS_IN_BH
       // initialise bottom half
-      dev->bh.next = 0;
+      INIT_LIST_HEAD(&dev->bh.list);
       dev->bh.sync = 0;
       dev->bh.routine = (void (*)(void *)) fill_rx_pools;
       dev->bh.data = dev;

@@ -314,7 +314,7 @@ ip6t_do_table(struct sk_buff **pskb,
 
 	/* Initialization */
 	ipv6 = (*pskb)->nh.ipv6h;
-	protohdr = (u_int32_t *)ipv6 + IPV6_HDR_LEN;
+	protohdr = (u_int32_t *)((char *)ipv6 + IPV6_HDR_LEN);
 	datalen = (*pskb)->len - IPV6_HDR_LEN;
 	indev = in ? in->name : nulldevname;
 	outdev = out ? out->name : nulldevname;
@@ -736,7 +736,7 @@ check_entry(struct ip6t_entry *e, const char *name, unsigned int size,
 	target = find_target_lock(t->u.user.name, &ret, &ip6t_mutex);
 	if (!target) {
 	  //		duprintf("check_entry: `%s' not found\n", t->u.name);
-		return ret;
+		goto cleanup_matches;
 	}
 	if (target->me)
 		__MOD_INC_USE_COUNT(target->me);
@@ -1075,7 +1075,7 @@ get_entries(const struct ip6t_get_entries *entries,
 			 t->private->number);
 		if (entries->size == t->private->size)
 			ret = copy_entries_to_user(t->private->size,
-						   t, uptr->entries);
+						   t, uptr->entrytable);
 		else {
 			duprintf("get_entries: I've got %u not %u!\n",
 				 t->private->size,
@@ -1342,9 +1342,10 @@ ip6t_register_target(struct ip6t_target *target)
 
 	MOD_INC_USE_COUNT;
 	ret = down_interruptible(&ip6t_mutex);
-	if (ret != 0)
+	if (ret != 0) {
+		MOD_DEC_USE_COUNT;
 		return ret;
-
+	}
 	if (!list_named_insert(&ip6t_target, target)) {
 		duprintf("ip6t_register_target: `%s' already in list!\n",
 			 target->name);
@@ -1375,9 +1376,7 @@ ip6t_register_match(struct ip6t_match *match)
 		MOD_DEC_USE_COUNT;
 		return ret;
 	}
-	if (list_named_insert(&ip6t_match, match)) {
-		ret = 0;
-	} else {
+	if (!list_named_insert(&ip6t_match, match)) {
 		duprintf("ip6t_register_match: `%s' already in list!\n",
 			 match->name);
 		MOD_DEC_USE_COUNT;

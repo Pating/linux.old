@@ -34,7 +34,7 @@
 void cpu_idle(void)
 {
 	/* endless idle loop with no priority at all */
-	current->priority = 0;
+	current->nice = 20;
 	current->counter = -100;
 	init_idle();
 
@@ -72,6 +72,7 @@ void flush_thread(void)
 }
 
 int copy_thread(int nr, unsigned long clone_flags, unsigned long usp,
+		 unsigned long unused,
                  struct task_struct * p, struct pt_regs * regs)
 {
 	struct pt_regs * childregs;

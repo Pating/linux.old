@@ -164,7 +164,7 @@ static int sealevel_ioctl(struct net_device *d, struct ifreq *ifr, int cmd)
 	return sppp_do_ioctl(d, ifr,cmd);
 }
 
-static struct enet_statistics *sealevel_get_stats(struct net_device *d)
+static struct net_device_stats *sealevel_get_stats(struct net_device *d)
 {
 	struct slvl_device *slvl=d->priv;
 	if(slvl)
@@ -323,6 +323,7 @@ static struct slvl_board *slvl_init(int iobase, int irq, int txdma, int rxdma, i
 	if(z8530_init(dev)!=0)
 	{
 		printk(KERN_ERR "Z8530 series device not found.\n");
+		restore_flags(flags);
 		goto dmafail2;
 	}
 	if(dev->type==Z85C30)

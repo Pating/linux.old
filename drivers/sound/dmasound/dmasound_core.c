@@ -111,6 +111,7 @@
 #include <linux/sound.h>
 #include <linux/init.h>
 #include <linux/soundcard.h>
+#include <linux/smp_lock.h>
 
 #include <asm/uaccess.h>
 
@@ -494,7 +495,6 @@ static struct {
 
 static int mixer_open(struct inode *inode, struct file *file)
 {
-	MOD_INC_USE_COUNT;
 	dmasound.mach.open();
 	mixer.busy = 1;
 	return 0;
@@ -502,9 +502,10 @@ static int mixer_open(struct inode *inode, struct file *file)
 
 static int mixer_release(struct inode *inode, struct file *file)
 {
+	lock_kernel();
 	mixer.busy = 0;
 	dmasound.mach.release();
-	MOD_DEC_USE_COUNT;
+	unlock_kernel();
 	return 0;
 }
 static int mixer_ioctl(struct inode *inode, struct file *file, u_int cmd,
@@ -522,7 +523,8 @@ static int mixer_ioctl(struct inode *inode, struct file *file, u_int cmd,
 		    strncpy(info.name, dmasound.mach.name2, sizeof(info.name));
 		    info.name[sizeof(info.name)-1] = 0;
 		    info.modify_counter = mixer.modify_counter;
-		    copy_to_user_ret((int *)arg, &info, sizeof(info), -EFAULT);
+		    if (copy_to_user((int *)arg, &info, sizeof(info)))
+			    return -EFAULT;
 		    return 0;
 		}
 	}
@@ -533,6 +535,7 @@ static int mixer_ioctl(struct inode *inode, struct file *file, u_int cmd,
 
 static struct file_operations mixer_fops =
 {
+	owner:		THIS_MODULE,
 	llseek:		sound_lseek,
 	ioctl:		mixer_ioctl,
 	open:		mixer_open,
@@ -843,11 +846,9 @@ static int sq_open(struct inode *inode, struct file *file)
 {
 	int rc;
 
-	MOD_INC_USE_COUNT;
 	dmasound.mach.open();
 	if ((rc = write_sq_open(file)) || (rc = read_sq_open(file))) {
 		dmasound.mach.release();
-		MOD_DEC_USE_COUNT;
 		return rc;
 	}
 
@@ -908,6 +909,7 @@ static int sq_release(struct inode *inode, struct file *file)
 {
 	int rc = 0;
 
+	lock_kernel();
 	if (write_sq.busy)
 		rc = sq_fsync(file, file->f_dentry);
 	dmasound.soft = dmasound.dsp;
@@ -917,7 +919,6 @@ static int sq_release(struct inode *inode, struct file *file)
 	write_sq_release_buffers();
 	read_sq_release_buffers();
 	dmasound.mach.release();
-	MOD_DEC_USE_COUNT;
 
 	/* There is probably a DOS atack here. They change the mode flag. */
 	/* XXX add check here */
@@ -927,6 +928,7 @@ static int sq_release(struct inode *inode, struct file *file)
 	/* Wake up a process waiting for the queue being released.
 	 * Note: There may be several processes waiting for a call
 	 * to open() returning. */
+	unlock_kernel();
 
 	return rc;
 }
@@ -934,6 +936,7 @@ static int sq_release(struct inode *inode, struct file *file)
 static int sq_ioctl(struct inode *inode, struct file *file, u_int cmd,
 		    u_long arg)
 {
+	int val;
 	u_long fmt;
 	int data;
 	int size, nbufs;
@@ -1011,7 +1014,7 @@ static int sq_ioctl(struct inode *inode, struct file *file, u_int cmd,
 		} else
 			size = write_sq.bufSize;
 		sq_setup(&write_sq, write_sq.numBufs, nbufs, size);
-		return 0;
+		return IOCTL_OUT(arg,write_sq.bufSize | write_sq.numBufs << 16);
 	case SNDCTL_DSP_GETOSPACE:
 		info.fragments = write_sq.max_active - write_sq.count;
 		info.fragstotal = write_sq.max_active;
@@ -1020,6 +1023,9 @@ static int sq_ioctl(struct inode *inode, struct file *file, u_int cmd,
 		if (copy_to_user((void *)arg, &info, sizeof(info)))
 			return -EFAULT;
 		return 0;
+	case SNDCTL_DSP_GETCAPS:
+		val = 1;        /* Revision level of this ioctl() */
+		return IOCTL_OUT(arg,val);
 
 	default:
 		return mixer_ioctl(inode, file, cmd, arg);
@@ -1029,6 +1035,7 @@ static int sq_ioctl(struct inode *inode, struct file *file, u_int cmd,
 
 static struct file_operations sq_fops =
 {
+	owner:		THIS_MODULE,
 	llseek:		sound_lseek,
 	write:		sq_write,
 	ioctl:		sq_ioctl,
@@ -1088,7 +1095,6 @@ static int state_open(struct inode *inode, struct file *file)
 	if (state.busy)
 		return -EBUSY;
 
-	MOD_INC_USE_COUNT;
 	dmasound.mach.open();
 	state.ptr = 0;
 	state.busy = 1;
@@ -1145,9 +1151,10 @@ static int state_open(struct inode *inode, struct file *file)
 
 static int state_release(struct inode *inode, struct file *file)
 {
+	lock_kernel();
 	state.busy = 0;
 	dmasound.mach.release();
-	MOD_DEC_USE_COUNT;
+	unlock_kernel();
 	return 0;
 }
 
@@ -1165,8 +1172,8 @@ static ssize_t state_read(struct file *file, char *buf, size_t count,
 	return n;
 }
 
-static struct file_operations state_fops =
-{
+static struct file_operations state_fops = {
+	owner:		THIS_MODULE,
 	llseek:		sound_lseek,
 	read:		state_read,
 	open:		state_open,

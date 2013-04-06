@@ -31,6 +31,7 @@
 #include <linux/types.h>
 #include <linux/errno.h>
 #include <linux/miscdevice.h>
+#include <linux/module.h>
 #include <linux/init.h>
 #include <linux/rtc.h>
 #include <linux/proc_fs.h>
@@ -248,7 +249,7 @@ efi_rtc_ioctl(struct inode *inode, struct file *file, unsigned int cmd,
 
 			convert_from_efi_time(&eft, &wtime);
 
-			return copy_to_user((void *)&ewp->time, &wtime, sizeof(struct rtc_time));
+			return copy_to_user((void *)&ewp->time, &wtime, sizeof(struct rtc_time)) ? -EFAULT : 0;
 	}
 	return -EINVAL;
 }
@@ -281,6 +282,7 @@ efi_rtc_close(struct inode *inode, struct file *file)
  */
 
 static struct file_operations efi_rtc_fops = {
+	owner:		THIS_MODULE,
 	ioctl:		efi_rtc_ioctl,
 	open:		efi_rtc_open,
 	release:	efi_rtc_close,
@@ -393,11 +395,10 @@ efi_rtc_init(void)
 	return 0;
 }
 
-static int __exit
+static void __exit
 efi_rtc_exit(void)
 {
 	/* not yet used */
-	return 0;
 }
 
 module_init(efi_rtc_init);

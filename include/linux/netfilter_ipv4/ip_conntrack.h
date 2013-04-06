@@ -31,6 +31,7 @@ enum ip_conntrack_info
 
 #include <linux/types.h>
 #include <linux/skbuff.h>
+#include <linux/netfilter_ipv4/ip_conntrack_tcp.h>
 
 #ifdef CONFIG_NF_DEBUG
 #define IP_NF_ASSERT(x)							\
@@ -48,13 +49,20 @@ do {									\
 /* Bitset representing status of connection. */
 enum ip_conntrack_status {
 	/* It's an expected connection: bit 0 set.  This bit never changed */
-	IPS_EXPECTED = 0x01,
+	IPS_EXPECTED_BIT = 0,
+	IPS_EXPECTED = (1 << IPS_EXPECTED_BIT),
 
 	/* We've seen packets both ways: bit 1 set.  Can be set, not unset. */
-	IPS_SEEN_REPLY = 0x02,
+	IPS_SEEN_REPLY_BIT = 1,
+	IPS_SEEN_REPLY = (1 << IPS_SEEN_REPLY_BIT),
 
 	/* Packet seen leaving box: bit 2 set.  Can be set, not unset. */
-	IPS_CONFIRMED = 0x04
+	IPS_CONFIRMED_BIT = 2,
+	IPS_CONFIRMED = (1 << IPS_CONFIRMED_BIT),
+
+	/* Conntrack should never be early-expired. */
+	IPS_ASSURED_BIT = 4,
+	IPS_ASSURED = (1 << IPS_ASSURED_BIT),
 };
 
 struct ip_conntrack_expect
@@ -62,9 +70,11 @@ struct ip_conntrack_expect
 	/* Internal linked list */
 	struct list_head list;
 
-	/* We expect this tuple, but DON'T CARE ABOUT THE SOURCE
-	   per-protocol part. */
-	struct ip_conntrack_tuple tuple;
+	/* We expect this tuple, with the following mask */
+	struct ip_conntrack_tuple tuple, mask;
+
+	/* Function to call after setup and insertion */
+	int (*expectfn)(struct ip_conntrack *new);
 
 	/* The conntrack we are part of (set iff we're live) */
 	struct ip_conntrack *expectant;
@@ -91,7 +101,7 @@ struct ip_conntrack
 	struct ip_conntrack_tuple_hash tuplehash[IP_CT_DIR_MAX];
 
 	/* Have we seen traffic both ways yet? (bitset) */
-	volatile unsigned int status;
+	volatile unsigned long status;
 
 	/* Timer function; drops refcnt when it goes off. */
 	struct timer_list timeout;
@@ -113,7 +123,7 @@ struct ip_conntrack
 	/* Storage reserved for other modules: */
 
 	union {
-		int /*enum tcp_conntrack*/ tcp_state;
+		struct ip_ct_tcp tcp;
 	} proto;
 
 	union {

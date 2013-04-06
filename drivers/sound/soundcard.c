@@ -25,6 +25,7 @@
 #include <linux/config.h>
 
 #include "sound_config.h"
+#include <linux/init.h>
 #include <linux/types.h>
 #include <linux/errno.h>
 #include <linux/signal.h>
@@ -43,11 +44,6 @@
 #include <linux/delay.h>
 #include <linux/proc_fs.h>
 #include <linux/smp_lock.h>
-#include "soundmodule.h"
-
-
-struct notifier_block *sound_locker=(struct notifier_block *)0;
-static int lock_depth = 0;
 
 /*
  * This ought to be moved into include/asm/dma.h
@@ -55,8 +51,6 @@ static int lock_depth = 0;
 #ifndef valid_dma
 #define valid_dma(n) ((n) >= 0 && (n) < MAX_DMA_CHANNELS && (n) != 4)
 #endif
-
-static int      chrdev_registered = 0;
 
 /*
  * Table for permanently allocated memory (used when unloading the module)
@@ -78,7 +72,6 @@ static char     dma_alloc_map[MAX_DMA_CHANNELS] = {0};
 #define DMA_MAP_BUSY		2
 
 
-static int in_use = 0;	        /* Total # of open devices */
 unsigned long seq_time = 0;	/* Time for /dev/sequencer */
 
 /*
@@ -221,7 +214,7 @@ static int sound_open(struct inode *inode, struct file *file)
 
 	DEB(printk("sound_open(dev=%d)\n", dev));
 	if ((dev >= SND_NDEVS) || (dev < 0)) {
-		/* printk(KERN_ERR "Invalid minor device %d\n", dev);*/
+		printk(KERN_ERR "Invalid minor device %d\n", dev);
 		return -ENXIO;
 	}
 	switch (dev & 0x0f) {
@@ -234,6 +227,9 @@ static int sound_open(struct inode *inode, struct file *file)
 		}
 		if (dev && (dev >= num_mixers || mixer_devs[dev] == NULL))
 			return -ENXIO;
+
+		if (mixer_devs[dev]->owner)
+			__MOD_INC_USE_COUNT (mixer_devs[dev]->owner);
 		break;
 
 	case SND_DEV_SEQ:
@@ -258,10 +254,6 @@ static int sound_open(struct inode *inode, struct file *file)
 		printk(KERN_ERR "Invalid minor device %d\n", dev);
 		return -ENXIO;
 	}
-	in_use++;
-
-	notifier_call_chain(&sound_locker, 1, 0);
-	lock_depth++;
 
 	return 0;
 }
@@ -270,9 +262,13 @@ static int sound_release(struct inode *inode, struct file *file)
 {
 	int dev = MINOR(inode->i_rdev);
 
+	lock_kernel();
 	DEB(printk("sound_release(dev=%d)\n", dev));
 	switch (dev & 0x0f) {
 	case SND_DEV_CTL:
+		dev >>= 4;
+		if (mixer_devs[dev]->owner)
+			__MOD_DEC_USE_COUNT (mixer_devs[dev]->owner);
 		break;
 		
 	case SND_DEV_SEQ:
@@ -293,10 +289,7 @@ static int sound_release(struct inode *inode, struct file *file)
 	default:
 		printk(KERN_ERR "Sound error: Releasing unknown device 0x%02x\n", dev);
 	}
-	in_use--;
-
-	notifier_call_chain(&sound_locker, 0, 0);
-	lock_depth--;
+	unlock_kernel();
 
 	return 0;
 }
@@ -449,29 +442,35 @@ static int sound_mmap(struct file *file, struct vm_area_struct *vma)
 		printk(KERN_ERR "Sound: mmap() not supported for other than audio devices\n");
 		return -EINVAL;
 	}
+	lock_kernel();
 	if (vma->vm_flags & VM_WRITE)	/* Map write and read/write to the output buf */
 		dmap = audio_devs[dev]->dmap_out;
 	else if (vma->vm_flags & VM_READ)
 		dmap = audio_devs[dev]->dmap_in;
 	else {
 		printk(KERN_ERR "Sound: Undefined mmap() access\n");
+		unlock_kernel();
 		return -EINVAL;
 	}
 
 	if (dmap == NULL) {
 		printk(KERN_ERR "Sound: mmap() error. dmap == NULL\n");
+		unlock_kernel();
 		return -EIO;
 	}
 	if (dmap->raw_buf == NULL) {
 		printk(KERN_ERR "Sound: mmap() called when raw_buf == NULL\n");
+		unlock_kernel();
 		return -EIO;
 	}
 	if (dmap->mapping_flags) {
 		printk(KERN_ERR "Sound: mmap() called twice for the same DMA buffer\n");
+		unlock_kernel();
 		return -EIO;
 	}
 	if (vma->vm_pgoff != 0) {
 		printk(KERN_ERR "Sound: mmap() offset must be 0.\n");
+		unlock_kernel();
 		return -EINVAL;
 	}
 	size = vma->vm_end - vma->vm_start;
@@ -481,8 +480,10 @@ static int sound_mmap(struct file *file, struct vm_area_struct *vma)
 	}
 	if (remap_page_range(vma->vm_start, virt_to_phys(dmap->raw_buf),
 		vma->vm_end - vma->vm_start,
-		vma->vm_page_prot))
+		vma->vm_page_prot)) {
+		unlock_kernel();
 		return -EAGAIN;
+	}
 
 	dmap->mapping_flags |= DMA_MAP_MAPPED;
 
@@ -492,11 +493,12 @@ static int sound_mmap(struct file *file, struct vm_area_struct *vma)
 	memset(dmap->raw_buf,
 	       dmap->neutral_byte,
 	       dmap->bytes_in_use);
+	unlock_kernel();
 	return 0;
 }
 
-struct file_operations oss_sound_fops =
-{
+struct file_operations oss_sound_fops = {
+	owner:		THIS_MODULE,
 	llseek:		sound_lseek,
 	read:		sound_read,
 	write:		sound_write,
@@ -565,14 +567,14 @@ static void soundcard_register_devfs (int do_register)
 		for (j = 0; j < num || j == 0; j++) {
 			soundcard_make_name (name_buf, dev_list[i].name, j);
 			if (do_register)
-				devfs_register (NULL, name_buf, 0, DEVFS_FL_NONE,
+				devfs_register (NULL, name_buf, DEVFS_FL_NONE,
 					SOUND_MAJOR, dev_list[i].minor+ (j* 0x10),
-					S_IFCHR | dev_list[i].mode, 0, 0,
+					S_IFCHR | dev_list[i].mode,
 					&oss_sound_fops, NULL);
 			else {
 				devfs_handle_t de;
 				
-				de = devfs_find_handle (NULL, name_buf, 0, 0, 0,
+				de = devfs_find_handle (NULL, name_buf, 0, 0,
 					DEVFS_SPECIAL_CHR, 0);
 				devfs_unregister (de);
 			}
@@ -580,34 +582,6 @@ static void soundcard_register_devfs (int do_register)
 	}
 }
 
-#ifdef MODULE
-static void
-#else
-void
-#endif
-soundcard_init(void)
-{
-	/* drag in sound_syms.o */
-	{
-		extern char sound_syms_symbol;
-		sound_syms_symbol = 0;
-	}
-
-#ifndef MODULE
-	create_special_devices();
-	chrdev_registered = 1;
-#endif
-
-	soundcard_register_devfs(1); /* register after we know # of devices */
-}
-
-#ifdef MODULE
-
-static void destroy_special_devices(void)
-{
-	unregister_sound_special(1);
-	unregister_sound_special(8);
-}
 
 static int dmabuf = 0;
 static int dmabug = 0;
@@ -615,14 +589,21 @@ static int dmabug = 0;
 MODULE_PARM(dmabuf, "i");
 MODULE_PARM(dmabug, "i");
 
-int init_module(void)
+static int __init oss_init(void)
 {
 	int             err;
+	
+	/* drag in sound_syms.o */
+	{
+		extern char sound_syms_symbol;
+		sound_syms_symbol = 0;
+	}
 
 #ifdef CONFIG_PCI
 	if(dmabug)
 		isa_dma_bridge_buggy = dmabug;
 #endif
+
 	err = create_special_devices();
 	if (err) {
 		printk(KERN_ERR "sound: driver already loaded/included in kernel\n");
@@ -632,8 +613,7 @@ int init_module(void)
 	/* Protecting the innocent */
 	sound_dmap_flag = (dmabuf > 0 ? 1 : 0);
 
-	chrdev_registered = 1;
-	soundcard_init();
+	soundcard_register_devfs(1);
 
 	if (sound_nblocks >= 1024)
 		printk(KERN_ERR "Sound warning: Deallocation table was too small.\n");
@@ -641,7 +621,7 @@ int init_module(void)
 	return 0;
 }
 
-void cleanup_module(void)
+static void __exit oss_cleanup(void)
 {
 	int i;
 
@@ -649,8 +629,9 @@ void cleanup_module(void)
 		return;
 
 	soundcard_register_devfs (0);
-	if (chrdev_registered)
-		destroy_special_devices();
+	
+	unregister_sound_special(1);
+	unregister_sound_special(8);
 
 	sound_stop_timer();
 
@@ -666,7 +647,10 @@ void cleanup_module(void)
 		vfree(sound_mem_blocks[i]);
 
 }
-#endif
+
+module_init(oss_init);
+module_exit(oss_cleanup);
+
 
 int sound_alloc_dma(int chn, char *deviceID)
 {
@@ -799,28 +783,4 @@ void conf_printf2(char *name, int base, int irq, int dma, int dma2)
 	}
 	printk("\n");
 #endif
-}
-
-/*
- *	Module and lock management
- */
- 
-/*
- *	When a sound module is registered we need to bring it to the current
- *	lock level...
- */
- 
-void sound_notifier_chain_register(struct notifier_block *bl)
-{
-	int ct=0;
-	
-	notifier_chain_register(&sound_locker, bl);
-	/*
-	 *	Normalise the lock count by calling the entry directly. We
-	 *	have to call the module as it owns its own use counter
-	 */
-	while(ct<lock_depth) {
-		bl->notifier_call(bl, 1, 0);
-		ct++;
-	}
 }

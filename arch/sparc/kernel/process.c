@@ -1,4 +1,4 @@
-/*  $Id: process.c,v 1.147 2000/05/09 17:40:13 davem Exp $
+/*  $Id: process.c,v 1.154 2000/10/05 06:12:57 anton Exp $
  *  linux/arch/sparc/kernel/process.c
  *
  *  Copyright (C) 1995 David S. Miller (davem@caip.rutgers.edu)
@@ -60,7 +60,7 @@ int cpu_idle(void)
 		goto out;
 
 	/* endless idle loop with no priority at all */
-	current->priority = 0;
+	current->nice = 20;
 	current->counter = -100;
 	init_idle();
 
@@ -109,7 +109,7 @@ out:
 int cpu_idle(void)
 {
 	/* endless idle loop with no priority at all */
-	current->priority = 0;
+	current->nice = 20;
 	current->counter = -100;
 	init_idle();
 
@@ -126,9 +126,10 @@ int cpu_idle(void)
 
 extern char reboot_command [];
 
+extern int serial_console;
+
 #ifdef CONFIG_SUN_CONSOLE
 extern void (*prom_palette)(int);
-extern int serial_console;
 #endif
 
 void machine_halt(void)
@@ -169,7 +170,7 @@ void machine_restart(char * cmd)
 void machine_power_off(void)
 {
 #ifdef CONFIG_SUN_AUXIO
-	if (auxio_power_register)
+	if (auxio_power_register && !serial_console)
 		*auxio_power_register |= AUXIO_POWER_OFF;
 #endif
 	machine_halt();
@@ -233,6 +234,7 @@ void show_backtrace(void)
 void smp_show_backtrace_all_cpus(void)
 {
 	xc0((smpfunc_t) show_backtrace);
+	show_backtrace();
 }
 #endif
 
@@ -460,6 +462,7 @@ extern void ret_from_syscall(void);
 #endif
 
 int copy_thread(int nr, unsigned long clone_flags, unsigned long sp,
+		unsigned long unused,
 		struct task_struct *p, struct pt_regs *regs)
 {
 	struct pt_regs *childregs;

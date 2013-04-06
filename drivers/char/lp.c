@@ -119,6 +119,7 @@
 #include <linux/kernel.h>
 #include <linux/major.h>
 #include <linux/sched.h>
+#include <linux/smp_lock.h>
 #include <linux/devfs_fs_kernel.h>
 #include <linux/malloc.h>
 #include <linux/fcntl.h>
@@ -371,8 +372,6 @@ static int lp_open(struct inode * inode, struct file * file)
 	if (test_and_set_bit(LP_BUSY_BIT_POS, &LP_F(minor)))
 		return -EBUSY;
 
-	MOD_INC_USE_COUNT;
-
 	/* If ABORTOPEN is set and the printer is offline or out of paper,
 	   we may still want to open it to perform ioctl()s.  Therefore we
 	   have commandeered O_NONBLOCK, even though it is being used in
@@ -385,24 +384,20 @@ static int lp_open(struct inode * inode, struct file * file)
 		parport_release (lp_table[minor].dev);
 		if (status & LP_POUTPA) {
 			printk(KERN_INFO "lp%d out of paper\n", minor);
-			MOD_DEC_USE_COUNT;
 			LP_F(minor) &= ~LP_BUSY;
 			return -ENOSPC;
 		} else if (!(status & LP_PSELECD)) {
 			printk(KERN_INFO "lp%d off-line\n", minor);
-			MOD_DEC_USE_COUNT;
 			LP_F(minor) &= ~LP_BUSY;
 			return -EIO;
 		} else if (!(status & LP_PERRORP)) {
 			printk(KERN_ERR "lp%d printer error\n", minor);
-			MOD_DEC_USE_COUNT;
 			LP_F(minor) &= ~LP_BUSY;
 			return -EIO;
 		}
 	}
 	lp_table[minor].lp_buffer = (char *) kmalloc(LP_BUFFER_SIZE, GFP_KERNEL);
 	if (!lp_table[minor].lp_buffer) {
-		MOD_DEC_USE_COUNT;
 		LP_F(minor) &= ~LP_BUSY;
 		return -ENOMEM;
 	}
@@ -413,10 +408,11 @@ static int lp_release(struct inode * inode, struct file * file)
 {
 	unsigned int minor = MINOR(inode->i_rdev);
 
-	kfree_s(lp_table[minor].lp_buffer, LP_BUFFER_SIZE);
+	lock_kernel();
+	kfree(lp_table[minor].lp_buffer);
 	lp_table[minor].lp_buffer = NULL;
-	MOD_DEC_USE_COUNT;
 	LP_F(minor) &= ~LP_BUSY;
+	unlock_kernel();
 	return 0;
 }
 
@@ -526,6 +522,7 @@ static int lp_ioctl(struct inode *inode, struct file *file,
 }
 
 static struct file_operations lp_fops = {
+	owner:		THIS_MODULE,
 	write:		lp_write,
 	ioctl:		lp_ioctl,
 	open:		lp_open,
@@ -606,17 +603,10 @@ static kdev_t lp_console_device (struct console *c)
 }
 
 static struct console lpcons = {
-	"lp",
-	lp_console_write,
-	NULL,
-	lp_console_device,
-	NULL,
-	NULL,
-	NULL,
-	CON_PRINTBUFFER,
-	0,
-	0,
-	NULL
+	name:		"lp",
+	write:		lp_console_write,
+	device:		lp_console_device,
+	flags:		CON_PRINTBUFFER,
 };
 
 #endif /* console on line printer */
@@ -681,9 +671,9 @@ static int lp_register(int nr, struct parport *port)
 		lp_reset(nr);
 
 	sprintf (name, "%d", nr);
-	devfs_register (devfs_handle, name, 0,
+	devfs_register (devfs_handle, name,
 			DEVFS_FL_DEFAULT, LP_MAJOR, nr,
-			S_IFCHR | S_IRUGO | S_IWUGO, 0, 0,
+			S_IFCHR | S_IRUGO | S_IWUGO,
 			&lp_fops, NULL);
 
 	printk(KERN_INFO "lp%d: using %s (%s).\n", nr, port->name, 
@@ -715,11 +705,12 @@ static void lp_attach (struct parport *port)
 		if (parport_nr[0] == LP_PARPORT_AUTO &&
 		    port->probe_info[0].class != PARPORT_CLASS_PRINTER)
 			return;
-
+		if (lp_count == LP_NO) {
+			printk("lp: ignoring parallel port (max. %d)\n",LP_NO);
+			return;
+		}
 		if (!lp_register(lp_count, port))
-			if (++lp_count == LP_NO)
-				break;
-
+			lp_count++;
 		break;
 
 	default:
@@ -777,7 +768,7 @@ int __init lp_init (void)
 		return -EIO;
 	}
 
-	devfs_handle = devfs_mk_dir (NULL, "printers", 0, NULL);
+	devfs_handle = devfs_mk_dir (NULL, "printers", NULL);
 
 	if (parport_register_driver (&lp_driver)) {
 		printk ("lp: unable to register with parport\n");

@@ -1,5 +1,5 @@
 /*
- *  linux/drivers/ide/ide-probe.c	Version 1.05	July 3, 1999
+ *  linux/drivers/ide/ide-probe.c	Version 1.06	June 9, 2000
  *
  *  Copyright (C) 1994-1998  Linus Torvalds & authors (see below)
  */
@@ -7,6 +7,7 @@
 /*
  *  Mostly written by Mark Lord <mlord@pobox.com>
  *                and Gadi Oxman <gadio@netvision.net.il>
+ *                and Andre Hedrick <andre@linux-ide.org>
  *
  *  See linux/MAINTAINERS for address of current maintainer.
  *
@@ -23,6 +24,7 @@
  *			added ide6/7/8/9
  *			allowed for secondary flash card to be detectable
  *			 with new flag : drive->ata_flash : 1;
+ * Version 1.06		stream line request queue and prep for cascade project.
  */
 
 #undef REALLY_SLOW_IO		/* most systems can safely undef this */
@@ -41,6 +43,7 @@
 #include <linux/malloc.h>
 #include <linux/delay.h>
 #include <linux/ide.h>
+#include <linux/spinlock.h>
 
 #include <asm/byteorder.h>
 #include <asm/irq.h>
@@ -167,6 +170,7 @@ static inline void do_identify (ide_drive_t *drive, byte cmd)
 	}
 	drive->media = ide_disk;
 	printk("ATA DISK drive\n");
+	QUIRK_LIST(HWIF(drive),drive);
 	return;
 }
 
@@ -180,22 +184,16 @@ static inline void do_identify (ide_drive_t *drive, byte cmd)
  *		1  device timed-out (no response to identify request)
  *		2  device aborted the command (refused to identify itself)
  */
-static int try_to_identify (ide_drive_t *drive, byte cmd)
+static int actual_try_to_identify (ide_drive_t *drive, byte cmd)
 {
 	int rc;
 	ide_ioreg_t hd_status;
 	unsigned long timeout;
-	unsigned long irqs = 0;
 	byte s, a;
 
 	if (IDE_CONTROL_REG) {
-		if (!HWIF(drive)->irq) {		/* already got an IRQ? */
-			probe_irq_off(probe_irq_on());	/* clear dangling irqs */
-			irqs = probe_irq_on();		/* start monitoring irqs */
-			OUT_BYTE(drive->ctl,IDE_CONTROL_REG);	/* enable device irq */
-		}
-
-		ide_delay_50ms();				/* take a deep breath */
+		/* take a deep breath */
+		ide_delay_50ms();
 		a = IN_BYTE(IDE_ALTSTATUS_REG);
 		s = IN_BYTE(IDE_STATUS_REG);
 		if ((a ^ s) & ~INDEX_STAT) {
@@ -218,8 +216,6 @@ static int try_to_identify (ide_drive_t *drive, byte cmd)
 		/* DC4030 hosted drives need their own identify... */
 		extern int pdc4030_identify(ide_drive_t *);
 		if (pdc4030_identify(drive)) {
-			if (irqs)
-				(void) probe_irq_off(irqs);
 			return 1;
 		}
 	} else
@@ -229,8 +225,6 @@ static int try_to_identify (ide_drive_t *drive, byte cmd)
 	timeout += jiffies;
 	do {
 		if (0 < (signed long)(jiffies - timeout)) {
-			if (irqs)
-				(void) probe_irq_off(irqs);
 			return 1;	/* drive timed-out */
 		}
 		ide_delay_50ms();		/* give drive a breather */
@@ -247,31 +241,48 @@ static int try_to_identify (ide_drive_t *drive, byte cmd)
 		__restore_flags(flags);	/* local CPU only */
 	} else
 		rc = 2;			/* drive refused ID */
-	if (IDE_CONTROL_REG && !HWIF(drive)->irq) {
-		irqs = probe_irq_off(irqs);	/* get our irq number */
-		if (irqs > 0) {
-			HWIF(drive)->irq = irqs; /* save it for later */
-			irqs = probe_irq_on();
-			OUT_BYTE(drive->ctl|2,IDE_CONTROL_REG); /* mask device irq */
-			udelay(5);
-			(void) probe_irq_off(irqs);
-			(void) probe_irq_off(probe_irq_on()); /* clear self-inflicted irq */
-			(void) GET_STAT();	/* clear drive IRQ */
-
-		} else {	/* Mmmm.. multiple IRQs.. don't know which was ours */
-			printk("%s: IRQ probe failed (%ld)\n", drive->name, irqs);
-#ifdef CONFIG_BLK_DEV_CMD640
-#ifdef CMD640_DUMP_REGS
-			if (HWIF(drive)->chipset == ide_cmd640) {
-				printk("%s: Hmmm.. probably a driver problem.\n", drive->name);
-				CMD640_DUMP_REGS;
-			}
-#endif /* CMD640_DUMP_REGS */
-#endif /* CONFIG_BLK_DEV_CMD640 */
-		}
-	}
 	return rc;
 }
+
+static int try_to_identify (ide_drive_t *drive, byte cmd)
+{
+	int retval;
+	int autoprobe = 0;
+	unsigned long cookie = 0;
+
+	if (IDE_CONTROL_REG && !HWIF(drive)->irq) {
+		autoprobe = 1;
+		cookie = probe_irq_on();
+		OUT_BYTE(drive->ctl,IDE_CONTROL_REG);	/* enable device irq */
+	}
+
+	retval = actual_try_to_identify(drive, cmd);
+
+	if (autoprobe) {
+		int irq;
+		OUT_BYTE(drive->ctl|2,IDE_CONTROL_REG);	/* mask device irq */
+		(void) GET_STAT();			/* clear drive IRQ */
+		udelay(5);
+		irq = probe_irq_off(cookie);
+		if (!HWIF(drive)->irq) {
+			if (irq > 0) {
+				HWIF(drive)->irq = irq;
+			} else {	/* Mmmm.. multiple IRQs.. don't know which was ours */
+				printk("%s: IRQ probe failed (0x%lx)\n", drive->name, cookie);
+#ifdef CONFIG_BLK_DEV_CMD640
+#ifdef CMD640_DUMP_REGS
+				if (HWIF(drive)->chipset == ide_cmd640) {
+					printk("%s: Hmmm.. probably a driver problem.\n", drive->name);
+					CMD640_DUMP_REGS;
+				}
+#endif /* CMD640_DUMP_REGS */
+#endif /* CONFIG_BLK_DEV_CMD640 */
+			}
+		}
+	}
+	return retval;
+}
+
 
 /*
  * do_probe() has the difficult job of finding a drive if it exists,
@@ -425,10 +436,10 @@ static int hwif_check_regions (ide_hwif_t *hwif)
 
 	if (hwif->io_ports[IDE_CONTROL_OFFSET])
 		region_errors += ide_check_region(hwif->io_ports[IDE_CONTROL_OFFSET], 1);
-
+#if defined(CONFIG_AMIGA) || defined(CONFIG_MAC)
 	if (hwif->io_ports[IDE_IRQ_OFFSET])
 		region_errors += ide_check_region(hwif->io_ports[IDE_IRQ_OFFSET], 1);
-
+#endif /* (CONFIG_AMIGA) || (CONFIG_MAC) */
 	/*
 	 * If any errors are return, we drop the hwif interface.
 	 */
@@ -437,8 +448,8 @@ static int hwif_check_regions (ide_hwif_t *hwif)
 
 static void hwif_register (ide_hwif_t *hwif)
 {
-	if ((hwif->io_ports[IDE_DATA_OFFSET] | 7) ==
-	    (hwif->io_ports[IDE_STATUS_OFFSET])) {
+	if (((unsigned long)hwif->io_ports[IDE_DATA_OFFSET] | 7) ==
+	    ((unsigned long)hwif->io_ports[IDE_STATUS_OFFSET])) {
 		ide_request_region(hwif->io_ports[IDE_DATA_OFFSET], 8, hwif->name);
 		hwif->straight8 = 1;
 		goto jump_straight8;
@@ -464,8 +475,10 @@ static void hwif_register (ide_hwif_t *hwif)
 jump_straight8:
 	if (hwif->io_ports[IDE_CONTROL_OFFSET])
 		ide_request_region(hwif->io_ports[IDE_CONTROL_OFFSET], 1, hwif->name);
+#if defined(CONFIG_AMIGA) || defined(CONFIG_MAC)
 	if (hwif->io_ports[IDE_IRQ_OFFSET])
 		ide_request_region(hwif->io_ports[IDE_IRQ_OFFSET], 1, hwif->name);
+#endif /* (CONFIG_AMIGA) || (CONFIG_MAC) */
 }
 
 /*
@@ -574,6 +587,17 @@ static void save_match (ide_hwif_t *hwif, ide_hwif_t *new, ide_hwif_t **match)
 #endif /* MAX_HWIFS > 1 */
 
 /*
+ * init request queue
+ */
+static void ide_init_queue(ide_drive_t *drive)
+{
+	request_queue_t *q = &drive->queue;
+
+	q->queuedata = HWGROUP(drive);
+	blk_init_queue(q, do_ide_request);
+}
+
+/*
  * This routine sets up the irq for an ide interface, and creates a new
  * hwgroup for the irq/hwif if none was previously assigned.
  *
@@ -671,6 +695,7 @@ static int init_irq (ide_hwif_t *hwif)
 			hwgroup->drive = drive;
 		drive->next = hwgroup->drive->next;
 		hwgroup->drive->next = drive;
+		ide_init_queue(drive);
 	}
 	if (!hwgroup->hwif) {
 		hwgroup->hwif = HWIF(hwgroup->drive);
@@ -774,16 +799,13 @@ static void init_gendisk (ide_hwif_t *hwif)
 				 (hwif->channel && hwif->mate) ? hwif->mate->index : hwif->index,
 				 hwif->channel, unit, hwif->drives[unit].lun);
 			hwif->drives[unit].de =
-				devfs_mk_dir (ide_devfs_handle, name, 0, NULL);
+				devfs_mk_dir (ide_devfs_handle, name, NULL);
 		}
 	}
 }
 
 static int hwif_init (ide_hwif_t *hwif)
 {
-	request_queue_t *q;
-	unsigned int unit;
-
 	if (!hwif->present)
 		return 0;
 	if (!hwif->irq) {
@@ -833,12 +855,6 @@ static int hwif_init (ide_hwif_t *hwif)
 	blk_dev[hwif->major].queue = ide_get_queue;
 	read_ahead[hwif->major] = 8;	/* (4kB) */
 	hwif->present = 1;	/* success */
-
-	for (unit = 0; unit < MAX_DRIVES; ++unit) {
-		q = &hwif->drives[unit].queue;
-		q->queuedata = hwif->hwgroup;
-		blk_init_queue(q, do_ide_request);
-	}
 
 #if (DEBUG_SPINLOCK > 0)
 {

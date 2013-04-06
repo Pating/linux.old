@@ -54,7 +54,7 @@ static void sendintr(int destid, unsigned char status)
 
 /* The 'big kernel lock' */
 spinlock_t kernel_flag = SPIN_LOCK_UNLOCKED;
-int smp_threads_ready = 0;	/* Not used */
+int smp_threads_ready;	/* Not used */
 atomic_t smp_commenced = ATOMIC_INIT(0);
 struct cpuinfo_mips cpu_data[NR_CPUS];
 int smp_num_cpus;		/* Number that came online.  */
@@ -69,14 +69,11 @@ static void smp_tune_scheduling (void)
 void __init smp_boot_cpus(void)
 {
 	extern void allowboot(void);
-	extern int maxcpus;
 
 	init_new_context(current, &init_mm);
-	global_irq_holder = 0;
 	current->processor = 0;
 	init_idle();
 	smp_tune_scheduling();
-	smp_num_cpus = maxcpus;
 	allowboot();
 }
 
@@ -133,7 +130,7 @@ static volatile struct call_data_struct {
 	atomic_t started;
 	atomic_t finished;
 	int wait;
-} *call_data = NULL;
+} *call_data;
 
 int smp_call_function (void (*func) (void *info), void *info, int retry, 
 								int wait)
@@ -171,7 +168,7 @@ int smp_call_function (void (*func) (void *info), void *info, int retry,
 	return 0;
 }
 
-void smp_call_function_interrupt(void)
+extern void smp_call_function_interrupt(int irq, void *d, struct pt_regs *r)
 {
 	void (*func) (void *info) = call_data->func;
 	void *info = call_data->info;
@@ -208,9 +205,29 @@ static void flush_tlb_mm_ipi(void *mm)
 	_flush_tlb_mm((struct mm_struct *)mm);
 }
 
+/*
+ * The following tlb flush calls are invoked when old translations are 
+ * being torn down, or pte attributes are changing. For single threaded
+ * address spaces, a new context is obtained on the current cpu, and tlb
+ * context on other cpus are invalidated to force a new context allocation
+ * at switch_mm time, should the mm ever be used on other cpus. For 
+ * multithreaded address spaces, intercpu interrupts have to be sent.
+ * Another case where intercpu interrupts are required is when the target
+ * mm might be active on another cpu (eg debuggers doing the flushes on
+ * behalf of debugees, kswapd stealing pages from another process etc).
+ * Kanoj 07/00.
+ */
+
 void flush_tlb_mm(struct mm_struct *mm)
 {
-	smp_call_function(flush_tlb_mm_ipi, (void *)mm, 1, 1);
+	if ((atomic_read(&mm->mm_users) != 1) || (current->mm != mm)) {
+		smp_call_function(flush_tlb_mm_ipi, (void *)mm, 1, 1);
+	} else {
+		int i;
+		for (i = 0; i < smp_num_cpus; i++)
+			if (smp_processor_id() != i)
+				CPU_CONTEXT(i, mm) = 0;
+	}
 	_flush_tlb_mm(mm);
 }
 
@@ -230,12 +247,19 @@ static void flush_tlb_range_ipi(void *info)
 
 void flush_tlb_range(struct mm_struct *mm, unsigned long start, unsigned long end)
 {
-	struct flush_tlb_data fd;
+	if ((atomic_read(&mm->mm_users) != 1) || (current->mm != mm)) {
+		struct flush_tlb_data fd;
 
-	fd.mm = mm;
-	fd.addr1 = start;
-	fd.addr2 = end;
-	smp_call_function(flush_tlb_range_ipi, (void *)&fd, 1, 1);
+		fd.mm = mm;
+		fd.addr1 = start;
+		fd.addr2 = end;
+		smp_call_function(flush_tlb_range_ipi, (void *)&fd, 1, 1);
+	} else {
+		int i;
+		for (i = 0; i < smp_num_cpus; i++)
+			if (smp_processor_id() != i)
+				CPU_CONTEXT(i, mm) = 0;
+	}
 	_flush_tlb_range(mm, start, end);
 }
 
@@ -248,11 +272,18 @@ static void flush_tlb_page_ipi(void *info)
 
 void flush_tlb_page(struct vm_area_struct *vma, unsigned long page)
 {
-	struct flush_tlb_data fd;
+	if ((atomic_read(&vma->vm_mm->mm_users) != 1) || (current->mm != vma->vm_mm)) {
+		struct flush_tlb_data fd;
 
-	fd.vma = vma;
-	fd.addr1 = page;
-	smp_call_function(flush_tlb_page_ipi, (void *)&fd, 1, 1);
+		fd.vma = vma;
+		fd.addr1 = page;
+		smp_call_function(flush_tlb_page_ipi, (void *)&fd, 1, 1);
+	} else {
+		int i;
+		for (i = 0; i < smp_num_cpus; i++)
+			if (smp_processor_id() != i)
+				CPU_CONTEXT(i, vma->vm_mm) = 0;
+	}
 	_flush_tlb_page(vma, page);
 }
 

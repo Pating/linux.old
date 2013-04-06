@@ -1,5 +1,4 @@
-/* $Id: setup.c,v 1.9 2000/03/14 01:39:27 ralf Exp $
- *
+/*
  * This file is subject to the terms and conditions of the GNU General Public
  * License.  See the file "COPYING" in the main directory of this archive
  * for more details.
@@ -35,11 +34,7 @@
 #include <asm/io.h>
 #include <asm/stackframe.h>
 #include <asm/system.h>
-
-#ifdef CONFIG_SGI_IP27
-/* XXX Origin garbage has no business in this file  */
-#include <asm/sn/sn0/addrs.h>
-#endif
+#include <asm/pgalloc.h>
 
 #ifndef CONFIG_SMP
 struct cpuinfo_mips cpu_data[1];
@@ -153,6 +148,9 @@ void __init setup_arch(char **cmdline_p)
 	unsigned long tmp;
 	unsigned long *initrd_header;
 #endif
+	int i;
+	pmd_t *pmd = kpmdtbl;
+	pte_t *pte = kptbl;
 
 	cpu_probe();
 	load_mmu();
@@ -191,4 +189,10 @@ void __init setup_arch(char **cmdline_p)
 #endif
 
 	paging_init();
+
+	memset((void *)kptbl, 0, PAGE_SIZE << KPTBL_PAGE_ORDER);
+	memset((void *)kpmdtbl, 0, PAGE_SIZE);
+	pgd_set(swapper_pg_dir, kpmdtbl);
+	for (i = 0; i < (1 << KPTBL_PAGE_ORDER); pmd++,i++,pte+=PTRS_PER_PTE)
+		pmd_val(*pmd) = (unsigned long)pte;
 }

@@ -163,7 +163,7 @@ static const expansioncard_ops_t icside_ops_arcin_v6 = {
  * Purpose  : identify IDE interface type
  * Notes    : checks the description string
  */
-static iftype_t icside_identifyif (struct expansion_card *ec)
+static iftype_t __init icside_identifyif (struct expansion_card *ec)
 {
 	unsigned int addr;
 	iftype_t iftype;
@@ -255,43 +255,7 @@ static int ide_build_sglist(ide_hwif_t *hwif, struct request *rq)
 static int
 icside_build_dmatable(ide_drive_t *drive, int reading)
 {
-	dmasg_t *ide_sg = (dmasg_t *)HWIF(drive)->dmatable_cpu;
-	unsigned int count = 0;
-	int i;
-	struct scatterlist *sg;
-
-	HWIF(drive)->sg_nents = i = ide_build_sglist(HWIF(drive), HWGROUP(drive)->rq);
-
-	sg = HWIF(drive)->sg_table;
-	while (i && sg_dma_len(sg)) {
-		u32 cur_addr;
-		u32 cur_len;
-
-		cur_addr = sg_dma_address(sg);
-		cur_len  = sg_dma_len(sg);
-
-		if (count >= (TABLE_SIZE / sizeof(dmasg_t))) {
-			printk("%s: DMA table too small\n",
-				drive->name);
-			pci_unmap_sg(NULL,
-				     HWIF(drive)->sg_table,
-				     HWIF(drive)->sg_nents,
-				     HWIF(drive)->sg_dma_direction);
-			return 0;
-		} else {
-			ide_sg[count].address = cur_addr;
-			ide_sg[count].length  = cur_len;
-		}
-
-		count++;
-		sg++;
-		i--;
-	}
-
-	if (!count)
-		printk("%s: empty DMA table?\n", drive->name);
-
-	return count;
+	return HWIF(drive)->sg_nents = ide_build_sglist(HWIF(drive), HWGROUP(drive)->rq);
 }
 
 /* Teardown mappings after DMA has completed.  */
@@ -351,7 +315,7 @@ icside_config_if(ide_drive_t *drive, int xfer_mode)
 static int
 icside_set_speed(ide_drive_t *drive, byte speed)
 {
-	return ((int) icside_config_if(drive, (int) speed));
+	return icside_config_if(drive, speed);
 }
 
 static int
@@ -435,7 +399,7 @@ icside_dmaproc(ide_dma_action_t func, ide_drive_t *drive)
 		 */
 		set_dma_speed(hwif->hw.dma, drive->drive_data);
 
-		set_dma_sg(hwif->hw.dma, (dmasg_t *)hwif->dmatable_cpu, count);
+		set_dma_sg(hwif->hw.dma, HWIF(drive)->sg_table, count);
 		set_dma_mode(hwif->hw.dma, reading ? DMA_MODE_READ
 			     : DMA_MODE_WRITE);
 
@@ -465,31 +429,6 @@ icside_dmaproc(ide_dma_action_t func, ide_drive_t *drive)
 	}
 }
 
-static void *icside_alloc_dmatable(void)
-{
-	static unsigned long dmatable;
-	static unsigned int leftover;
-	unsigned long table;
-
-	if (leftover < TABLE_SIZE) {
-#if PAGE_SIZE == TABLE_SIZE * 2
-		dmatable = __get_free_pages(GFP_KERNEL, 1);
-		leftover = PAGE_SIZE;
-#else
-		dmatable = kmalloc(TABLE_SIZE, GFP_KERNEL);
-		leftover = TABLE_SIZE;
-#endif
-	}
-
-	table = dmatable;
-	if (table) {
-		dmatable += TABLE_SIZE;
-		leftover -= TABLE_SIZE;
-	}
-
-	return (void *)table;
-}
-
 static int
 icside_setup_dma(ide_hwif_t *hwif, int autodma)
 {
@@ -500,17 +439,11 @@ icside_setup_dma(ide_hwif_t *hwif, int autodma)
 	if (!hwif->sg_table)
 		goto failed;
 
-	hwif->dmatable_cpu = icside_alloc_dmatable();
-
-	if (!hwif->dmatable_cpu) {
-		kfree(hwif->sg_table);
-		hwif->sg_table = NULL;
-		goto failed;
-	}
-
-	hwif->dmaproc = &icside_dmaproc;
+	hwif->dmatable_cpu = NULL;
+	hwif->dmatable_dma = 0;
+	hwif->speedproc = icside_set_speed;
+	hwif->dmaproc = icside_dmaproc;
 	hwif->autodma = autodma;
-	hwif->speedproc = &icside_set_speed;
 
 	printk(" capable%s\n", autodma ?
 		", auto-enable" : "");
@@ -572,7 +505,7 @@ icside_setup(unsigned long base, struct cardinfo *info, int irq)
 	return hwif;
 }
 
-static int icside_register_v5(struct expansion_card *ec, int autodma)
+static int __init icside_register_v5(struct expansion_card *ec, int autodma)
 {
 	unsigned long slot_port;
 	ide_hwif_t *hwif;
@@ -594,7 +527,7 @@ static int icside_register_v5(struct expansion_card *ec, int autodma)
 	return hwif ? 0 : -1;
 }
 
-static int icside_register_v6(struct expansion_card *ec, int autodma)
+static int __init icside_register_v6(struct expansion_card *ec, int autodma)
 {
 	unsigned long slot_port, port;
 	ide_hwif_t *hwif, *mate;
@@ -652,7 +585,7 @@ no_dma:
 	return hwif || mate ? 0 : -1;
 }
 
-int icside_init(void)
+int __init icside_init(void)
 {
 	int autodma = 0;
 

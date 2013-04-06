@@ -218,10 +218,6 @@ struct net_local
  *	The boilerplate probe code.
  */
 
-#ifdef HAVE_DEVLIST
-struct netdev_entry el1_drv = {"3c501", el1_probe1, EL1_IO_EXTENT, netcard_portlist};
-#else
-
 /**
  * el1_probe:
  * @dev: The device structure passed in to probe. 
@@ -238,7 +234,9 @@ struct netdev_entry el1_drv = {"3c501", el1_probe1, EL1_IO_EXTENT, netcard_portl
 int __init el1_probe(struct net_device *dev)
 {
 	int i;
-	int base_addr = dev ? dev->base_addr : 0;
+	int base_addr = dev->base_addr;
+
+	SET_MODULE_OWNER(dev);
 
 	if (base_addr > 0x1ff)	/* Check a single specified location. */
 		return el1_probe1(dev, base_addr);
@@ -246,17 +244,11 @@ int __init el1_probe(struct net_device *dev)
 		return -ENXIO;
 
 	for (i = 0; netcard_portlist[i]; i++)
-	{
-		int ioaddr = netcard_portlist[i];
-		if (check_region(ioaddr, EL1_IO_EXTENT))
-			continue;
-		if (el1_probe1(dev, ioaddr) == 0)
+		if (el1_probe1(dev, netcard_portlist[i]) == 0)
 			return 0;
-	}
 
 	return -ENODEV;
 }
-#endif
 
 /**
  *	el1_probe: 
@@ -278,6 +270,13 @@ static int __init el1_probe1(struct net_device *dev, int ioaddr)
 	unsigned char station_addr[6];
 	int autoirq = 0;
 	int i;
+
+	/*
+	 *	Reserve I/O resource for exclusive use by this driver
+	 */
+
+	if (!request_region(ioaddr, EL1_IO_EXTENT, dev->name))
+		return -ENODEV;
 
 	/*
 	 *	Read the station address PROM data from the special port.
@@ -302,15 +301,10 @@ static int __init el1_probe1(struct net_device *dev, int ioaddr)
 	{
 		mname = "NP943";
     	}
-    	else
+    	else {
+		release_region(ioaddr, EL1_IO_EXTENT);
 		return -ENODEV;
-
-	/*
-	 *	Grab the region so we can find the another board if autoIRQ fails.
-	 */
-
-	if (!request_region(ioaddr, EL1_IO_EXTENT,"3c501"))
-		return -ENODEV;
+	}
 
 	/*
 	 *	We auto-IRQ by shutting off the interrupt line and letting it float
@@ -332,6 +326,7 @@ static int __init el1_probe1(struct net_device *dev, int ioaddr)
 		{
 			printk("%s probe at %#x failed to detect IRQ line.\n",
 				mname, ioaddr);
+			release_region(ioaddr, EL1_IO_EXTENT);
 			return -EAGAIN;
 		}
 	}
@@ -360,8 +355,10 @@ static int __init el1_probe1(struct net_device *dev, int ioaddr)
 	 */
 
 	dev->priv = kmalloc(sizeof(struct net_local), GFP_KERNEL);
-	if (dev->priv == NULL)
+	if (dev->priv == NULL) {
+		release_region(ioaddr, EL1_IO_EXTENT);
 		return -ENOMEM;
+	}
 	memset(dev->priv, 0, sizeof(struct net_local));
 
 	lp=dev->priv;
@@ -403,19 +400,16 @@ static int __init el1_probe1(struct net_device *dev, int ioaddr)
 
 static int el_open(struct net_device *dev)
 {
+	int retval;
 	int ioaddr = dev->base_addr;
 	struct net_local *lp = (struct net_local *)dev->priv;
 	unsigned long flags;
 
-	MOD_INC_USE_COUNT;
-
 	if (el_debug > 2)
 		printk("%s: Doing el_open()...", dev->name);
 
-	if (request_irq(dev->irq, &el_interrupt, 0, "3c501", dev)) {
-		MOD_DEC_USE_COUNT;
-		return -EAGAIN;
-	}
+	if ((retval = request_irq(dev->irq, &el_interrupt, 0, dev->name, dev)))
+		return retval;
 
 	spin_lock_irqsave(&lp->lock, flags);
 	el_reset(dev);
@@ -867,7 +861,6 @@ static int el1_close(struct net_device *dev)
 	free_irq(dev->irq, dev);
 	outb(AX_RESET, AX_CMD);		/* Reset the chip */
 
-	MOD_DEC_USE_COUNT;
 	return 0;
 }
 
@@ -921,12 +914,10 @@ static void set_multicast_list(struct net_device *dev)
 
 #ifdef MODULE
 
-static struct net_device dev_3c501 =
-{
-	"", /* device name is inserted by linux/drivers/net/net_init.c */
-	0, 0, 0, 0,
-	0x280, 5,
-	0, 0, 0, NULL, el1_probe
+static struct net_device dev_3c501 = {
+	init:		el1_probe,
+	base_addr:	0x280,
+	irq:		5,
 };
 
 static int io=0x280;

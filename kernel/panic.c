@@ -19,11 +19,10 @@
 
 asmlinkage void sys_sync(void);	/* it's really int */
 extern void unblank_console(void);
-extern int C_A_D;
 
 int panic_timeout;
 
-struct notifier_block *panic_notifier_list = NULL;
+struct notifier_block *panic_notifier_list;
 
 static int __init panic_setup(char *str)
 {

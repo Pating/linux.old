@@ -97,8 +97,8 @@ iommu_arena_alloc(struct pci_iommu_arena *arena, long n)
 	}
 
 	if (i < n) {
-		/* Reached the end.  Flush the TLB and restart the
-		   search from the beginning.  */
+                /* Reached the end.  Flush the TLB and restart the
+                   search from the beginning.  */
 		alpha_mv.mv_pci_tbi(arena->hose, 0, -1);
 
 		p = 0, i = 0;
@@ -139,7 +139,7 @@ iommu_arena_free(struct pci_iommu_arena *arena, long ofs, long n)
 		p[i] = 0;
 }
 
-/* Map a single buffer of the indicate size for PCI DMA in streaming
+/* Map a single buffer of the indicated size for PCI DMA in streaming
    mode.  The 32-bit PCI bus mastering address to use is returned.
    Once the device is given the dma address, the device owns this memory
    until either pci_unmap_single or pci_dma_sync_single is performed.  */
@@ -250,9 +250,12 @@ pci_unmap_single(struct pci_dev *pdev, dma_addr_t dma_addr, long size,
 	npages = calc_npages((dma_addr & ~PAGE_MASK) + size);
 	iommu_arena_free(arena, dma_ofs, npages);
 
-	/* If we're freeing ptes above the `next_entry' pointer, they
-	   may have snuck back into the TLB since the last wrap flush.
-	   We need to flush the TLB before reallocating these.  */
+
+        /*
+	   If we're freeing ptes above the `next_entry' pointer (they
+           may have snuck back into the TLB since the last wrap flush),
+           we need to flush the TLB before reallocating the latter.
+	*/
 	if (dma_ofs >= arena->next_entry)
 		alpha_mv.mv_pci_tbi(hose, dma_addr, dma_addr + size - 1);
 
@@ -413,7 +416,9 @@ sg_fill(struct scatterlist *leader, struct scatterlist *end,
 	ptes = &arena->ptes[dma_ofs];
 	sg = leader;
 	do {
+#if DEBUG_ALLOC > 0
 		struct scatterlist *last_sg = sg;
+#endif
 
 		size = sg->length;
 		paddr = virt_to_phys(sg->address);
@@ -574,9 +579,11 @@ pci_unmap_sg(struct pci_dev *pdev, struct scatterlist *sg, int nents,
 		if (fend < tend) fend = tend;
 	}
 
-	/* If we're freeing ptes above the `next_entry' pointer, they
-	   may have snuck back into the TLB since the last wrap flush.
-	   We need to flush the TLB before reallocating these.  */
+        /*
+	   If we're freeing ptes above the `next_entry' pointer (they
+           may have snuck back into the TLB since the last wrap flush),
+           we need to flush the TLB before reallocating the latter.
+	*/
 	if ((fend - arena->dma_base) >> PAGE_SHIFT >= arena->next_entry)
 		alpha_mv.mv_pci_tbi(hose, fbeg, fend);
 
@@ -606,10 +613,10 @@ pci_dma_supported(struct pci_dev *pdev, dma_addr_t mask)
 	/* Check that we have a scatter-gather arena that fits.  */
 	hose = pdev ? pdev->sysdata : pci_isa_hose;
 	arena = hose->sg_isa;
-	if (arena && arena->dma_base + arena->size <= mask)
+	if (arena && arena->dma_base + arena->size - 1 <= mask)
 		return 1;
 	arena = hose->sg_pci;
-	if (arena && arena->dma_base + arena->size <= mask)
+	if (arena && arena->dma_base + arena->size - 1 <= mask)
 		return 1;
 
 	return 0;

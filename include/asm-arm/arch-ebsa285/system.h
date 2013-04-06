@@ -1,14 +1,19 @@
 /*
- * linux/include/asm-arm/arch-ebsa285/system.h
+ *  linux/include/asm-arm/arch-ebsa285/system.h
  *
- * Copyright (c) 1996-1999 Russell King.
+ *  Copyright (C) 1996-1999 Russell King.
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
  */
-#include <asm/dec21285.h>
+#include <asm/hardware/dec21285.h>
 #include <asm/io.h>
 #include <asm/hardware.h>
 #include <asm/leds.h>
+#include <asm/mach-types.h>
 
-extern __inline__ void arch_idle(void)
+static void arch_idle(void)
 {
 	unsigned long start_idle;
 
@@ -18,7 +23,7 @@ extern __inline__ void arch_idle(void)
 		if (current->need_resched || hlt_counter)
 			goto slow_out;
 		cpu_do_idle(IDLE_WAIT_FAST);
-	} while (time_before(start_idle, jiffies + HZ/3));
+	} while (time_before(jiffies, start_idle + HZ/50));
 
 	cpu_do_idle(IDLE_CLOCK_SLOW);
 
@@ -29,8 +34,6 @@ extern __inline__ void arch_idle(void)
 	cpu_do_idle(IDLE_CLOCK_FAST);
 slow_out:
 }
-
-#define arch_power_off()	do { } while (0)
 
 extern __inline__ void arch_reset(char mode)
 {

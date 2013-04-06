@@ -8,6 +8,10 @@
  *
  * This file is responsible for IEEE 1284 negotiation, and for handing
  * read/write requests to low-level drivers.
+ *
+ * Any part of this program may be used in documents licensed under
+ * the GNU Free Documentation License, Version 1.1 or any later version
+ * published by the Free Software Foundation.
  */
 
 #include <linux/config.h>
@@ -520,7 +524,8 @@ int parport_negotiate (struct parport *port, int mode)
 					     PARPORT_STATUS_PAPEROUT,
 					     PARPORT_STATUS_PAPEROUT);
 		if (r)
-			DPRINTK (KERN_INFO "%s: Timeout at event 31\n");
+			DPRINTK (KERN_INFO "%s: Timeout at event 31\n",
+				 port->name);
 
 		port->ieee1284.phase = IEEE1284_PH_FWD_IDLE;
 		DPRINTK (KERN_DEBUG "%s: ECP direction: forward\n",

@@ -23,6 +23,7 @@
 #include <linux/tty.h>
 
 #include <asm/addrspace.h>
+#include <asm/mmu_context.h>
 #include <asm/bcache.h>
 #include <asm/keyboard.h>
 #include <asm/irq.h>
@@ -113,9 +114,9 @@ struct kbd_ops sgi_kbd_ops = {
 
 int __init page_is_ram(unsigned long pagenr)
 {
-	if (pagenr < MAP_NR(PAGE_OFFSET + 0x2000UL))
+	if ((pagenr<<PAGE_SHIFT) < 0x2000UL)
 		return 1;
-	if (pagenr > MAP_NR(PAGE_OFFSET + 0x08002000))
+	if ((pagenr<<PAGE_SHIFT) > 0x08002000)
 		return 1;
 	return 0;
 }
@@ -125,6 +126,7 @@ void __init ip22_setup(void)
 #ifdef CONFIG_SERIAL_CONSOLE
 	char *ctype;
 #endif
+	TLBMISS_HANDLER_SETUP();
 
 	/* Init the INDY HPC I/O controller.  Need to call this before
 	 * fucking with the memory controller because it needs to know the
@@ -151,7 +153,7 @@ void __init ip22_setup(void)
 			console_setup ("ttyS0");
 	}
 #endif
-#ifdef CONFIG_SGI_PROM_CONSOLE
+#ifdef CONFIG_ARC_CONSOLE
 	console_setup("ttyS0");
 #endif
 

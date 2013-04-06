@@ -27,6 +27,11 @@
 #define FBIOGET_VBLANK		_IOR('F', 0x12, struct fb_vblank)
 #define FBIO_ALLOC              0x4613
 #define FBIO_FREE               0x4614
+#define FBIOGET_GLYPH           0x4615
+#define FBIOGET_HWCINFO         0x4616
+#define FBIOPUT_MODEINFO        0x4617
+#define FBIOGET_DISPINFO        0x4618
+
 
 #define FB_TYPE_PACKED_PIXELS		0	/* Packed Pixels	*/
 #define FB_TYPE_PLANES			1	/* Non interleaved planes */
@@ -260,6 +265,7 @@ struct file;
 
 struct fb_ops {
     /* open/release and usage marking */
+    struct module *owner;
     int (*fb_open)(struct fb_info *info, int user);
     int (*fb_release)(struct fb_info *info, int user);
     /* get non settable parameters */
@@ -277,10 +283,10 @@ struct fb_ops {
     /* set colormap */
     int (*fb_set_cmap)(struct fb_cmap *cmap, int kspc, int con,
 		       struct fb_info *info);
-    /* pan display */
+    /* pan display (optional) */
     int (*fb_pan_display)(struct fb_var_screeninfo *var, int con,
 			  struct fb_info *info);
-    /* perform fb specific ioctl */
+    /* perform fb specific ioctl (optional) */
     int (*fb_ioctl)(struct inode *inode, struct file *file, unsigned int cmd,
 		    unsigned long arg, int con, struct fb_info *info);
     /* perform fb specific mmap */
@@ -381,9 +387,6 @@ extern int fbgen_set_cmap(struct fb_cmap *cmap, int kspc, int con,
 			  struct fb_info *info);
 extern int fbgen_pan_display(struct fb_var_screeninfo *var, int con,
 			     struct fb_info *info);
-extern int fbgen_ioctl(struct inode *inode, struct file *file,
-		       unsigned int cmd, unsigned long arg, int con,
-		       struct fb_info *info);
 
     /*
      *  Helper functions

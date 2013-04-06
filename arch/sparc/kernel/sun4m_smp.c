@@ -25,7 +25,6 @@
 #include <asm/pgalloc.h>
 #include <asm/pgtable.h>
 #include <asm/oplib.h>
-#include <asm/atops.h>
 #include <asm/hardirq.h>
 #include <asm/softirq.h>
 
@@ -279,22 +278,22 @@ void __init smp4m_boot_cpus(void)
 	
 	/* Free unneeded trap tables */
 	if (!(cpu_present_map & (1 << 1))) {
-		ClearPageReserved(mem_map + MAP_NR(trapbase_cpu1));
-		set_page_count(mem_map + MAP_NR(trapbase_cpu1), 1);
+		ClearPageReserved(virt_to_page(trapbase_cpu1));
+		set_page_count(virt_to_page(trapbase_cpu1), 1);
 		free_page((unsigned long)trapbase_cpu1);
 		totalram_pages++;
 		num_physpages++;
 	}
 	if (!(cpu_present_map & (1 << 2))) {
-		ClearPageReserved(mem_map + MAP_NR(trapbase_cpu2));
-		set_page_count(mem_map + MAP_NR(trapbase_cpu2), 1);
+		ClearPageReserved(virt_to_page(trapbase_cpu2));
+		set_page_count(virt_to_page(trapbase_cpu2), 1);
 		free_page((unsigned long)trapbase_cpu2);
 		totalram_pages++;
 		num_physpages++;
 	}
 	if (!(cpu_present_map & (1 << 3))) {
-		ClearPageReserved(mem_map + MAP_NR(trapbase_cpu3));
-		set_page_count(mem_map + MAP_NR(trapbase_cpu3), 1);
+		ClearPageReserved(virt_to_page(trapbase_cpu3));
+		set_page_count(virt_to_page(trapbase_cpu3), 1);
 		free_page((unsigned long)trapbase_cpu3);
 		totalram_pages++;
 		num_physpages++;
@@ -405,9 +404,6 @@ void smp4m_cross_call(smpfunc_t func, unsigned long arg1, unsigned long arg2,
 			}
 		}
 
-		/* First, run local copy. */
-		func(arg1, arg2, arg3, arg4, arg5);
-
 		{
 			register int i;
 
@@ -425,8 +421,7 @@ void smp4m_cross_call(smpfunc_t func, unsigned long arg1, unsigned long arg2,
 		}
 
 		spin_unlock_irqrestore(&cross_call_lock, flags);
-	} else
-		func(arg1, arg2, arg3, arg4, arg5); /* Just need to run local copy. */
+	}
 }
 
 /* Running cross calls. */
@@ -443,10 +438,6 @@ void smp4m_cross_call_irq(void)
 extern unsigned int prof_multiplier[NR_CPUS];
 extern unsigned int prof_counter[NR_CPUS];
 
-extern void update_one_process(struct task_struct *p, unsigned long ticks,
-			       unsigned long user, unsigned long system,
-			       int cpu);
-
 extern void sparc_do_profile(unsigned long pc, unsigned long o7);
 
 void smp4m_percpu_timer_interrupt(struct pt_regs *regs)
@@ -462,29 +453,10 @@ void smp4m_percpu_timer_interrupt(struct pt_regs *regs)
 		int user = user_mode(regs);
 
 		irq_enter(cpu, 0);
-		if(current->pid) {
-			update_one_process(current, 1, user, !user, cpu);
-
-			if(--current->counter <= 0) {
-				current->counter = 0;
-				current->need_resched = 1;
-			}
-
-			if(user) {
-				if(current->priority < DEF_PRIORITY) {
-					kstat.cpu_nice++;
-					kstat.per_cpu_nice[cpu]++;
-				} else {
-					kstat.cpu_user++;
-					kstat.per_cpu_user[cpu]++;
-				}
-			} else {
-				kstat.cpu_system++;
-				kstat.per_cpu_system[cpu]++;
-			}
-		}
-		prof_counter[cpu] = prof_multiplier[cpu];
+		update_process_times(user);
 		irq_exit(cpu, 0);
+
+		prof_counter[cpu] = prof_multiplier[cpu];
 	}
 }
 

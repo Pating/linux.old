@@ -36,7 +36,7 @@
 #include <asm/dma.h>
 #include <asm/lowcore.h>
 
-static unsigned long totalram_pages = 0;
+static unsigned long totalram_pages;
 
 /*
  * BAD_PAGE is the page that is used for page faults when linux
@@ -192,7 +192,7 @@ int do_check_pgt_cache(int low, int high)
 
 void show_mem(void)
 {
-        int i,free = 0,total = 0,reserved = 0;
+        int i, total = 0, reserved = 0;
         int shared = 0, cached = 0;
 
         printk("Mem-info:\n");
@@ -205,9 +205,7 @@ void show_mem(void)
                         reserved++;
                 else if (PageSwapCache(mem_map+i))
                         cached++;
-                else if (!atomic_read(&mem_map[i].count))
-                        free++;
-                else
+                else if (page_count(mem_map+i))
                         shared += atomic_read(&mem_map[i].count) - 1;
         }
         printk("%d pages of RAM\n",total);
@@ -351,8 +349,8 @@ void free_initmem(void)
 
         addr = (unsigned long)(&__init_begin);
         for (; addr < (unsigned long)(&__init_end); addr += PAGE_SIZE) {
-		ClearPageReserved(mem_map + MAP_NR(addr));
-		set_page_count(mem_map+MAP_NR(addr), 1);
+		ClearPageReserved(virt_to_page(addr));
+		set_page_count(virt_to_page(addr), 1);
 		free_page(addr);
 		totalram_pages++;
         }
@@ -366,8 +364,8 @@ void free_initrd_mem(unsigned long start, unsigned long end)
         if (start < end)
                 printk ("Freeing initrd memory: %ldk freed\n", (end - start) >> 10);
         for (; start < end; start += PAGE_SIZE) {
-                ClearPageReserved(mem_map + MAP_NR(start));
-                set_page_count(mem_map+MAP_NR(start), 1);
+                ClearPageReserved(virt_to_page(start));
+                set_page_count(virt_to_page(start), 1);
                 free_page(start);
                 totalram_pages++;
         }

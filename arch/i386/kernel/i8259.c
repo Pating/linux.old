@@ -36,7 +36,7 @@
 BUILD_COMMON_IRQ()
 
 #define BI(x,y) \
-	BUILD_IRQ(##x##y)
+	BUILD_IRQ(x##y)
 
 #define BUILD_16_IRQS(x) \
 	BI(x,0) BI(x,1) BI(x,2) BI(x,3) \
@@ -127,7 +127,7 @@ void (*interrupt[NR_IRQS])(void) = {
  * moves to arch independent land
  */
 
-static spinlock_t i8259A_lock = SPIN_LOCK_UNLOCKED;
+spinlock_t i8259A_lock = SPIN_LOCK_UNLOCKED;
 
 static void end_8259A_irq (unsigned int irq)
 {
@@ -178,12 +178,8 @@ static unsigned int cached_irq_mask = 0xffff;
  * this 'mixed mode' IRQ handling costs nothing because it's only used
  * at IRQ setup time.
  */
-unsigned long io_apic_irqs = 0;
+unsigned long io_apic_irqs;
 
-/*
- * These have to be protected by the irq controller spinlock
- * before being called.
- */
 void disable_8259A_irq(unsigned int irq)
 {
 	unsigned int mask = 1 << irq;
@@ -239,6 +235,8 @@ void make_8259A_irq(unsigned int irq)
 /*
  * This function assumes to be called rarely. Switching between
  * 8259A registers is slow.
+ * This has to be protected by the irq controller spinlock
+ * before being called.
  */
 static inline int i8259A_irq_real(unsigned int irq)
 {
@@ -314,7 +312,7 @@ spurious_8259A_irq:
 		goto handle_real_irq;
 
 	{
-		static int spurious_irq_mask = 0;
+		static int spurious_irq_mask;
 		/*
 		 * At this point we can be sure the IRQ is spurious,
 		 * lets ACK and report it. [once per IRQ]
@@ -337,8 +335,7 @@ void __init init_8259A(int auto_eoi)
 {
 	unsigned long flags;
 
-	save_flags(flags);
-	cli();
+	spin_lock_irqsave(&i8259A_lock, flags);
 
 	outb(0xff, 0x21);	/* mask all of 8259A-1 */
 	outb(0xff, 0xA1);	/* mask all of 8259A-2 */
@@ -366,16 +363,17 @@ void __init init_8259A(int auto_eoi)
 		 * when acking.
 		 */
 		i8259A_irq_type.ack = disable_8259A_irq;
+	else
+		i8259A_irq_type.ack = mask_and_ack_8259A;
 
 	udelay(100);		/* wait for 8259A to initialize */
 
 	outb(cached_21, 0x21);	/* restore master IRQ mask */
 	outb(cached_A1, 0xA1);	/* restore slave IRQ mask */
 
-	restore_flags(flags);
+	spin_unlock_irqrestore(&i8259A_lock, flags);
 }
 
-#ifndef CONFIG_VISWS
 /*
  * Note that on a 486, we don't want to do a SIGFPE on an irq13
  * as the irq is unreliable, and exception 16 works correctly
@@ -390,18 +388,24 @@ void __init init_8259A(int auto_eoi)
  
 static void math_error_irq(int cpl, void *dev_id, struct pt_regs *regs)
 {
+	extern void math_error(void *);
 	outb(0,0xF0);
 	if (ignore_irq13 || !boot_cpu_data.hard_math)
 		return;
-	math_error();
+	math_error((void *)regs->eip);
 }
 
+/*
+ * New motherboards sometimes make IRQ 13 be a PCI interrupt,
+ * so allow interrupt sharing.
+ */
 static struct irqaction irq13 = { math_error_irq, 0, 0, "fpu", NULL, NULL };
 
 /*
  * IRQ2 is cascade interrupt to second interrupt controller
  */
 
+#ifndef CONFIG_VISWS
 static struct irqaction irq2 = { no_action, 0, 0, "cascade", NULL, NULL};
 #endif
 
@@ -490,6 +494,12 @@ void __init init_IRQ(void)
 
 #ifndef CONFIG_VISWS
 	setup_irq(2, &irq2);
-	setup_irq(13, &irq13);
 #endif
+
+	/*
+	 * External FPU? Set up irq13 if so, for
+	 * original braindamaged IBM FERR coupling.
+	 */
+	if (boot_cpu_data.hard_math && !cpu_has_fpu)
+		setup_irq(13, &irq13);
 }

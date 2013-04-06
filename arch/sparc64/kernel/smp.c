@@ -28,6 +28,7 @@
 #include <asm/softirq.h>
 #include <asm/uaccess.h>
 #include <asm/timer.h>
+#include <asm/starfire.h>
 
 #define __KERNEL_SYSCALLS__
 #include <linux/unistd.h>
@@ -78,8 +79,8 @@ int smp_bogo(char *buf)
 		if(cpu_present_map & (1UL << i))
 			len += sprintf(buf + len,
 				       "Cpu%dBogo\t: %lu.%02lu\n",
-				       i, cpu_data[i].udelay_val / 500000,
-				       (cpu_data[i].udelay_val / 5000) % 100);
+				       i, cpu_data[i].udelay_val / (500000/HZ),
+				       (cpu_data[i].udelay_val / (5000/HZ)) % 100);
 	return len;
 }
 
@@ -87,10 +88,9 @@ void __init smp_store_cpu_info(int id)
 {
 	int i;
 
-	cpu_data[id].bh_count			= 0;
 	/* multiplier and counter set by
 	   smp_setup_percpu_timer()  */
-	cpu_data[id].udelay_val			= loops_per_sec;
+	cpu_data[id].udelay_val			= loops_per_jiffy;
 
 	cpu_data[id].pgcache_size		= 0;
 	cpu_data[id].pte_cache[0]		= NULL;
@@ -303,9 +303,17 @@ void __init smp_boot_cpus(void)
 
 static inline void xcall_deliver(u64 data0, u64 data1, u64 data2, u64 pstate, unsigned long cpu)
 {
-	u64 result, target = (cpu << 14) | 0x70;
+	u64 result, target;
 	int stuck, tmp;
 
+	if (this_is_starfire) {
+		/* map to real upaid */
+		cpu = (((cpu & 0x3c) << 1) |
+			((cpu & 0x40) >> 4) |
+			(cpu & 0x3));
+	}
+
+	target = (cpu << 14) | 0x70;
 #ifdef XCALL_DEBUG
 	printk("CPU[%d]: xcall(data[%016lx:%016lx:%016lx],tgt[%016lx])\n",
 	       smp_processor_id(), data0, data1, data2, target);
@@ -384,6 +392,46 @@ void smp_cross_call(unsigned long *func, u32 ctx, u64 data1, u64 data2)
 		}
 		/* NOTE: Caller runs local copy on master. */
 	}
+}
+
+struct call_data_struct {
+	void (*func) (void *info);
+	void *info;
+	atomic_t finished;
+	int wait;
+};
+
+extern unsigned long xcall_call_function;
+
+int smp_call_function(void (*func)(void *info), void *info,
+		      int nonatomic, int wait)
+{
+	struct call_data_struct data;
+	int cpus = smp_num_cpus - 1;
+
+	if (!cpus)
+		return 0;
+
+	data.func = func;
+	data.info = info;
+	atomic_set(&data.finished, 0);
+	data.wait = wait;
+
+	smp_cross_call(&xcall_call_function,
+		       0, (u64) &data, 0);
+	if (wait) {
+		while (atomic_read(&data.finished) != cpus)
+			barrier();
+	}
+
+	return 0;
+}
+
+void smp_call_function_client(struct call_data_struct *call_data)
+{
+	call_data->func(call_data->info);
+	if (call_data->wait)
+		atomic_inc(&call_data->finished);
 }
 
 extern unsigned long xcall_flush_tlb_page;
@@ -633,10 +681,6 @@ static unsigned long current_tick_offset;
 #define prof_multiplier(__cpu)		cpu_data[(__cpu)].multiplier
 #define prof_counter(__cpu)		cpu_data[(__cpu)].counter
 
-extern void update_one_process(struct task_struct *p, unsigned long ticks,
-			       unsigned long user, unsigned long system,
-			       int cpu);
-
 void smp_percpu_timer_interrupt(struct pt_regs *regs)
 {
 	unsigned long compare, tick, pstate;
@@ -667,30 +711,8 @@ void smp_percpu_timer_interrupt(struct pt_regs *regs)
 				irq_exit(cpu, 0);
 			}
 
-			if (current->pid) {
-				unsigned int *inc, *inc2;
+			update_process_times(user);
 
-				update_one_process(current, 1, user, !user, cpu);
-				if (--current->counter <= 0) {
-					current->counter = 0;
-					current->need_resched = 1;
-				}
-
-				if (user) {
-					if (current->priority < DEF_PRIORITY) {
-						inc = &kstat.cpu_nice;
-						inc2 = &kstat.per_cpu_nice[cpu];
-					} else {
-						inc = &kstat.cpu_user;
-						inc2 = &kstat.per_cpu_user[cpu];
-					}
-				} else {
-					inc = &kstat.cpu_system;
-					inc2 = &kstat.per_cpu_system[cpu];
-				}
-				atomic_inc((atomic_t *)inc);
-				atomic_inc((atomic_t *)inc2);
-			}
 			prof_counter(cpu) = prof_multiplier(cpu);
 		}
 
@@ -804,14 +826,14 @@ static inline unsigned long find_flush_base(unsigned long size)
 
 	size = PAGE_ALIGN(size);
 	found = size;
-	base = page_address(p);
+	base = (unsigned long) page_address(p);
 	while(found != 0) {
 		/* Failure. */
 		if(p >= (mem_map + max_mapnr))
 			return 0UL;
 		if(PageReserved(p)) {
 			found = size;
-			base = page_address(p);
+			base = (unsigned long) page_address(p);
 		} else {
 			found -= PAGE_SIZE;
 		}

@@ -61,8 +61,6 @@
  * interrupt controllers, without having to do assembly magic.
  */
 
-irq_cpustat_t irq_stat [NR_CPUS];
-
 /*
  * Controller mappings for all interrupt sources:
  */
@@ -160,7 +158,7 @@ int get_irq_list(char *buf)
 	p += sprintf(p, "NMI: ");
 	for (j = 0; j < smp_num_cpus; j++)
 		p += sprintf(p, "%10u ",
-			atomic_read(&nmi_counter(cpu_logical_map(j))));
+			nmi_count(cpu_logical_map(j)));
 	p += sprintf(p, "\n");
 #if CONFIG_SMP
 	p += sprintf(p, "LOC: ");
@@ -181,7 +179,7 @@ int get_irq_list(char *buf)
 
 #ifdef CONFIG_SMP
 unsigned char global_irq_holder = NO_PROC_ID;
-unsigned volatile int global_irq_lock;
+unsigned volatile long global_irq_lock; /* pendantic: long for set_bit --RR */
 
 extern void show_stack(unsigned long* esp);
 
@@ -536,7 +534,7 @@ void enable_irq(unsigned int irq)
 		desc->depth--;
 		break;
 	case 0:
-		printk("enable_irq() unbalanced from %p\n",
+		printk("enable_irq(%u) unbalanced from %p\n", irq,
 		       __builtin_return_address(0));
 	}
 	spin_unlock_irqrestore(&desc->lock, flags);
@@ -624,7 +622,7 @@ out:
 	desc->handler->end(irq);
 	spin_unlock(&desc->lock);
 
-	if (softirq_state[cpu].active & softirq_state[cpu].mask)
+	if (softirq_active(cpu) & softirq_mask(cpu))
 		do_softirq();
 	return 1;
 }
@@ -775,6 +773,8 @@ void free_irq(unsigned int irq, void *dev_id)
  * disabled.
  */
 
+static DECLARE_MUTEX(probe_sem);
+
 /**
  *	probe_irq_on	- begin an interrupt autodetect
  *
@@ -790,6 +790,7 @@ unsigned long probe_irq_on(void)
 	unsigned long val;
 	unsigned long delay;
 
+	down(&probe_sem);
 	/* 
 	 * something may have generated an irq long ago and we want to
 	 * flush such a longstanding irq before considering it as spurious. 
@@ -868,15 +869,18 @@ unsigned long probe_irq_on(void)
  *	Scan the ISA bus interrupt lines and return a bitmap of
  *	active interrupts. The interrupt probe logic state is then
  *	returned to its previous value.
+ *
+ *	Note: we need to scan all the irq's even though we will
+ *	only return ISA irq numbers - just so that we reset them
+ *	all to a known state.
  */
- 
 unsigned int probe_irq_mask(unsigned long val)
 {
 	int i;
 	unsigned int mask;
 
 	mask = 0;
-	for (i = 0; i < 16; i++) {
+	for (i = 0; i < NR_IRQS; i++) {
 		irq_desc_t *desc = irq_desc + i;
 		unsigned int status;
 
@@ -884,7 +888,7 @@ unsigned int probe_irq_mask(unsigned long val)
 		status = desc->status;
 
 		if (status & IRQ_AUTODETECT) {
-			if (!(status & IRQ_WAITING))
+			if (i < 16 && !(status & IRQ_WAITING))
 				mask |= 1 << i;
 
 			desc->status = status & ~IRQ_AUTODETECT;
@@ -892,6 +896,7 @@ unsigned int probe_irq_mask(unsigned long val)
 		}
 		spin_unlock_irq(&desc->lock);
 	}
+	up(&probe_sem);
 
 	return mask & val;
 }
@@ -943,6 +948,7 @@ int probe_irq_off(unsigned long val)
 		}
 		spin_unlock_irq(&desc->lock);
 	}
+	up(&probe_sem);
 
 	if (nr_irqs > 1)
 		irq_found = -irq_found;
@@ -998,7 +1004,7 @@ int setup_irq(unsigned int irq, struct irqaction * new)
 
 	if (!shared) {
 		desc->depth = 0;
-		desc->status &= ~IRQ_DISABLED;
+		desc->status &= ~(IRQ_DISABLED | IRQ_AUTODETECT | IRQ_WAITING);
 		desc->handler->startup(irq);
 	}
 	spin_unlock_irqrestore(&desc->lock,flags);

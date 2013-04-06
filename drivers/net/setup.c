@@ -1,3 +1,4 @@
+
 /*
  *	New style setup code for the network devices
  */
@@ -8,13 +9,11 @@
 #include <linux/init.h>
 #include <linux/netlink.h>
 
-extern int mkiss_init_ctrl_dev(void);
 extern int slip_init_ctrl_dev(void);
 extern int strip_init_ctrl_dev(void);
 extern int x25_asy_init_ctrl_dev(void);
   
 extern int dmascc_init(void);
-extern int yam_init(void);
 
 extern int awc4500_pci_probe(void);
 extern int awc4500_isa_probe(void);
@@ -22,6 +21,7 @@ extern int awc4500_pnp_probe(void);
 extern int awc4500_365_probe(void);
 extern int arcnet_init(void); 
 extern int scc_enet_init(void); 
+extern int fec_enet_init(void); 
 extern int dlci_setup(void); 
 extern int lapbeth_init(void);
 extern int sdla_setup(void); 
@@ -29,9 +29,7 @@ extern int sdla_c_setup(void);
 extern int comx_init(void);
 extern int lmc_setup(void);
 
-extern int abyss_probe(void);
 extern int madgemc_probe(void);
-extern int tms_pci_probe(void);
 
 /* Pad device name to IFNAMSIZ=16. F.e. __PAD6 is string of 9 zeros. */
 #define __PAD6 "\0\0\0\0\0\0\0\0\0"
@@ -75,6 +73,9 @@ struct net_probe pci_probes[] __initdata = {
 #if defined(CONFIG_SCC_ENET)
         {scc_enet_init, 0},
 #endif
+#if defined(CONFIG_FEC_ENET)
+        {fec_enet_init, 0},
+#endif
 #if defined(CONFIG_COMX)
 	{comx_init, 0},
 #endif
@@ -99,27 +100,13 @@ struct net_probe pci_probes[] __initdata = {
 #endif
 
 #endif
-/*
- *	Amateur Radio Drivers
- */	
-
-#ifdef CONFIG_YAM
-	{yam_init, 0},
-#endif	/* CONFIG_YAM */
 
 /*
  *	Token Ring Drivers
  */  
-#ifdef CONFIG_ABYSS
-	{abyss_probe, 0},
-#endif
 #ifdef CONFIG_MADGEMC
 	{madgemc_probe, 0},
 #endif
-#ifdef CONFIG_TMSPCI
-	{tms_pci_probe, 0},
-#endif
- 
 	{NULL, 0},
 };
 
@@ -153,67 +140,14 @@ static void __init network_ldisc_init(void)
 #if defined(CONFIG_X25_ASY)
 	x25_asy_init_ctrl_dev();
 #endif
-#if defined(CONFIG_MKISS)
-	mkiss_init_ctrl_dev();
-#endif
 #if defined(CONFIG_STRIP)
 	strip_init_ctrl_dev();
 #endif
 }
 
 
-static void __init appletalk_device_init(void)
+static void __init special_device_init(void)
 {
-#if defined(CONFIG_IPDDP)
-	extern int ipddp_init(struct net_device *dev);
-	static struct net_device dev_ipddp = {
-				"ipddp0"  __PAD6,
-				0, 0, 0, 0,
-				0x0, 0,
-				0, 0, 0, NULL, ipddp_init 
-	};
-	
-	dev_ipddp.init(&dev_ipddp);
-#endif /* CONFIG_IPDDP */
-}
-
-static void special_device_init(void)
-{
-#ifdef CONFIG_DUMMY
-	{
-		extern int dummy_init(struct net_device *dev);
-		static struct net_device dummy_dev = {
-			"dummy" __PAD5, 0x0, 0x0, 0x0, 0x0, 0, 0, 0, 0, 0, NULL, dummy_init, 
-		};
-		register_netdev(&dummy_dev);
-	}
-#endif	
-#ifdef CONFIG_EQUALIZER
-	{
-		extern int eql_init(struct net_device *dev);
-		static struct net_device eql_dev = 
-		{
-			"eql" __PAD3,			/* Master device for IP traffic load balancing */
-			0x0, 0x0, 0x0, 0x0,		/* recv end/start; mem end/start */
-			0,				/* base I/O address */
-			0,				/* IRQ */
-			0, 0, 0,			/* flags */
-			NULL,				/* next device */
-			eql_init			/* set up the rest */
-		};
-		register_netdev(&eql_dev);
-	}
-#endif	
-#ifdef CONFIG_APBIF
-	{
-		extern int bif_init(struct net_device *dev);
-		static struct net_device bif_dev = 
-		{
-        		"bif" __PAD3, 0x0, 0x0, 0x0, 0x0, 0, 0, 0, 0, 0, NULL, bif_init 
-        	};
-		register_netdev(&bif_dev);
-        }
-#endif
 #ifdef CONFIG_NET_SB1000
 	{
 		extern int sb1000_probe(struct net_device *dev);
@@ -224,15 +158,6 @@ static void special_device_init(void)
 		register_netdev(&sb1000_dev);
 	}
 #endif
-#ifdef CONFIG_BONDING
-	{
-		extern int bond_init(struct net_device *dev);
-		static struct net_device bond_dev = {
-			"bond" __PAD4, 0x0, 0x0, 0x0, 0x0, 0, 0, 0, 0, 0, NULL, bond_init,
-		};
-		register_netdev(&bond_dev);
-	}
-#endif	
 }
 
 /*
@@ -245,8 +170,6 @@ void __init net_device_init(void)
 	network_probe();
 	/* Line disciplines */
 	network_ldisc_init();
-	/* Appletalk */
-	appletalk_device_init();
 	/* Special devices */
 	special_device_init();
 	/* That kicks off the legacy init functions */

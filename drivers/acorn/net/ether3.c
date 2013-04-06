@@ -1,5 +1,11 @@
 /*
- * linux/drivers/net/ether3.c
+ *  linux/drivers/acorn/net/ether3.c
+ *
+ *  Copyright (C) 1995-2000 Russell King
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
  *
  * SEEQ nq8005 ethernet driver for Acorn/ANT Ether3 card
  *  for Acorn machines
@@ -83,7 +89,7 @@ static int	ether3_open (struct net_device *dev);
 static int	ether3_sendpacket (struct sk_buff *skb, struct net_device *dev);
 static void	ether3_interrupt (int irq, void *dev_id, struct pt_regs *regs);
 static int	ether3_close (struct net_device *dev);
-static struct enet_statistics *ether3_getstats (struct net_device *dev);
+static struct net_device_stats *ether3_getstats (struct net_device *dev);
 static void	ether3_setmulticastlist (struct net_device *dev);
 static void	ether3_timeout(struct net_device *dev);
 
@@ -338,7 +344,7 @@ ether3_init_for_open(struct net_device *dev)
 	struct dev_priv *priv = (struct dev_priv *)dev->priv;
 	int i;
 
-	memset(&priv->stats, 0, sizeof(struct enet_statistics));
+	memset(&priv->stats, 0, sizeof(struct net_device_stats));
 
 	/* Reset the chip */
 	ether3_outw(CFG2_RESET, REG_CONFIG2);
@@ -459,7 +465,7 @@ ether3_close(struct net_device *dev)
  * Get the current statistics.	This may be called with the card open or
  * closed.
  */
-static struct enet_statistics *ether3_getstats(struct net_device *dev)
+static struct net_device_stats *ether3_getstats(struct net_device *dev)
 {
 	struct dev_priv *priv = (struct dev_priv *)dev->priv;
 	return &priv->stats;
@@ -690,7 +696,7 @@ if (next_ptr < RX_START || next_ptr >= RX_END) {
 			} else
 				goto dropping;
 		} else {
-			struct enet_statistics *stats = &priv->stats;
+			struct net_device_stats *stats = &priv->stats;
 			ether3_outw(next_ptr >> 8, REG_RECVEND);
 			if (status & RXSTAT_OVERSIZE)	  stats->rx_over_errors ++;
 			if (status & RXSTAT_CRCERROR)	  stats->rx_crc_errors ++;

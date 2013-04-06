@@ -2,12 +2,16 @@
  * Universal Host Controller Interface driver for USB.
  *
  * (C) Copyright 1999 Linus Torvalds
- * (C) Copyright 1999-2000 Johannes Erdfelt, jerdfelt@sventech.com
+ * (C) Copyright 1999-2000 Johannes Erdfelt, johannes@erdfelt.com
  * (C) Copyright 1999 Randy Dunlap
  * (C) Copyright 1999 Georg Acher, acher@in.tum.de
  * (C) Copyright 1999 Deti Fliegl, deti@fliegl.de
  * (C) Copyright 1999 Thomas Sailer, sailer@ife.ee.ethz.ch
  * (C) Copyright 1999 Roman Weissgaerber, weissg@vienna.at
+ * (C) Copyright 2000 Yggdrasil Computing, Inc. (port of new PCI interface
+ *               support from usb-ohci.c by Adam Richter, adam@yggdrasil.com).
+ * (C) Copyright 1999 Gregory P. Smith (from usb-ohci.c)
+ *
  *
  * Intel documents this fairly well, and as far as I know there
  * are no royalties or anything like that, but even so there are
@@ -21,9 +25,11 @@
  *  - working around the horridness of the rest
  */
 
+#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/pci.h>
 #include <linux/kernel.h>
+#include <linux/init.h>
 #include <linux/delay.h>
 #include <linux/ioport.h>
 #include <linux/sched.h>
@@ -45,16 +51,14 @@
 #include "uhci-debug.h"
 
 #include <linux/pm.h>
-static int handle_pm_event(struct pm_dev *dev, pm_request_t rqst, void *data);
 
 static int debug = 1;
 MODULE_PARM(debug, "i");
+MODULE_PARM_DESC(debug, "Debug level");
 
 static kmem_cache_t *uhci_td_cachep;
 static kmem_cache_t *uhci_qh_cachep;
 static kmem_cache_t *uhci_up_cachep;	/* urb_priv */
-
-static LIST_HEAD(uhci_list);
 
 static int rh_submit_urb(struct urb *urb);
 static int rh_unlink_urb(struct urb *urb);
@@ -491,8 +495,6 @@ struct urb_priv *uhci_alloc_urb_priv(struct urb *urb)
 
 	urb->hcpriv = urbp;
 
-	usb_inc_dev_use(urb->dev);
-
 	return urbp;
 }
 
@@ -554,8 +556,6 @@ static void uhci_destroy_urb_priv(struct urb *urb)
 	urb->hcpriv = NULL;
 	kmem_cache_free(uhci_up_cachep, urbp);
 
-	usb_dec_dev_use(urb->dev);
-
 unlock:
 	spin_unlock_irqrestore(&urb->lock, flags);
 }
@@ -570,7 +570,7 @@ static void uhci_inc_fsbr(struct uhci *uhci, struct urb *urb)
 
 	spin_lock_irqsave(&uhci->framelist_lock, flags);
 
-	if (!urbp->fsbr) {
+	if ((!(urb->transfer_flags & USB_NO_FSBR)) && (!urbp->fsbr)) {
 		urbp->fsbr = 1;
 		if (!uhci->fsbr++)
 			uhci->skel_term_qh.link = virt_to_bus(&uhci->skel_hs_control_qh) | UHCI_PTR_QH;
@@ -589,7 +589,7 @@ static void uhci_dec_fsbr(struct uhci *uhci, struct urb *urb)
 
 	spin_lock_irqsave(&uhci->framelist_lock, flags);
 
-	if (urbp->fsbr) {
+	if ((!(urb->transfer_flags & USB_NO_FSBR)) && urbp->fsbr) {
 		urbp->fsbr = 0;
 		if (!--uhci->fsbr)
 			uhci->skel_term_qh.link = UHCI_PTR_TERM;
@@ -736,8 +736,6 @@ static int uhci_submit_control(struct urb *urb)
 	urbp->qh = qh;
 
 	uhci_add_urb_list(uhci, urb);
-
-	usb_inc_dev_use(urb->dev);
 
 	return -EINPROGRESS;
 }
@@ -1296,6 +1294,7 @@ static int uhci_submit_urb(struct urb *urb)
 	struct uhci *uhci;
 	unsigned long flags;
 	struct urb *u;
+	int bustime;
 
 	if (!urb)
 		return -EINVAL;
@@ -1313,10 +1312,13 @@ static int uhci_submit_urb(struct urb *urb)
 	if (u && !(urb->transfer_flags & USB_QUEUE_BULK))
 		return -ENXIO;
 
+	usb_inc_dev_use(urb->dev);
 	spin_lock_irqsave(&urb->lock, flags);
 
 	if (!uhci_alloc_urb_priv(urb)) {
 		spin_unlock_irqrestore(&urb->lock, flags);
+		usb_dec_dev_use(urb->dev);
+
 		return -ENOMEM;
 	}
 
@@ -1325,13 +1327,38 @@ static int uhci_submit_urb(struct urb *urb)
 		ret = uhci_submit_control(urb);
 		break;
 	case PIPE_INTERRUPT:
-		ret = uhci_submit_interrupt(urb);
+		if (urb->bandwidth == 0) {	/* not yet checked/allocated */
+			bustime = usb_check_bandwidth(urb->dev, urb);
+			if (bustime < 0)
+				ret = bustime;
+			else {
+				ret = uhci_submit_interrupt(urb);
+				if (ret == -EINPROGRESS)
+					usb_claim_bandwidth(urb->dev, urb, bustime, 0);
+			}
+		} else		/* bandwidth is already set */
+			ret = uhci_submit_interrupt(urb);
 		break;
 	case PIPE_BULK:
 		ret = uhci_submit_bulk(urb, u);
 		break;
 	case PIPE_ISOCHRONOUS:
-		ret = uhci_submit_isochronous(urb);
+		if (urb->bandwidth == 0) {	/* not yet checked/allocated */
+			if (urb->number_of_packets <= 0) {
+				ret = -EINVAL;
+				break;
+			}
+			bustime = usb_check_bandwidth(urb->dev, urb);
+			if (bustime < 0) {
+				ret = bustime;
+				break;
+			}
+
+			ret = uhci_submit_isochronous(urb);
+			if (ret == -EINPROGRESS)
+				usb_claim_bandwidth(urb->dev, urb, bustime, 1);
+		} else		/* bandwidth is already set */
+			ret = uhci_submit_isochronous(urb);
 		break;
 	}
 
@@ -1341,8 +1368,10 @@ static int uhci_submit_urb(struct urb *urb)
 
 	if (ret == -EINPROGRESS)
 		ret = 0;
-	else
+	else {
 		uhci_unlink_generic(urb);
+		usb_dec_dev_use(urb->dev);
+	}
 
 	return ret;
 }
@@ -1354,6 +1383,7 @@ static int uhci_submit_urb(struct urb *urb)
  */
 static void uhci_transfer_result(struct urb *urb)
 {
+	struct usb_device *dev = urb->dev;
 	struct urb *turb;
 	int proceed = 0, is_ring = 0;
 	int ret = -EINVAL;
@@ -1387,16 +1417,26 @@ static void uhci_transfer_result(struct urb *urb)
 	case PIPE_CONTROL:
 	case PIPE_BULK:
 	case PIPE_ISOCHRONOUS:
+		/* Release bandwidth for Interrupt or Isoc. transfers */
+		/* Spinlock needed ? */
+		if (urb->bandwidth)
+			usb_release_bandwidth(urb->dev, urb, 1);
 		uhci_unlink_generic(urb);
 		break;
 	case PIPE_INTERRUPT:
 		/* Interrupts are an exception */
-		urb->complete(urb);
-		if (urb->interval)
+		if (urb->interval) {
+			urb->complete(urb);
 			uhci_reset_interrupt(urb);
-		else
-			uhci_unlink_generic(urb);
-		return;		/* <-- Note the return */
+			return;
+		}
+
+		/* Release bandwidth for Interrupt or Isoc. transfers */
+		/* Spinlock needed ? */
+		if (urb->bandwidth)
+			usb_release_bandwidth(urb->dev, urb, 0);
+		uhci_unlink_generic(urb);
+		break;
 	}
 
 	if (urb->next) {
@@ -1414,7 +1454,7 @@ static void uhci_transfer_result(struct urb *urb)
 			is_ring = 1;
 	}
 
-	if (urb->complete && (!proceed || (urb->transfer_flags & USB_URB_EARLY_COMPLETE))) {
+	if (urb->complete && !proceed) {
 		urb->complete(urb);
 		if (!proceed && is_ring)
 			uhci_submit_urb(urb);
@@ -1429,9 +1469,12 @@ static void uhci_transfer_result(struct urb *urb)
 			turb = turb->next;
 		} while (turb && turb != urb->next);
 
-		if (urb->complete && !(urb->transfer_flags & USB_URB_EARLY_COMPLETE))
+		if (urb->complete)
 			urb->complete(urb);
 	}
+
+	/* We decrement the usage count after we're done with everything */
+	usb_dec_dev_use(dev);
 }
 
 static int uhci_unlink_generic(struct urb *urb)
@@ -1455,6 +1498,8 @@ static int uhci_unlink_generic(struct urb *urb)
 
 	uhci_destroy_urb_priv(urb);
 
+	urb->dev = NULL;
+
 	return 0;
 }
 
@@ -1475,6 +1520,21 @@ static int uhci_unlink_urb(struct urb *urb)
 	/* Short circuit the virtual root hub */
 	if (usb_pipedevice(urb->pipe) == uhci->rh.devnum)
 		return rh_unlink_urb(urb);
+
+	/* Release bandwidth for Interrupt or Isoc. transfers */
+	/* Spinlock needed ? */
+	if (urb->bandwidth) {
+		switch (usb_pipetype(urb->pipe)) {
+		case PIPE_INTERRUPT:
+			usb_release_bandwidth(urb->dev, urb, 0);
+			break;
+		case PIPE_ISOCHRONOUS:
+			usb_release_bandwidth(urb->dev, urb, 1);
+			break;
+		default:
+			break;
+		}
+	}
 
 	if (urb->status == -EINPROGRESS) {
 		uhci_unlink_generic(urb);
@@ -1695,11 +1755,11 @@ static void rh_int_timer_do(unsigned long ptr)
 		urbp = (struct urb_priv *)u->hcpriv;
 		if (urbp) {
 			/* Check if the FSBR timed out */
-			if (urbp->fsbr && time_after(urbp->inserttime + IDLE_TIMEOUT, jiffies))
+			if (urbp->fsbr && time_after_eq(jiffies, urbp->inserttime + IDLE_TIMEOUT))
 				uhci_fsbr_timeout(uhci, u);
 
 			/* Check if the URB timed out */
-			if (u->timeout && time_after(u->timeout, jiffies)) {
+			if (u->timeout && time_after_eq(jiffies, u->timeout)) {
 				u->transfer_flags |= USB_ASYNC_UNLINK | USB_TIMEOUT_KILLED;
 				uhci_unlink_urb(u);
 			}
@@ -2285,9 +2345,7 @@ static int setup_uhci(struct pci_dev *dev, int irq, unsigned int io_addr, unsign
 	uhci = alloc_uhci(io_addr, io_size);
 	if (!uhci)
 		return -ENOMEM;
-
-	INIT_LIST_HEAD(&uhci->uhci_list);
-	list_add(&uhci->uhci_list, &uhci_list);
+	dev->driver_data = uhci;
 
 	request_region(uhci->io_addr, io_size, "usb-uhci");
 
@@ -2300,21 +2358,13 @@ static int setup_uhci(struct pci_dev *dev, int irq, unsigned int io_addr, unsign
 	if (request_irq(irq, uhci_interrupt, SA_SHIRQ, "usb-uhci", uhci) == 0) {
 		uhci->irq = irq;
 
-		if (!uhci_start_root_hub(uhci)) {
-			struct pm_dev *pmdev;
+		pci_write_config_word(dev, USBLEGSUP, USBLEGSUP_DEFAULT);
 
-			pmdev = pm_register(PM_PCI_DEV,
-					    PM_PCI_ID(dev),
-					    handle_pm_event);
-			if (pmdev)
-				pmdev->data = uhci;
+		if (!uhci_start_root_hub(uhci))
 			return 0;
-		}
 	}
 
 	/* Couldn't allocate IRQ if we got here */
-	list_del(&uhci->uhci_list);
-	INIT_LIST_HEAD(&uhci->uhci_list);
 
 	reset_hc(uhci);
 	release_region(uhci->io_addr, uhci->io_size);
@@ -2323,19 +2373,19 @@ static int setup_uhci(struct pci_dev *dev, int irq, unsigned int io_addr, unsign
 	return retval;
 }
 
-static int found_uhci(struct pci_dev *dev)
+static int __devinit uhci_pci_probe(struct pci_dev *dev, const struct pci_device_id *id)
 {
 	int i;
 
 	/* disable legacy emulation */
-	pci_write_config_word(dev, USBLEGSUP, USBLEGSUP_DEFAULT);
+	pci_write_config_word(dev, USBLEGSUP, 0);
 
 	if (pci_enable_device(dev) < 0)
-		return -1;
+		return -ENODEV;
 
 	if (!dev->irq) {
 		err("found UHCI device with no IRQ assigned. check BIOS settings!");
-		return -1;
+		return -ENODEV;
 	}
 
 	/* Search for the IO base address.. */
@@ -2351,32 +2401,77 @@ static int found_uhci(struct pci_dev *dev)
 		if (check_region(io_addr, io_size))
 			break;
 
+		pci_set_master(dev);
 		return setup_uhci(dev, dev->irq, io_addr, io_size);
 	}
 
-	return -1;
+	return -ENODEV;
 }
 
-static int handle_pm_event(struct pm_dev *dev, pm_request_t rqst, void *data)
+static void __devexit uhci_pci_remove(struct pci_dev *dev)
 {
-	struct uhci *uhci = dev->data;
-	switch (rqst) {
-	case PM_SUSPEND:
-		reset_hc(uhci);
-		break;
-	case PM_RESUME:
-		reset_hc(uhci);
-		start_hc(uhci);
-		break;
-	}
-	return 0;
+	struct uhci *uhci = dev->driver_data;
+
+	if (uhci->bus->root_hub)
+		usb_disconnect(&uhci->bus->root_hub);
+
+	usb_deregister_bus(uhci->bus);
+
+	reset_hc(uhci);
+	release_region(uhci->io_addr, uhci->io_size);
+
+	uhci_free_pending_qhs(uhci);
+
+	release_uhci(uhci);
 }
 
-int uhci_init(void)
+static void uhci_pci_suspend(struct pci_dev *dev)
+{
+	reset_hc((struct uhci *) dev->driver_data);
+}
+
+static void uhci_pci_resume(struct pci_dev *dev)
+{
+	reset_hc((struct uhci *) dev->driver_data);
+	start_hc((struct uhci *) dev->driver_data);
+}
+
+/*-------------------------------------------------------------------------*/
+
+static const struct pci_device_id __devinitdata uhci_pci_ids [] = { {
+
+	/* handle any USB UHCI controller */
+	class: 		((PCI_CLASS_SERIAL_USB << 8) | 0x00),
+	class_mask: 	~0,
+
+	/* no matter who makes it */
+	vendor:		PCI_ANY_ID,
+	device:		PCI_ANY_ID,
+	subvendor:	PCI_ANY_ID,
+	subdevice:	PCI_ANY_ID,
+
+	}, { /* end: all zeroes */ }
+};
+
+MODULE_DEVICE_TABLE (pci, uhci_pci_ids);
+
+static struct pci_driver uhci_pci_driver = {
+	name:		"usb-uhci",
+	id_table:	&uhci_pci_ids [0],
+
+	probe:		uhci_pci_probe,
+	remove:		uhci_pci_remove,
+
+#ifdef	CONFIG_PM
+	suspend:	uhci_pci_suspend,
+	resume:		uhci_pci_resume,
+#endif	/* PM */
+};
+
+ 
+static int __init uhci_hcd_init(void)
 {
 	int retval;
-	struct pci_dev *dev;
-	u8 type;
 
 	retval = -ENOMEM;
 
@@ -2403,25 +2498,8 @@ int uhci_init(void)
 	if (!uhci_up_cachep)
 		goto up_failed;
 
-	retval = -ENODEV;
-	dev = NULL;
-	for (;;) {
-		dev = pci_find_class(PCI_CLASS_SERIAL_USB << 8, dev);
-		if (!dev)
-			break;
-
-		/* Is it the UHCI programming interface? */
-		pci_read_config_byte(dev, PCI_CLASS_PROG, &type);
-		if (type != 0)
-			continue;
-
-		/* Ok set it up */
-		retval = found_uhci(dev);
-	}
-
-	/* We only want to return an error code if ther was an error */
-	/*  and we didn't find a UHCI controller */
-	if (retval && list_empty(&uhci_list))
+	retval = pci_module_init (&uhci_pci_driver);
+	if (retval)
 		goto init_failed;
 
 	return 0;
@@ -2442,32 +2520,10 @@ td_failed:
 	return retval;
 }
 
-void uhci_cleanup(void)
+static void __exit uhci_hcd_cleanup (void) 
 {
-	struct list_head *tmp, *head = &uhci_list;
-
-	tmp = head->next;
-	while (tmp != head) {
-		struct uhci *uhci = list_entry(tmp, struct uhci, uhci_list);
-
-		tmp = tmp->next;
-
-		list_del(&uhci->uhci_list);
-		INIT_LIST_HEAD(&uhci->uhci_list);
-
-		if (uhci->bus->root_hub)
-			usb_disconnect(&uhci->bus->root_hub);
-
-		usb_deregister_bus(uhci->bus);
-
-		reset_hc(uhci);
-		release_region(uhci->io_addr, uhci->io_size);
-
-		uhci_free_pending_qhs(uhci);
-
-		release_uhci(uhci);
-	}
-
+	pci_unregister_driver (&uhci_pci_driver);
+	
 	if (kmem_cache_destroy(uhci_up_cachep))
 		printk(KERN_INFO "uhci: not all urb_priv's were freed\n");
 
@@ -2478,16 +2534,9 @@ void uhci_cleanup(void)
 		printk(KERN_INFO "uhci: not all TD's were freed\n");
 }
 
-#ifdef MODULE
-int init_module(void)
-{
-	return uhci_init();
-}
+module_init(uhci_hcd_init);
+module_exit(uhci_hcd_cleanup);
 
-void cleanup_module(void)
-{
-	pm_unregister_all(handle_pm_event);
-	uhci_cleanup();
-}
-#endif //MODULE
+MODULE_AUTHOR("Linus Torvalds, Johannes Erdfelt, Randy Dunlap, Georg Acher, Deti Fliegl, Thomas Sailer, Roman Weissgaerber");
+MODULE_DESCRIPTION("USB Universal Host Controller Interface driver");
 

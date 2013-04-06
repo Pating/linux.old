@@ -3,32 +3,30 @@
  *
  *  Copyright (C) 1996-2000 Russell King - Converted to ARM.
  *  Origional Copyright (C) 1995  Linus Torvalds
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
  */
-
 #include <stdarg.h>
 
-#include <linux/errno.h>
+#include <linux/config.h>
 #include <linux/sched.h>
 #include <linux/kernel.h>
 #include <linux/mm.h>
-#include <linux/smp.h>
-#include <linux/smp_lock.h>
 #include <linux/stddef.h>
 #include <linux/unistd.h>
 #include <linux/ptrace.h>
 #include <linux/malloc.h>
-#include <linux/vmalloc.h>
 #include <linux/user.h>
-#include <linux/a.out.h>
-#include <linux/interrupt.h>
-#include <linux/config.h>
 #include <linux/delay.h>
 #include <linux/reboot.h>
 #include <linux/init.h>
 
-#include <asm/uaccess.h>
 #include <asm/system.h>
 #include <asm/io.h>
+#include <asm/leds.h>
+#include <asm/uaccess.h>
 
 /*
  * Values for cpu_do_idle()
@@ -38,7 +36,7 @@
 #define IDLE_CLOCK_SLOW	2
 #define IDLE_CLOCK_FAST	3
 
-extern char *processor_modes[];
+extern const char *processor_modes[];
 extern void setup_mm_for_reboot(char mode);
 
 asmlinkage void ret_from_sys_call(void) __asm__("ret_from_sys_call");
@@ -73,6 +71,12 @@ __setup("nohlt", nohlt_setup);
 __setup("hlt", hlt_setup);
 
 /*
+ * The following aren't currently used.
+ */
+void (*pm_idle)(void);
+void (*pm_power_off)(void);
+
+/*
  * The idle thread.  We try to conserve power, while trying to keep
  * overall latency low.  The architecture specific idle is passed
  * a value to indicate the level of "idleness" of the system.
@@ -81,11 +85,15 @@ void cpu_idle(void)
 {
 	/* endless idle loop with no priority at all */
 	init_idle();
-	current->priority = 0;
+	current->nice = 20;
 	current->counter = -100;
 
 	while (1) {
-		arch_idle();
+		void (*idle)(void) = pm_idle;
+		if (!idle)
+			idle = arch_idle;
+		while (!current->need_resched)
+			idle();
 		schedule();
 #ifndef CONFIG_NO_PGT_CACHE
 		check_pgt_cache();
@@ -102,6 +110,18 @@ int __init reboot_setup(char *str)
 }
 
 __setup("reboot=", reboot_setup);
+
+void machine_halt(void)
+{
+	leds_event(led_halted);
+}
+
+void machine_power_off(void)
+{
+	leds_event(led_halted);
+	if (pm_power_off)
+		pm_power_off();
+}
 
 void machine_restart(char * __unused)
 {
@@ -131,15 +151,6 @@ void machine_restart(char * __unused)
 	while (1);
 }
 
-void machine_halt(void)
-{
-}
-
-void machine_power_off(void)
-{
-	arch_power_off();
-}
-
 void show_regs(struct pt_regs * regs)
 {
 	unsigned long flags;
@@ -165,10 +176,11 @@ void show_regs(struct pt_regs * regs)
 		flags & CC_Z_BIT ? 'Z' : 'z',
 		flags & CC_C_BIT ? 'C' : 'c',
 		flags & CC_V_BIT ? 'V' : 'v');
-	printk("  IRQs %s  FIQs %s  Mode %s  Segment %s\n",
+	printk("  IRQs %s  FIQs %s  Mode %s%s  Segment %s\n",
 		interrupts_enabled(regs) ? "on" : "off",
 		fast_interrupts_enabled(regs) ? "on" : "off",
 		processor_modes[processor_mode(regs)],
+		thumb_mode(regs) ? " (T)" : "",
 		get_fs() == get_ds() ? "kernel" : "user");
 #if defined(CONFIG_CPU_32)
 	{
@@ -272,8 +284,8 @@ void exit_thread(void)
 
 void flush_thread(void)
 {
-	memset(&current->thread.debug, 0, sizeof(current->thread.debug));
-	memset(&current->thread.fpstate, 0, sizeof(current->thread.fpstate));
+	memset(&current->thread.debug, 0, sizeof(struct debug_info));
+	memset(&current->thread.fpstate, 0, sizeof(union fp_state));
 	current->used_math = 0;
 	current->flags &= ~PF_USEDFPU;
 }
@@ -283,6 +295,7 @@ void release_thread(struct task_struct *dead_task)
 }
 
 int copy_thread(int nr, unsigned long clone_flags, unsigned long esp,
+	unsigned long unused,
 	struct task_struct * p, struct pt_regs * regs)
 {
 	struct pt_regs * childregs;
@@ -318,19 +331,21 @@ int dump_fpu (struct pt_regs *regs, struct user_fp *fp)
  */
 void dump_thread(struct pt_regs * regs, struct user * dump)
 {
+	struct task_struct *tsk = current;
+
 	dump->magic = CMAGIC;
-	dump->start_code = current->mm->start_code;
+	dump->start_code = tsk->mm->start_code;
 	dump->start_stack = regs->ARM_sp & ~(PAGE_SIZE - 1);
 
-	dump->u_tsize = (current->mm->end_code - current->mm->start_code) >> PAGE_SHIFT;
-	dump->u_dsize = (current->mm->brk - current->mm->start_data + PAGE_SIZE - 1) >> PAGE_SHIFT;
+	dump->u_tsize = (tsk->mm->end_code - tsk->mm->start_code) >> PAGE_SHIFT;
+	dump->u_dsize = (tsk->mm->brk - tsk->mm->start_data + PAGE_SIZE - 1) >> PAGE_SHIFT;
 	dump->u_ssize = 0;
 
-	dump->u_debugreg[0] = current->thread.debug.bp[0].address;
-	dump->u_debugreg[1] = current->thread.debug.bp[1].address;
-	dump->u_debugreg[2] = current->thread.debug.bp[0].insn;
-	dump->u_debugreg[3] = current->thread.debug.bp[1].insn;
-	dump->u_debugreg[4] = current->thread.debug.nsaved;
+	dump->u_debugreg[0] = tsk->thread.debug.bp[0].address;
+	dump->u_debugreg[1] = tsk->thread.debug.bp[1].address;
+	dump->u_debugreg[2] = tsk->thread.debug.bp[0].insn;
+	dump->u_debugreg[3] = tsk->thread.debug.bp[1].insn;
+	dump->u_debugreg[4] = tsk->thread.debug.nsaved;
 
 	if (dump->start_stack < 0x04000000)
 		dump->u_ssize = (0x04000000 - dump->start_stack) >> PAGE_SHIFT;
@@ -353,10 +368,12 @@ pid_t kernel_thread(int (*fn)(void *), void *arg, unsigned long flags)
 	pid_t __ret;
 
 	__asm__ __volatile__(
-	"mov	r0, %1		@ kernel_thread sys_clone\n"
-"	mov	r1, #0\n"
-	__syscall(clone)"\n"
-"	mov	%0, r0"
+	"mov	r0, %1		@ kernel_thread sys_clone
+	mov	r1, #0
+	"__syscall(clone)"
+	teq	r0, #0		@ if we are the child
+	moveq	fp, #0		@ ensure that fp is zero
+	mov	%0, r0"
         : "=r" (__ret)
         : "Ir" (flags | CLONE_VM) : "r0", "r1");
 	if (__ret == 0)

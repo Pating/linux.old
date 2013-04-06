@@ -68,11 +68,10 @@ int __init dmx3191d_detect(Scsi_Host_Template *tmpl) {
 	while ((pdev = pci_find_device(PCI_VENDOR_ID_DOMEX,
 			PCI_DEVICE_ID_DOMEX_DMX3191D, pdev))) {
 
-#if LINUX_VERSION_CODE < KERNEL_VERSION(2,3,13)
-		unsigned long port = pdev->base_address[0] & PCI_IOADDRESS_MASK;
-#else
-		unsigned long port = pdev->resource[0].start;
-#endif	/* LINUX_VERSION_CODE < KERNEL_VERSION(2,3,13) */
+		unsigned long port = pci_resource_start (pdev, 0);
+
+		if (pci_enable_device(pdev))
+			continue;
 
 		if (check_region(port, DMX3191D_REGION)) {
 			dmx3191d_printk("region 0x%lx-0x%lx already reserved\n",
@@ -83,6 +82,11 @@ int __init dmx3191d_detect(Scsi_Host_Template *tmpl) {
 		request_region(port, DMX3191D_REGION, DMX3191D_DRIVER_NAME);
 
 		instance = scsi_register(tmpl, sizeof(struct NCR5380_hostdata));
+		if(instance == NULL)
+		{
+			release_region(port, DMX3191D_REGION);
+			continue;
+		}
 		instance->io_port = port;
 		instance->irq = pdev->irq;
 		NCR5380_init(instance, FLAG_NO_PSEUDO_DMA | FLAG_DTC3181E);
@@ -116,10 +120,6 @@ int dmx3191d_release_resources(struct Scsi_Host *instance)
 }
 
 
-#ifdef MODULE
-Scsi_Host_Template driver_template = DMX3191D;
-
+static Scsi_Host_Template driver_template = DMX3191D;
 #include "scsi_module.c"
-
-#endif	/* MODULE */
 

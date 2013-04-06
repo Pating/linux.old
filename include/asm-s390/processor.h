@@ -127,8 +127,6 @@ extern int kernel_thread(int (*fn)(void *), void * arg, unsigned long flags);
 /* Copy and release all segment info associated with a VM */
 #define copy_segments(nr, mm)           do { } while (0)
 #define release_segments(mm)            do { } while (0)
-#define forget_segments()               do { } while (0)
-
 
 /*
  * Return saved PC of a blocked thread. used in kernel/sched
@@ -149,7 +147,7 @@ unsigned long get_wchan(struct task_struct *p);
 #define alloc_task_struct() \
         ((struct task_struct *) __get_free_pages(GFP_KERNEL,1))
 #define free_task_struct(p)     free_pages((unsigned long)(p),1)
-#define get_task_struct(tsk)      atomic_inc(&mem_map[MAP_NR(tsk)].count)
+#define get_task_struct(tsk)      atomic_inc(&virt_to_page(tsk)->count)
 
 #define init_task       (init_task_union.task)
 #define init_stack      (init_task_union.stack)

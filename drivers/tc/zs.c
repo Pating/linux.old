@@ -559,10 +559,6 @@ static void do_softint(void *private_)
 	}
 }
 
-static void rs_timer(void)
-{
-}
-
 static int startup(struct dec_serial * info)
 {
 	unsigned long flags;
@@ -1576,7 +1572,6 @@ static void __init probe_sccs(void)
 {
 	struct dec_serial **pp;
 	int i, n, n_chips = 0, n_channels, chip, channel;
-	unsigned long flags;
 
 	/*
 	 * did we get here by accident?
@@ -1665,8 +1660,6 @@ int __init zs_init(void)
 
 	/* Setup base handler, and timer table. */
 	init_bh(SERIAL_BH, do_serial_bh);
-	timer_table[RS_TIMER].fn = rs_timer;
-	timer_table[RS_TIMER].expires = 0;
 
 	/* Find out how many Z8530 SCCs we have */
 	if (zs_chain == 0)
@@ -1839,7 +1832,6 @@ static void serial_console_write(struct console *co, const char *s,
 {
 	struct dec_serial *info;
 	int i;
-	unsigned char nine;
 
 	info = zs_soft + co->index;
 
@@ -2006,17 +1998,13 @@ static int __init serial_console_setup(struct console *co, char *options)
 }
 
 static struct console sercons = {
-	"ttyS",
-	serial_console_write,
-	NULL,
-	serial_console_device,
-	serial_console_wait_key,
-	NULL,
-	serial_console_setup,
-	CON_PRINTBUFFER,
-	-1,
-	0,
-	NULL
+	name:		"ttyS",
+	write:		serial_console_write,
+	device:		serial_console_device,
+	wait_key:	serial_console_wait_key,
+	setup:		serial_console_setup,
+	flags:		CON_PRINTBUFFER,
+	index:		-1,
 };
 
 /*

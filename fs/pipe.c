@@ -8,7 +8,6 @@
 #include <linux/file.h>
 #include <linux/poll.h>
 #include <linux/malloc.h>
-#include <linux/smp_lock.h>
 #include <linux/module.h>
 #include <linux/init.h>
 
@@ -285,7 +284,7 @@ pipe_poll(struct file *filp, poll_table *wait)
 
 	poll_wait(filp, PIPE_WAIT(*inode), wait);
 
-	/* Reading only -- no need for aquiring the semaphore.  */
+	/* Reading only -- no need for acquiring the semaphore.  */
 	mask = POLLIN | POLLRDNORM;
 	if (PIPE_EMPTY(*inode))
 		mask = POLLOUT | POLLWRNORM;
@@ -466,6 +465,13 @@ fail_page:
 }
 
 static struct vfsmount *pipe_mnt;
+static int pipefs_delete_dentry(struct dentry *dentry)
+{
+	return 1;
+}
+static struct dentry_operations pipefs_dentry_operations = {
+	d_delete:	pipefs_delete_dentry,
+};
 
 static struct inode * get_pipe_inode(void)
 {
@@ -534,14 +540,15 @@ int do_pipe(int *fd)
 	j = error;
 
 	error = -ENOMEM;
-	sprintf(name, "%lu", inode->i_ino);
+	sprintf(name, "[%lu]", inode->i_ino);
 	this.name = name;
 	this.len = strlen(name);
-	/* We don't care for hash - it will never be looked up */
+	this.hash = inode->i_ino; /* will go */
 	dentry = d_alloc(pipe_mnt->mnt_sb->s_root, &this);
 	if (!dentry)
 		goto close_f12_inode_i_j;
-	d_instantiate(dentry, inode);
+	dentry->d_op = &pipefs_dentry_operations;
+	d_add(dentry, inode);
 	f1->f_vfsmnt = f2->f_vfsmnt = mntget(mntget(pipe_mnt));
 	f1->f_dentry = f2->f_dentry = dget(dentry);
 
@@ -601,7 +608,7 @@ static struct super_operations pipefs_ops = {
 
 static struct super_block * pipefs_read_super(struct super_block *sb, void *data, int silent)
 {
-	struct inode *root = get_empty_inode();
+	struct inode *root = new_inode(sb);
 	if (!root)
 		return NULL;
 	root->i_mode = S_IFDIR | S_IRUSR | S_IWUSR;
@@ -631,7 +638,9 @@ static int __init init_pipe_fs(void)
 	if (!err) {
 		pipe_mnt = kern_mount(&pipe_fs_type);
 		err = PTR_ERR(pipe_mnt);
-		if (!IS_ERR(pipe_mnt))
+		if (IS_ERR(pipe_mnt))
+			unregister_filesystem(&pipe_fs_type);
+		else
 			err = 0;
 	}
 	return err;

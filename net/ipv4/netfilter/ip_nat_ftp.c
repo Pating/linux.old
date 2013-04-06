@@ -54,13 +54,13 @@ ftp_nat_expected(struct sk_buff **pskb,
 		newdstip = master->tuplehash[IP_CT_DIR_ORIGINAL].tuple.src.ip;
 		newsrcip = master->tuplehash[IP_CT_DIR_ORIGINAL].tuple.dst.ip;
 		DEBUGP("nat_expected: PORT cmd. %u.%u.%u.%u->%u.%u.%u.%u\n",
-		       IP_PARTS(newsrcip), IP_PARTS(newdstip));
+		       NIPQUAD(newsrcip), NIPQUAD(newdstip));
 	} else {
 		/* PASV command: make the connection go to the server */
 		newdstip = master->tuplehash[IP_CT_DIR_REPLY].tuple.src.ip;
 		newsrcip = master->tuplehash[IP_CT_DIR_REPLY].tuple.dst.ip;
 		DEBUGP("nat_expected: PASV cmd. %u.%u.%u.%u->%u.%u.%u.%u\n",
-		       IP_PARTS(newsrcip), IP_PARTS(newdstip));
+		       NIPQUAD(newsrcip), NIPQUAD(newdstip));
 	}
 	UNLOCK_BH(&ip_ftp_lock);
 
@@ -69,13 +69,21 @@ ftp_nat_expected(struct sk_buff **pskb,
 	else
 		newip = newdstip;
 
-	DEBUGP("nat_expected: IP to %u.%u.%u.%u\n", IP_PARTS(newip));
+	DEBUGP("nat_expected: IP to %u.%u.%u.%u\n", NIPQUAD(newip));
 
 	mr.rangesize = 1;
-	/* We don't want to manip the per-protocol, just the IPs. */
+	/* We don't want to manip the per-protocol, just the IPs... */
 	mr.range[0].flags = IP_NAT_RANGE_MAP_IPS;
 	mr.range[0].min_ip = mr.range[0].max_ip = newip;
 
+	/* ... unless we're doing a MANIP_DST, in which case, make
+	   sure we map to the correct port */
+	if (HOOK2MANIP(hooknum) == IP_NAT_MANIP_DST) {
+		mr.range[0].flags |= IP_NAT_RANGE_PROTO_SPECIFIED;
+		mr.range[0].min = mr.range[0].max
+			= ((union ip_conntrack_manip_proto)
+				{ htons(ftpinfo->port) });
+	}
 	*verdict = ip_nat_setup_info(ct, &mr, hooknum);
 
 	return 1;
@@ -102,7 +110,7 @@ mangle_packet(struct sk_buff **pskb,
 
 	MUST_BE_LOCKED(&ip_ftp_lock);
 	sprintf(buffer, "%u,%u,%u,%u,%u,%u",
-		IP_PARTS(newip), port>>8, port&0xFF);
+		NIPQUAD(newip), port>>8, port&0xFF);
 
 	tcplen = (*pskb)->len - iph->ihl * 4;
 	newtcplen = tcplen - matchlen + strlen(buffer);
@@ -118,12 +126,13 @@ mangle_packet(struct sk_buff **pskb,
 			       NIPQUAD((*pskb)->nh.iph->saddr),
 			       NIPQUAD((*pskb)->nh.iph->daddr),
 			       (*pskb)->nh.iph->protocol);
-		return NF_DROP;
+		return 0;
 	}
 
 	if (newlen > (*pskb)->len + skb_tailroom(*pskb)) {
 		struct sk_buff *newskb;
-		newskb = skb_copy_expand(*pskb, skb_headroom(*pskb), newlen,
+		newskb = skb_copy_expand(*pskb, skb_headroom(*pskb),
+					 newlen - (*pskb)->len,
 					 GFP_ATOMIC);
 		if (!newskb) {
 			DEBUGP("ftp: oom\n");
@@ -235,10 +244,16 @@ static int ftp_data_fixup(const struct ip_ct_ftp *ct_ftp_info,
 			  struct sk_buff **pskb)
 {
 	u_int32_t newip;
-	struct ip_conntrack_tuple t;
 	struct iphdr *iph = (*pskb)->nh.iph;
 	struct tcphdr *tcph = (void *)iph + iph->ihl*4;
+	u_int16_t port;
+	struct ip_conntrack_tuple tuple;
+	/* Don't care about source port */
+	const struct ip_conntrack_tuple mask
+		= { { 0xFFFFFFFF, { 0 } },
+		    { 0xFFFFFFFF, { 0xFFFF }, 0xFFFF } };
 
+	memset(&tuple, 0, sizeof(tuple));
 	MUST_BE_LOCKED(&ip_ftp_lock);
 	DEBUGP("FTP_NAT: seq %u + %u in %u + %u\n",
 	       ct_ftp_info->seq, ct_ftp_info->len,
@@ -250,26 +265,34 @@ static int ftp_data_fixup(const struct ip_ct_ftp *ct_ftp_info,
 		/* PASV response: must be where client thinks server
 		   is */
 		newip = ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple.dst.ip;
+		/* Expect something from client->server */
+		tuple.src.ip = ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple.src.ip;
+		tuple.dst.ip = ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple.dst.ip;
 	} else {
 		/* PORT command: must be where server thinks client is */
 		newip = ct->tuplehash[IP_CT_DIR_REPLY].tuple.dst.ip;
+		/* Expect something from server->client */
+		tuple.src.ip = ct->tuplehash[IP_CT_DIR_REPLY].tuple.src.ip;
+		tuple.dst.ip = ct->tuplehash[IP_CT_DIR_REPLY].tuple.dst.ip;
 	}
+	tuple.dst.protonum = IPPROTO_TCP;
 
-	if (!mangle_packet(pskb, newip, ct_ftp_info->port,
+	/* Try to get same port: if not, try to change it. */
+	for (port = ct_ftp_info->port; port != 0; port++) {
+		tuple.dst.u.tcp.port = htons(port);
+
+		if (ip_conntrack_expect_related(ct, &tuple, &mask, NULL) == 0)
+			break;
+	}
+	if (port == 0)
+		return 0;
+
+	if (!mangle_packet(pskb, newip, port,
 			   ct_ftp_info->seq - ntohl(tcph->seq),
 			   ct_ftp_info->len,
 			   &ftp[ct_ftp_info->ftptype],
 			   &ftp[!ct_ftp_info->ftptype]))
 		return 0;
-
-	/* Alter conntrack's expectations. */
-
-	/* We can read expect here without conntrack lock, since it's
-	   only set in ip_conntrack_ftp, with ip_ftp_lock held
-	   writable */
-	t = ct->expected.tuple;
-	t.dst.ip = newip;
-	ip_conntrack_expect_related(ct, &t);
 
 	return 1;
 }
@@ -349,8 +372,9 @@ static unsigned int help(struct ip_conntrack *ct,
 		newseq = ntohl(tcph->seq) + ftp[dir].syn_offset_before;
 	newseq = htonl(newseq);
 
-	/* Ack adjust */
-	if (after(ntohl(tcph->ack_seq), ftp[!dir].syn_correction_pos))
+	/* Ack adjust: other dir sees offset seq numbers */
+	if (after(ntohl(tcph->ack_seq) - ftp[!dir].syn_offset_before, 
+		  ftp[!dir].syn_correction_pos))
 		newack = ntohl(tcph->ack_seq) - ftp[!dir].syn_offset_after;
 	else
 		newack = ntohl(tcph->ack_seq) - ftp[!dir].syn_offset_before;
@@ -367,8 +391,12 @@ static unsigned int help(struct ip_conntrack *ct,
 	return NF_ACCEPT;
 }
 
-static struct ip_nat_helper ftp
-= { { NULL, NULL }, IPPROTO_TCP, __constant_htons(21), help, "ftp" };
+static struct ip_nat_helper ftp = { { NULL, NULL },
+				    { { 0, { __constant_htons(21) } },
+				      { 0, { 0 }, IPPROTO_TCP } },
+				    { { 0, { 0xFFFF } },
+				      { 0, { 0 }, 0xFFFF } },
+				    help, "ftp" };
 static struct ip_nat_expect ftp_expect
 = { { NULL, NULL }, ftp_nat_expected };
 

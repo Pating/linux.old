@@ -1,4 +1,4 @@
-/* $Id: elf.h,v 1.24 2000/04/14 09:59:04 davem Exp $ */
+/* $Id: elf.h,v 1.25 2000/07/12 01:27:08 davem Exp $ */
 #ifndef __ASM_SPARC64_ELF_H
 #define __ASM_SPARC64_ELF_H
 
@@ -36,7 +36,7 @@ typedef struct {
  * This is used to ensure we don't load something for the wrong architecture.
  */
 #ifndef elf_check_arch
-#define elf_check_arch(x) ((x) == ELF_ARCH)	/* Might be EM_SPARCV9 or EM_SPARC */
+#define elf_check_arch(x) ((x)->e_machine == ELF_ARCH)	/* Might be EM_SPARCV9 or EM_SPARC */
 #endif
 
 #define USE_ELF_CORE_DUMP

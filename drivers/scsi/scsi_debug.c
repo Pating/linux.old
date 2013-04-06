@@ -554,9 +554,21 @@ static void scsi_debug_send_self_command(struct Scsi_Host * shpnt)
         
         printk("Allocating host dev\n");
         sdev = scsi_get_host_dev(shpnt);
+        if(sdev==NULL)
+        {
+        	printk("Out of memory.\n");
+        	return;
+        }
+        
         printk("Got %p. Allocating command block\n", sdev);
         scp  = scsi_allocate_request(sdev);
         printk("Got %p\n", scp);
+        
+        if(scp==NULL)
+        {
+        	printk("Out of memory.\n");
+        	goto bail;
+        }
 
         scp->sr_cmd_len = 6;
         scp->sr_use_sg = 0;
@@ -567,7 +579,8 @@ static void scsi_debug_send_self_command(struct Scsi_Host * shpnt)
         
         printk("Releasing command\n");
         scsi_release_request(scp);
-        printk("Freeing device\n");
+bail:
+	printk("Freeing device\n");
         scsi_free_host_dev(sdev);
 }
 
@@ -762,17 +775,17 @@ void *scsi_debug_get_handle(void)
 	static Scsi_Host_Template driver_copy = SCSI_DEBUG;
 	void *rtn;
 	rtn = kmalloc(sizeof(driver_copy), GFP_ATOMIC);
+	if(rtn==NULL)
+		return NULL;
 	memcpy(rtn, (void *) &driver_copy, sizeof(driver_copy));
 	return rtn;
 }
 #endif
 
-#ifdef MODULE
 /* Eventually this will go into an include file, but this will be later */
-Scsi_Host_Template driver_template = SCSI_DEBUG;
+static Scsi_Host_Template driver_template = SCSI_DEBUG;
 
 #include "scsi_module.c"
-#endif
 
 /*
  * Overrides for Emacs so that we almost follow Linus's tabbing style.

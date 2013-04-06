@@ -1,4 +1,4 @@
-/* $Id: ioport.c,v 1.37 2000/03/28 06:38:19 davem Exp $
+/* $Id: ioport.c,v 1.42 2000/12/05 00:56:36 anton Exp $
  * ioport.c:  Simple io mapping allocator.
  *
  * Copyright (C) 1995 David S. Miller (davem@caip.rutgers.edu)
@@ -43,6 +43,8 @@
 #include <asm/pgalloc.h>
 #include <asm/pgtable.h>
 
+#define mmu_inval_dma_area(p, l)	/* Anton pulled it out for 2.4.0-xx */
+
 struct resource *_sparc_find_resource(struct resource *r, unsigned long);
 
 static void *_sparc_ioremap(struct resource *res, u32 bus, u32 pa, int sz);
@@ -52,11 +54,11 @@ static void _sparc_free_io(struct resource *res);
 
 /* This points to the next to use virtual memory for DVMA mappings */
 static struct resource _sparc_dvma = {
-	"sparc_dvma", DVMA_VADDR, DVMA_VADDR + DVMA_LEN - 1
+	"sparc_dvma", DVMA_VADDR, DVMA_END - 1
 };
 /* This points to the start of I/O mappings, cluable from outside. */
 /*ext*/ struct resource sparc_iomap = {
-	"sparc_iomap", IOBASE_VADDR, IOBASE_END-1
+	"sparc_iomap", IOBASE_VADDR, IOBASE_END - 1
 };
 
 /*
@@ -242,6 +244,7 @@ static void _sparc_free_io(struct resource *res)
 	unsigned long plen;
 
 	plen = res->end - res->start + 1;
+	plen = (plen + PAGE_SIZE-1) & PAGE_MASK;
 	while (plen != 0) {
 		plen -= PAGE_SIZE;
 		(*_sparc_unmapioaddr)(res->start + plen);
@@ -321,7 +324,7 @@ void sbus_free_consistent(struct sbus_dev *sdev, long n, void *p, u32 ba)
 		return;
 	}
 
-	if (((unsigned long)p & (PAGE_MASK-1)) != 0) {
+	if (((unsigned long)p & (PAGE_SIZE-1)) != 0) {
 		printk("sbus_free_consistent: unaligned va %p\n", p);
 		return;
 	}
@@ -444,6 +447,7 @@ void sbus_unmap_sg(struct sbus_dev *sdev, struct scatterlist *sg, int n, int dir
  */
 void sbus_dma_sync_single(struct sbus_dev *sdev, u32 ba, long size, int direction)
 {
+#if 0
 	unsigned long va;
 	struct resource *res;
 
@@ -453,7 +457,12 @@ void sbus_dma_sync_single(struct sbus_dev *sdev, u32 ba, long size, int directio
 		panic("sbus_dma_sync_single: 0x%x\n", ba);
 
 	va = (unsigned long) phys_to_virt(mmu_translate_dvma(ba));
-	mmu_inval_dma_area(va, (size + PAGE_SIZE-1) & PAGE_MASK);
+	/*
+	 * XXX This bogosity will be fixed with the iommu rewrite coming soon
+	 * to a kernel near you. - Anton
+	 */
+	/* mmu_inval_dma_area(va, (size + PAGE_SIZE-1) & PAGE_MASK); */
+#endif
 }
 
 void sbus_dma_sync_sg(struct sbus_dev *sdev, struct scatterlist *sg, int n, int direction)
@@ -490,7 +499,7 @@ void *pci_alloc_consistent(struct pci_dev *pdev, size_t len, dma_addr_t *pba)
 
 	if ((res = kmalloc(sizeof(struct resource), GFP_KERNEL)) == NULL) {
 		free_pages(va, order);
-		printk("sbus_alloc_consistent: no core\n");
+		printk("pci_alloc_consistent: no core\n");
 		return NULL;
 	}
 	memset((char*)res, 0, sizeof(struct resource));
@@ -540,18 +549,18 @@ void pci_free_consistent(struct pci_dev *pdev, size_t n, void *p, dma_addr_t ba)
 
 	if ((res = _sparc_find_resource(&_sparc_dvma,
 	    (unsigned long)p)) == NULL) {
-		printk("sbus_free_consistent: cannot free %p\n", p);
+		printk("pci_free_consistent: cannot free %p\n", p);
 		return;
 	}
 
-	if (((unsigned long)p & (PAGE_MASK-1)) != 0) {
-		printk("sbus_free_consistent: unaligned va %p\n", p);
+	if (((unsigned long)p & (PAGE_SIZE-1)) != 0) {
+		printk("pci_free_consistent: unaligned va %p\n", p);
 		return;
 	}
 
 	n = (n + PAGE_SIZE-1) & PAGE_MASK;
 	if ((res->end-res->start)+1 != n) {
-		printk("sbus_free_consistent: region 0x%lx asked 0x%lx\n",
+		printk("pci_free_consistent: region 0x%lx asked 0x%lx\n",
 		    (long)((res->end-res->start)+1), (long)n);
 		return;
 	}
@@ -577,7 +586,8 @@ void pci_free_consistent(struct pci_dev *pdev, size_t n, void *p, dma_addr_t ba)
  * Once the device is given the dma address, the device owns this memory
  * until either pci_unmap_single or pci_dma_sync_single is performed.
  */
-dma_addr_t pci_map_single(struct pci_dev *hwdev, void *ptr, size_t size, int direction)
+dma_addr_t pci_map_single(struct pci_dev *hwdev, void *ptr, size_t size,
+    int direction)
 {
 	if (direction == PCI_DMA_NONE)
 		BUG();

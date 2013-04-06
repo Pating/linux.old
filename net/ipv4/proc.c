@@ -7,7 +7,7 @@
  *		PROC file system.  It is mainly used for debugging and
  *		statistics.
  *
- * Version:	$Id: proc.c,v 1.42 2000/04/16 01:11:37 davem Exp $
+ * Version:	$Id: proc.c,v 1.44 2000/08/09 11:59:04 davem Exp $
  *
  * Authors:	Fred N. van Kempen, <waltje@uWalt.NL.Mugnet.ORG>
  *		Gerald J. Heim, <heim@peanuts.informatik.uni-tuebingen.de>
@@ -71,13 +71,17 @@ int afinet_get_info(char *buffer, char **start, off_t offset, int length)
 
 	int len  = socket_get_info(buffer,start,offset,length);
 
-	len += sprintf(buffer+len,"TCP: inuse %d orphan %d tw %d\n",
+	len += sprintf(buffer+len,"TCP: inuse %d orphan %d tw %d alloc %d mem %d\n",
 		       fold_prot_inuse(&tcp_prot),
-		       atomic_read(&tcp_orphan_count), tcp_tw_count);
+		       atomic_read(&tcp_orphan_count), tcp_tw_count,
+		       atomic_read(&tcp_sockets_allocated),
+		       atomic_read(&tcp_memory_allocated));
 	len += sprintf(buffer+len,"UDP: inuse %d\n",
 		       fold_prot_inuse(&udp_prot));
 	len += sprintf(buffer+len,"RAW: inuse %d\n",
 		       fold_prot_inuse(&raw_prot));
+	len += sprintf(buffer+len, "FRAG: inuse %d memory %d\n",
+		       ip_frag_nqueues, atomic_read(&ip_frag_mem));
 	if (offset >= len)
 	{
 		*start = buffer;
@@ -173,7 +177,22 @@ int netstat_get_info(char *buffer, char **start, off_t offset, int length)
 		      " ListenOverflows ListenDrops"
 		      " TCPPrequeued TCPDirectCopyFromBacklog"
 		      " TCPDirectCopyFromPrequeue TCPPrequeueDropped"
-		      " TCPHPHits TCPHPHitsToUser\n"
+		      " TCPHPHits TCPHPHitsToUser"
+		      " TCPPureAcks TCPHPAcks"
+		      " TCPRenoRecovery TCPSackRecovery"
+		      " TCPSACKReneging"
+		      " TCPFACKReorder TCPSACKReorder TCPRenoReorder TCPTSReorder"
+		      " TCPFullUndo TCPPartialUndo TCPDSACKUndo TCPLossUndo"
+		      " TCPLoss TCPLostRetransmit"
+		      " TCPRenoFailures TCPSackFailures TCPLossFailures"
+		      " TCPFastRetrans TCPForwardRetrans TCPSlowStartRetrans"
+		      " TCPTimeouts"
+		      " TCPRenoRecoveryFail TCPSackRecoveryFail"
+		      " TCPSchedulerFailed TCPRcvCollapsed"
+		      " TCPDSACKOldSent TCPDSACKOfoSent TCPDSACKRecv TCPDSACKOfoRecv"
+		      " TCPAbortOnSyn TCPAbortOnData TCPAbortOnClose"
+		      " TCPAbortOnMemory TCPAbortOnTimeout TCPAbortOnLinger"
+		      " TCPAbortFailed TCPMemoryPressures\n"
 		      "TcpExt:");
 	for (i=0; i<offsetof(struct linux_mib, __pad)/sizeof(unsigned long); i++)
 		len += sprintf(buffer+len, " %lu", fold_field((unsigned long*)net_statistics, sizeof(struct linux_mib), i));

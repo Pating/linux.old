@@ -28,12 +28,6 @@
 #include <asm/atomic.h>
 #include <asm/processor.h>
 
-static inline void console_verbose(void)
-{
-	extern int console_loglevel;
-	console_loglevel = 15;
-}
-
 #define DO_ERROR(trapnr, signr, str, name, tsk) \
 asmlinkage void do_##name(unsigned long r4, unsigned long r5, \
 			  unsigned long r6, unsigned long r7, \
@@ -131,9 +125,16 @@ void dump_stack(void)
 
 	asm("mov	$r15, %0" : "=r" (start));
 	asm("stc	$r7_bank, %0" : "=r" (end));
-	end += 8192;
+	end += 8192/4;
 
 	printk("%08lx:%08lx\n", (unsigned long)start, (unsigned long)end);
-	for (p=start; p < end; p++)
-		printk("%08lx\n", *p);
+	for (p=start; p < end; p++) {
+		extern long _text, _etext;
+		unsigned long v=*p;
+
+		if ((v >= (unsigned long )&_text)
+		    && (v <= (unsigned long )&_etext)) {
+			printk("%08lx\n", v);
+		}
+	}
 }

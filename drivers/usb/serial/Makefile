@@ -3,27 +3,23 @@
 #
 
 O_TARGET	:= usb-serial.o
-M_OBJS		:= usb-serial.o
-O_OBJS		:= usbserial.o
-MOD_LIST_NAME	:= USB_SERIAL_MODULES
 
-ifeq ($(CONFIG_USB_SERIAL_VISOR),y)
-	O_OBJS += visor.o
-endif
-ifeq ($(CONFIG_USB_SERIAL_WHITEHEAT),y)
-	O_OBJS += whiteheat.o
-endif
-ifeq ($(CONFIG_USB_SERIAL_FTDI_SIO),y)
-	O_OBJS += ftdi_sio.o
-endif
-ifeq ($(CONFIG_USB_SERIAL_KEYSPAN_PDA),y)
-	O_OBJS += keyspan_pda.o
-endif
-ifeq ($(CONFIG_USB_SERIAL_OMNINET),y)
-	O_OBJS += omninet.o
-endif
-ifeq ($(CONFIG_USB_SERIAL_DIGI_ACCELEPORT),y)
-	O_OBJS += digi_acceleport.o
-endif
+# Object file lists.
+
+obj-$(CONFIG_USB_SERIAL)                        += usbserial.o
+obj-$(CONFIG_USB_SERIAL_VISOR)			+= visor.o
+obj-$(CONFIG_USB_SERIAL_WHITEHEAT)		+= whiteheat.o
+obj-$(CONFIG_USB_SERIAL_FTDI_SIO)		+= ftdi_sio.o
+obj-$(CONFIG_USB_SERIAL_KEYSPAN_PDA)		+= keyspan_pda.o
+obj-$(CONFIG_USB_SERIAL_KEYSPAN)		+= keyspan.o
+obj-$(CONFIG_USB_SERIAL_OMNINET)		+= omninet.o
+obj-$(CONFIG_USB_SERIAL_DIGI_ACCELEPORT)	+= digi_acceleport.o
+obj-$(CONFIG_USB_SERIAL_BELKIN)			+= belkin_sa.o
+obj-$(CONFIG_USB_SERIAL_EMPEG)			+= empeg.o
+obj-$(CONFIG_USB_SERIAL_MCT_U232)		+= mct_u232.o
  
+# Objects that export symbols.
+export-objs	:= usbserial.o
+
 include $(TOPDIR)/Rules.make
+

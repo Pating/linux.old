@@ -34,6 +34,20 @@
  </bookinfo>
 
 <toc></toc>
+  <chapter id="adt">
+     <title>Data Types</title>
+     <sect1><title>Doubly Linked Lists</title>
+!Iinclude/linux/list.h
+     </sect1>
+  </chapter>
+
+  <chapter id="mm">
+     <title>Memory Management in Linux</title>
+     <sect1><title>The Slab Cache</title>
+!Emm/slab.c
+      </sect1>
+  </chapter>
+
   <chapter id="vfs">
      <title>The Linux VFS</title>
      <sect1><title>The Directory Cache</title>
@@ -46,6 +60,10 @@
      </sect1>
      <sect1><title>Registration and Superblocks</title>
 !Efs/super.c
+     </sect1>
+     <sect1><title>File Locks</title>
+!Efs/locks.c
+!Ifs/locks.c
      </sect1>
   </chapter>
 
@@ -111,6 +129,11 @@
 !Ekernel/pm.c
   </chapter>
 
+  <chapter id="blkdev">
+     <title>Block Devices</title>
+!Edrivers/block/ll_rw_blk.c
+  </chapter>
+
   <chapter id="miscdev">
      <title>Miscellaneous Devices</title>
 !Edrivers/char/misc.c
@@ -118,7 +141,7 @@
 
   <chapter id="viddev">
      <title>Video4Linux</title>
-!Edrivers/char/videodev.c
+!Edrivers/media/video/videodev.c
   </chapter>
 
   <chapter id="snddev">
@@ -127,6 +150,10 @@
 !Idrivers/sound/sound_firmware.c
   </chapter>
 
+  <chapter id="usb">
+     <title>USB Devices</title>
+!Edrivers/usb/usb.c
+  </chapter>
 
   <chapter id="uart16x50">
      <title>16x50 UART Driver</title>

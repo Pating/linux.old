@@ -1,5 +1,4 @@
-/* $Id: setup.c,v 1.28 2000/03/13 22:21:44 harald Exp $
- *
+/*
  * This file is subject to the terms and conditions of the GNU General Public
  * License.  See the file "COPYING" in the main directory of this archive
  * for more details.
@@ -25,6 +24,7 @@
 #include <linux/utsname.h>
 #include <linux/a.out.h>
 #include <linux/tty.h>
+#include <linux/bootmem.h>
 #ifdef CONFIG_BLK_DEV_RAM
 #include <linux/blk.h>
 #endif
@@ -76,7 +76,7 @@ extern struct fd_ops no_fd_ops;
 struct fd_ops *fd_ops;
 #endif
 
-#ifdef CONFIG_BLK_DEV_IDE
+#if defined(CONFIG_BLK_DEV_IDE) || defined(CONFIG_BLK_DEV_IDE_MODULE)
 extern struct ide_ops no_ide_ops;
 struct ide_ops *ide_ops;
 #endif
@@ -84,8 +84,10 @@ struct ide_ops *ide_ops;
 extern struct rtc_ops no_rtc_ops;
 struct rtc_ops *rtc_ops;
 
+#ifdef CONFIG_PC_KEYB
 extern struct kbd_ops no_kbd_ops;
 struct kbd_ops *kbd_ops;
+#endif
 
 /*
  * Setup information
@@ -199,6 +201,9 @@ static inline void cpu_probe(void)
 	case PRID_IMP_R10000:
 		mips_cputype = CPU_R10000;
 		break;
+	case PRID_IMP_RM7000:
+		mips_cputype = CPU_R5000;
+		break;
 	default:
 		mips_cputype = CPU_UNKNOWN;
 	}
@@ -248,10 +253,6 @@ static void __init default_irq_setup(void)
 
 void __init setup_arch(char **cmdline_p)
 {
-#ifdef CONFIG_BLK_DEV_INITRD
-	unsigned long tmp;
-	unsigned long *initrd_header;
-#endif
 	void baget_setup(void);
 	void cobalt_setup(void);
 	void decstation_setup(void);
@@ -260,6 +261,7 @@ void __init setup_arch(char **cmdline_p)
 	void sni_rm200_pci_setup(void);
 	void sgi_setup(void);
 	void ddb_setup(void);
+	void orion_setup(void);
 
 	/* Save defaults for configuration-dependent routines.  */
 	irq_setup = default_irq_setup;
@@ -272,8 +274,11 @@ void __init setup_arch(char **cmdline_p)
 	ide_ops = &no_ide_ops;
 #endif
 
-	rtc_ops = &no_rtc_ops;
+#ifdef CONFIG_PC_KEYB
 	kbd_ops = &no_kbd_ops;
+#endif
+	
+	rtc_ops = &no_rtc_ops;
 
 	switch(mips_machgroup)
 	{
@@ -311,6 +316,11 @@ void __init setup_arch(char **cmdline_p)
 #ifdef CONFIG_DDB5074
 	case MACH_GROUP_NEC_DDB:
 		ddb_setup();
+		break;
+#endif
+#ifdef CONFIG_ORION
+	case MACH_GROUP_ORION:
+		orion_setup();
 		break;
 #endif
 	default:

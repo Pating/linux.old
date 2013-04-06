@@ -45,8 +45,6 @@ int           s390_request_irq( unsigned int irq,
                      const char    *devname,
                      void          *dev_id);
 
-atomic_t nmi_counter;
-
 #if 0
 /*
  * The following vectors are part of the Linux architecture, there
@@ -105,7 +103,7 @@ int get_irq_list(char *buf)
 	
 	} /* endfor */
 
-	p += sprintf(p, "NMI: %10u\n", atomic_read(&nmi_counter));
+	p += sprintf(p, "NMI: %10u\n", nmi_counter);
 #ifdef CONFIG_SMP
 	p += sprintf(p, "IPI: %10u\n", atomic_read(&ipi_count));
 #endif
@@ -145,9 +143,9 @@ static void show(char * str)
 
 	printk("\n%s, CPU %d:\n", str, cpu);
 	printk("irq:  %d [%d]\n",
-	       atomic_read(&global_irq_count),atomic_read(&S390_lowcore.local_irq_count));
+	       atomic_read(&global_irq_count),local_irq_count(smp_processor_id()));
 	printk("bh:   %d [%d]\n",
-	       atomic_read(&global_bh_count),atomic_read(&S390_lowcore.local_bh_count));
+	       atomic_read(&global_bh_count),local_bh_count(smp_processor_id()));
 	stack = (unsigned long *) &str;
 	for (i = 40; i ; i--) {
 		unsigned long x = *++stack;
@@ -183,7 +181,7 @@ static inline void wait_on_irq(int cpu)
 		 * already executing in one..
 		 */
 		if (!atomic_read(&global_irq_count)) {
-			if (atomic_read(&safe_get_cpu_lowcore(cpu).local_bh_count)||
+			if (local_bh_count(cpu)||
 			    !atomic_read(&global_bh_count))
 				break;
 		}
@@ -204,7 +202,7 @@ static inline void wait_on_irq(int cpu)
 				continue;
 			if (atomic_read(&global_irq_lock))
 				continue;
-			if (!(atomic_read(&safe_get_cpu_lowcore(cpu).local_bh_count))
+			if (!local_bh_count(cpu)
 			    && atomic_read(&global_bh_count))
 				continue;
 			if (!test_and_set_bit(0,&global_irq_lock))
@@ -290,7 +288,7 @@ void __global_cli(void)
 	if (flags & (1 << EFLAGS_I_SHIFT)) {
 		int cpu = smp_processor_id();
 		__cli();
-		if (!atomic_read(&S390_lowcore.local_irq_count))
+		if (!in_irq())
 			get_irqlock(cpu);
 	}
 }
@@ -298,7 +296,7 @@ void __global_cli(void)
 void __global_sti(void)
 {
 
-	if (!atomic_read(&S390_lowcore.local_irq_count))
+	if (!in_irq())
 		release_irqlock(smp_processor_id());
 	__sti();
 }
@@ -322,7 +320,7 @@ unsigned long __global_save_flags(void)
 	retval = 2 + local_enabled;
 
 	/* check for global flags if we're not in an interrupt */
-	if (!atomic_read(&S390_lowcore.local_irq_count))
+	if (!in_irq())
 	{
 		if (local_enabled)
 			retval = 1;

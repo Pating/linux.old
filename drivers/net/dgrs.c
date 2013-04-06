@@ -4,7 +4,7 @@
  *	The RightSwitch is a 4 (EISA) or 6 (PCI) port etherswitch and
  *	a NIC on an internal board.
  *
- *	Author: Rick Richardson, rick@dgii.com, rick_richardson@dgii.com
+ *	Author: Rick Richardson, rick@remotepoint.com
  *	Derived from the SVR4.2 (UnixWare) driver for the same card.
  *
  *	Copyright 1995-1996 Digi International Inc.
@@ -73,7 +73,7 @@
  *
  */
 
-static char *version = "$Id: dgrs.c,v 1.12 1996/12/21 13:43:58 rick Exp $";
+static char *version = "$Id: dgrs.c,v 1.13 2000/06/06 04:07:00 rick Exp $";
 
 #include <linux/version.h>
 #include <linux/module.h>
@@ -129,6 +129,14 @@ typedef unsigned int bool;
 #include "dgrs_ether.h"
 #include "dgrs_asstruct.h"
 #include "dgrs_bcomm.h"
+
+#if LINUX_VERSION_CODE >= 0x20400
+static struct pci_device_id dgrs_pci_tbl[] __initdata = {
+	{ SE6_PCI_VENDOR_ID, SE6_PCI_DEVICE_ID, PCI_ANY_ID, PCI_ANY_ID, },
+	{ }			/* Terminating entry */
+};
+MODULE_DEVICE_TABLE(pci, dgrs_pci_tbl);
+#endif /* LINUX_VERSION_CODE >= 0x20400 */
 
 /*
  *	Firmware.  Compiled separately for local compilation,
@@ -206,7 +214,7 @@ typedef struct
         I596_RFD        *rfdp;          /* Current RFD list */
         I596_RBD        *rbdp;          /* Current RBD list */
 
-        int             intrcnt;        /* Count of interrupts */
+        volatile int    intrcnt;        /* Count of interrupts */
 
         /*
          *      SE-4 (EISA) board variables
@@ -788,9 +796,6 @@ static int
 dgrs_open( struct net_device *dev )
 {
 	netif_start_queue(dev);
-
-	MOD_INC_USE_COUNT;
-
 	return (0);
 }
 
@@ -800,9 +805,6 @@ dgrs_open( struct net_device *dev )
 static int dgrs_close( struct net_device *dev )
 {
 	netif_stop_queue(dev);
-
-	MOD_DEC_USE_COUNT;
-
 	return (0);
 }
 
@@ -1092,6 +1094,7 @@ dgrs_download(struct net_device *dev0)
 
 	for (i = jiffies + 8 * HZ; time_after(i, jiffies); )
 	{
+		barrier();		/* Gcc 2.95 needs this */
 		if (priv0->bcomm->bc_status >= BC_RUN)
 			break;
 	}
@@ -1183,7 +1186,7 @@ dgrs_probe1(struct net_device *dev)
 	 */
 	if (priv->plxreg)
 		OUTL(dev->base_addr + PLX_LCL2PCI_DOORBELL, 1);
-	rc = request_irq(dev->irq, &dgrs_intr, 0, "RightSwitch", dev);
+	rc = request_irq(dev->irq, &dgrs_intr, SA_SHIRQ, "RightSwitch", dev);
 	if (rc)
 		return (rc);
 
@@ -1267,6 +1270,7 @@ dgrs_found_device(
 	priv->devtbl[0] = dev;
 
 	dev->init = dgrs_probe1;
+	SET_MODULE_OWNER(dev);
 	ether_setup(dev);
 	priv->next_dev = dgrs_root_dev;
 	dgrs_root_dev = dev;
@@ -1302,6 +1306,7 @@ dgrs_found_device(
 		privN->chan = i+1;
 		priv->devtbl[i] = devN;
 		devN->init = dgrs_initclone;
+		SET_MODULE_OWNER(dev);
 		ether_setup(devN);
 		privN->next_dev = dgrs_root_dev;
 		dgrs_root_dev = devN;

@@ -67,7 +67,7 @@
 #include <asm/uaccess.h>
 
 /* Following value should be > 32k + RPC overhead */
-#define XPRT_MIN_WRITE_SPACE 35000
+#define XPRT_MIN_WRITE_SPACE (35000 + SOCK_MIN_WRITE_SPACE)
 
 extern spinlock_t rpc_queue_lock;
 
@@ -175,11 +175,10 @@ xprt_move_iov(struct msghdr *msg, struct iovec *niv, unsigned amount)
 
 	msg->msg_iov=niv;
 }
- 
+
 /*
  * Write data to socket.
  */
-
 static inline int
 xprt_sendmsg(struct rpc_xprt *xprt, struct rpc_rqst *req)
 {
@@ -239,7 +238,6 @@ xprt_sendmsg(struct rpc_xprt *xprt, struct rpc_rqst *req)
 		break;
 	default:
 		printk(KERN_NOTICE "RPC: sendmsg returned error %d\n", -result);
-		result = 0;
 	}
 	return result;
 }
@@ -288,13 +286,15 @@ xprt_recvmsg(struct rpc_xprt *xprt, struct iovec *iov, int nr, unsigned len, uns
 static void
 xprt_adjust_cwnd(struct rpc_xprt *xprt, int result)
 {
-	unsigned long	cwnd = xprt->cwnd;
+	unsigned long	cwnd;
 
 	if (xprt->nocong)
 		return;
+	spin_lock_bh(&xprt_sock_lock);
+	cwnd = xprt->cwnd;
 	if (result >= 0) {
 		if (xprt->cong < cwnd || time_before(jiffies, xprt->congtime))
-			return;
+			goto out;
 		/* The (cwnd >> 1) term makes sure
 		 * the result gets rounded properly. */
 		cwnd += (RPC_CWNDSCALE * RPC_CWNDSCALE + (cwnd >> 1)) / cwnd;
@@ -317,6 +317,8 @@ xprt_adjust_cwnd(struct rpc_xprt *xprt, int result)
 	}
 
 	xprt->cwnd = cwnd;
+ out:
+	spin_unlock_bh(&xprt_sock_lock);
 }
 
 /*
@@ -390,10 +392,7 @@ static void
 xprt_disconnect(struct rpc_xprt *xprt)
 {
 	dprintk("RPC:      disconnected transport %p\n", xprt);
-	xprt->connected = 0;
-	xprt->tcp_offset = 0;
-	xprt->tcp_copied = 0;
-	xprt->tcp_more = 0;
+	xprt_clear_connected(xprt);
 	xprt_remove_pending(xprt);
 	rpc_wake_up_status(&xprt->pending, -ENOTCONN);
 }
@@ -410,7 +409,7 @@ xprt_reconnect(struct rpc_task *task)
 	int		status;
 
 	dprintk("RPC: %4d xprt_reconnect %p connected %d\n",
-				task->tk_pid, xprt, xprt->connected);
+				task->tk_pid, xprt, xprt_connected(xprt));
 	if (xprt->shutdown)
 		return;
 
@@ -443,6 +442,11 @@ xprt_reconnect(struct rpc_task *task)
 
 	xprt_disconnect(xprt);
 
+	/* Reset TCP record info */
+	xprt->tcp_offset = 0;
+	xprt->tcp_copied = 0;
+	xprt->tcp_more = 0;
+
 	/* Now connect it asynchronously. */
 	dprintk("RPC: %4d connecting new socket\n", task->tk_pid);
 	status = sock->ops->connect(sock, (struct sockaddr *) &xprt->addr,
@@ -466,10 +470,10 @@ xprt_reconnect(struct rpc_task *task)
 		}
 
 		dprintk("RPC: %4d connect status %d connected %d\n",
-				task->tk_pid, status, xprt->connected);
+				task->tk_pid, status, xprt_connected(xprt));
 
 		spin_lock_bh(&xprt_sock_lock);
-		if (!xprt->connected) {
+		if (!xprt_connected(xprt)) {
 			task->tk_timeout = xprt->timeout.to_maxval;
 			rpc_sleep_on(&xprt->reconn, task, xprt_reconn_status, NULL);
 			spin_unlock_bh(&xprt_sock_lock);
@@ -533,7 +537,7 @@ xprt_lookup_rqst(struct rpc_xprt *xprt, u32 xid)
  out_bad:
 	req = NULL;
  out:
-	if (req && !rpc_lock_task(req->rq_task))
+	if (req && !__rpc_lock_task(req->rq_task))
 		req = NULL;
 	spin_unlock_bh(&rpc_queue_lock);
 	return req;
@@ -572,6 +576,7 @@ xprt_complete_rqst(struct rpc_xprt *xprt, struct rpc_rqst *req, int copied)
 
 	dprintk("RPC: %4d has input (%d bytes)\n", task->tk_pid, copied);
 	task->tk_status = copied;
+	req->rq_received = 1;
 
 	/* ... and wake up the process. */
 	rpc_wake_up_task(task);
@@ -586,7 +591,7 @@ static int csum_partial_copy_to_page_cache(struct iovec *iov,
 					   struct sk_buff *skb,
 					   int copied)
 {
-	__u8 *pkt_data = skb->data + sizeof(struct udphdr);
+	__u8 *pkt_data = skb->h.raw + sizeof(struct udphdr);
 	__u8 *cur_ptr = iov->iov_base;
 	__kernel_size_t cur_len = iov->iov_len;
 	unsigned int csum = skb->csum;
@@ -629,7 +634,7 @@ static int csum_partial_copy_to_page_cache(struct iovec *iov,
  * Input handler for RPC replies. Called from a bottom half and hence
  * atomic.
  */
-static inline void
+static void
 udp_data_ready(struct sock *sk, int len)
 {
 	struct rpc_task	*task;
@@ -641,13 +646,13 @@ udp_data_ready(struct sock *sk, int len)
 	dprintk("RPC:      udp_data_ready...\n");
 	if (!(xprt = xprt_from_sock(sk))) {
 		printk("RPC:      udp_data_ready request not found!\n");
-		return;
+		goto out;
 	}
 
 	dprintk("RPC:      udp_data_ready client %p\n", xprt);
 
 	if ((skb = skb_recv_datagram(sk, 0, 1, &err)) == NULL)
-		return;
+		goto out;
 
 	if (xprt->shutdown)
 		goto dropit;
@@ -671,7 +676,6 @@ udp_data_ready(struct sock *sk, int len)
 	if ((copied = rovr->rq_rlen) > repsize)
 		copied = repsize;
 
-	rovr->rq_damaged  = 1;
 	/* Suck it into the iovec, verify checksum if not done by hw. */
 	if (csum_partial_copy_to_page_cache(rovr->rq_rvec, skb, copied))
 		goto out_unlock;
@@ -686,6 +690,9 @@ udp_data_ready(struct sock *sk, int len)
 
  dropit:
 	skb_free_datagram(sk, skb);
+ out:
+	if (sk->sleep && waitqueue_active(sk->sleep))
+		wake_up_interruptible(sk->sleep);
 }
 
 /*
@@ -836,7 +843,7 @@ tcp_input_record(struct rpc_xprt *xprt)
 
 	if (xprt->shutdown)
 		return -EIO;
-	if (!xprt->connected)
+	if (!xprt_connected(xprt))
 		return -ENOTCONN;
 
 	/* Read in a new fragment marker if necessary */
@@ -854,11 +861,8 @@ tcp_input_record(struct rpc_xprt *xprt)
 	req = xprt_lookup_rqst(xprt, xprt->tcp_xid);
 	if (req) {
 		task = req->rq_task;
-		if (xprt->tcp_copied == sizeof(xprt->tcp_xid) || req->rq_damaged) {
-			req->rq_damaged = 1;
-			/* Read in the request data */
-			result = tcp_read_request(xprt,  req, avail);
-		}
+		/* Read in the request data */
+		result = tcp_read_request(xprt,  req, avail);
 		rpc_unlock_task(task);
 		if (result < 0)
 			return result;
@@ -970,18 +974,21 @@ static void tcp_data_ready(struct sock *sk, int len)
 	if (!(xprt = xprt_from_sock(sk)))
 	{
 		printk("Not a socket with xprt %p\n", sk);
-		return;
+		goto out;
 	}
 
 	if (xprt->shutdown)
-		return;
+		goto out;
 
 	xprt_append_pending(xprt);
 
 	dprintk("RPC:      tcp_data_ready client %p\n", xprt);
 	dprintk("RPC:      state %x conn %d dead %d zapped %d\n",
-				sk->state, xprt->connected,
+				sk->state, xprt_connected(xprt),
 				sk->dead, sk->zapped);
+ out:
+	if (sk->sleep && waitqueue_active(sk->sleep))
+		wake_up_interruptible(sk->sleep);
 }
 
 
@@ -991,26 +998,32 @@ tcp_state_change(struct sock *sk)
 	struct rpc_xprt	*xprt;
 
 	if (!(xprt = xprt_from_sock(sk)))
-		return;
+		goto out;
 	dprintk("RPC:      tcp_state_change client %p...\n", xprt);
 	dprintk("RPC:      state %x conn %d dead %d zapped %d\n",
-				sk->state, xprt->connected,
+				sk->state, xprt_connected(xprt),
 				sk->dead, sk->zapped);
 
-	spin_lock_bh(&xprt_sock_lock);
 	switch (sk->state) {
 	case TCP_ESTABLISHED:
-		xprt->connected = 1;
+		if (xprt_test_and_set_connected(xprt))
+			break;
+		spin_lock_bh(&xprt_sock_lock);
 		if (xprt->snd_task && xprt->snd_task->tk_rpcwait == &xprt->sending)
 			rpc_wake_up_task(xprt->snd_task);
 		rpc_wake_up(&xprt->reconn);
+		spin_unlock_bh(&xprt_sock_lock);
+		break;
+	case TCP_SYN_SENT:
+	case TCP_SYN_RECV:
 		break;
 	default:
-		xprt->connected = 0;
-		rpc_wake_up_status(&xprt->pending, -ENOTCONN);
+		xprt_disconnect(xprt);
 		break;
 	}
-	spin_unlock_bh(&xprt_sock_lock);
+ out:
+	if (sk->sleep && waitqueue_active(sk->sleep))
+		wake_up_interruptible_all(sk->sleep);
 }
 
 /*
@@ -1021,26 +1034,30 @@ static void
 tcp_write_space(struct sock *sk)
 {
 	struct rpc_xprt	*xprt;
+	struct socket	*sock;
 
-	if (!(xprt = xprt_from_sock(sk)))
+	if (!(xprt = xprt_from_sock(sk)) || !(sock = sk->socket))
 		return;
 	if (xprt->shutdown)
 		return;
 
 	/* Wait until we have enough socket memory */
-	if (sock_wspace(sk) < min(sk->sndbuf,XPRT_MIN_WRITE_SPACE))
+	if (!sock_writeable(sk))
 		return;
 
-	spin_lock_bh(&xprt_sock_lock);
-	if (xprt->write_space)
-		goto out_unlock;
+	if (!xprt_test_and_set_wspace(xprt)) {
+		spin_lock_bh(&xprt_sock_lock);
+		if (xprt->snd_task && xprt->snd_task->tk_rpcwait == &xprt->sending)
+			rpc_wake_up_task(xprt->snd_task);
+		spin_unlock_bh(&xprt_sock_lock);
+	}
 
-	xprt->write_space = 1;
-
-	if (xprt->snd_task && xprt->snd_task->tk_rpcwait == &xprt->sending)
-		rpc_wake_up_task(xprt->snd_task);
- out_unlock:
-	spin_unlock_bh(&xprt_sock_lock);
+	if (test_bit(SOCK_NOSPACE, &sock->flags)) {
+		if (sk->sleep && waitqueue_active(sk->sleep)) {
+			clear_bit(SOCK_NOSPACE, &sock->flags);
+			wake_up_interruptible(sk->sleep);
+		}
+	}
 }
 
 static void
@@ -1058,16 +1075,15 @@ udp_write_space(struct sock *sk)
 	if (sock_wspace(sk) < min(sk->sndbuf,XPRT_MIN_WRITE_SPACE))
 		return;
 
-	spin_lock_bh(&xprt_sock_lock);
-	if (xprt->write_space)
-		goto out_unlock;
+	if (!xprt_test_and_set_wspace(xprt)) {
+		spin_lock_bh(&xprt_sock_lock);
+		if (xprt->snd_task && xprt->snd_task->tk_rpcwait == &xprt->sending)
+			rpc_wake_up_task(xprt->snd_task);
+		spin_unlock_bh(&xprt_sock_lock);
+	}
 
-	xprt->write_space = 1;
-
-	if (xprt->snd_task && xprt->snd_task->tk_rpcwait == &xprt->sending)
-		rpc_wake_up_task(xprt->snd_task);
- out_unlock:
-	spin_unlock_bh(&xprt_sock_lock);
+	if (sk->sleep && waitqueue_active(sk->sleep))
+		wake_up_interruptible(sk->sleep);
 }
 
 /*
@@ -1150,7 +1166,7 @@ xprt_transmit(struct rpc_task *task)
 	if (xprt->shutdown)
 		task->tk_status = -EIO;
 
-	if (!xprt->connected)
+	if (!xprt_connected(xprt))
 		task->tk_status = -ENOTCONN;
 
 	if (task->tk_status < 0)
@@ -1194,7 +1210,7 @@ do_xprt_transmit(struct rpc_task *task)
 	 * called xprt_sendmsg().
 	 */
 	while (1) {
-		xprt->write_space = 0;
+		xprt_clear_wspace(xprt);
 		status = xprt_sendmsg(xprt, req);
 
 		if (status < 0)
@@ -1222,8 +1238,6 @@ do_xprt_transmit(struct rpc_task *task)
 	}
 	rpc_unlock_task(task);
 
-	task->tk_status = status;
-
 	/* Note: at this point, task->tk_sleeping has not yet been set,
 	 *	 hence there is no danger of the waking up task being put on
 	 *	 schedq, and being picked up by a parallel run of rpciod().
@@ -1231,14 +1245,19 @@ do_xprt_transmit(struct rpc_task *task)
 	rpc_wake_up_task(task);
 	if (!RPC_IS_RUNNING(task))
 		goto out_release;
+	if (req->rq_received)
+		goto out_release;
+
+	task->tk_status = status;
 
 	switch (status) {
 	case -ENOMEM:
 		/* Protect against (udp|tcp)_write_space */
-		task->tk_timeout = req->rq_timeout.to_current;
 		spin_lock_bh(&xprt_sock_lock);
-		if (!xprt->write_space)
+		if (!xprt_wspace(xprt)) {
+			task->tk_timeout = req->rq_timeout.to_current;
 			rpc_sleep_on(&xprt->sending, task, NULL, NULL);
+		}
 		spin_unlock_bh(&xprt_sock_lock);
 		return;
 	case -EAGAIN:
@@ -1276,6 +1295,7 @@ xprt_receive(struct rpc_task *task)
 
 	dprintk("RPC: %4d xprt_receive\n", task->tk_pid);
 
+	req->rq_received = 0;
 	task->tk_timeout = 0;
 	rpc_sleep_locked(&xprt->pending, task, NULL, NULL);
 }
@@ -1294,15 +1314,18 @@ xprt_reserve(struct rpc_task *task)
 
 	dprintk("RPC: %4d xprt_reserve cong = %ld cwnd = %ld\n",
 				task->tk_pid, xprt->cong, xprt->cwnd);
-	if (!RPCXPRT_CONGESTED(xprt) && xprt->free) {
-		xprt_reserve_status(task);
+	spin_lock_bh(&xprt_sock_lock);
+	xprt_reserve_status(task);
+	if (task->tk_rqstp) {
 		task->tk_timeout = 0;
 	} else if (!task->tk_timeout) {
 		task->tk_status = -ENOBUFS;
 	} else {
 		dprintk("RPC:      xprt_reserve waiting on backlog\n");
-		rpc_sleep_on(&xprt->backlog, task, xprt_reserve_status, NULL);
+		task->tk_status = -EAGAIN;
+		rpc_sleep_on(&xprt->backlog, task, NULL, NULL);
 	}
+	spin_unlock_bh(&xprt_sock_lock);
 	dprintk("RPC: %4d xprt_reserve returns %d\n",
 				task->tk_pid, task->tk_status);
 	return task->tk_status;
@@ -1323,25 +1346,20 @@ xprt_reserve_status(struct rpc_task *task)
 		/* NOP */
 	} else if (task->tk_rqstp) {
 		/* We've already been given a request slot: NOP */
-	} else if (!RPCXPRT_CONGESTED(xprt) && xprt->free) {
+	} else {
+		if (RPCXPRT_CONGESTED(xprt) || !(req = xprt->free))
+			goto out_nofree;
 		/* OK: There's room for us. Grab a free slot and bump
 		 * congestion value */
-		spin_lock(&xprt_lock);
-		if (!(req = xprt->free)) {
-			spin_unlock(&xprt_lock);
-			goto out_nofree;
-		}
 		xprt->free     = req->rq_next;
 		req->rq_next   = NULL;
-		spin_unlock(&xprt_lock);
 		xprt->cong    += RPC_CWNDSCALE;
 		task->tk_rqstp = req;
 		xprt_request_init(task, xprt);
 
 		if (xprt->free)
 			xprt_clear_backlog(xprt);
-	} else
-		goto out_nofree;
+	}
 
 	return;
 
@@ -1388,24 +1406,21 @@ xprt_release(struct rpc_task *task)
 
 	dprintk("RPC: %4d release request %p\n", task->tk_pid, req);
 
-	spin_lock(&xprt_lock);
-	req->rq_next = xprt->free;
-	xprt->free   = req;
-
 	/* remove slot from queue of pending */
 	if (task->tk_rpcwait) {
 		printk("RPC: task of released request still queued!\n");
-#ifdef RPC_DEBUG
-		printk("RPC: (task is on %s)\n", rpc_qname(task->tk_rpcwait));
-#endif
 		rpc_remove_wait_queue(task);
 	}
-	spin_unlock(&xprt_lock);
+
+	spin_lock_bh(&xprt_sock_lock);
+	req->rq_next = xprt->free;
+	xprt->free   = req;
 
 	/* Decrease congestion value. */
 	xprt->cong -= RPC_CWNDSCALE;
 
 	xprt_clear_backlog(xprt);
+	spin_unlock_bh(&xprt_sock_lock);
 }
 
 /*
@@ -1531,12 +1546,12 @@ xprt_bind_socket(struct rpc_xprt *xprt, struct socket *sock)
 		sk->data_ready = udp_data_ready;
 		sk->write_space = udp_write_space;
 		sk->no_check = UDP_CSUM_NORCV;
-		xprt->connected = 1;
+		xprt_set_connected(xprt);
 	} else {
 		sk->data_ready = tcp_data_ready;
 		sk->state_change = tcp_state_change;
 		sk->write_space = tcp_write_space;
-		xprt->connected = 0;
+		xprt_clear_connected(xprt);
 	}
 
 	/* Reset to new socket */
@@ -1612,7 +1627,8 @@ xprt_shutdown(struct rpc_xprt *xprt)
 	rpc_wake_up(&xprt->pending);
 	rpc_wake_up(&xprt->backlog);
 	rpc_wake_up(&xprt->reconn);
-	wake_up(&xprt->cong_wait);
+	if (waitqueue_active(&xprt->cong_wait))
+		wake_up(&xprt->cong_wait);
 }
 
 /*
@@ -1623,7 +1639,8 @@ xprt_clear_backlog(struct rpc_xprt *xprt) {
 	if (RPCXPRT_CONGESTED(xprt))
 		return 0;
 	rpc_wake_up_next(&xprt->backlog);
-	wake_up(&xprt->cong_wait);
+	if (waitqueue_active(&xprt->cong_wait))
+		wake_up(&xprt->cong_wait);
 	return 1;
 }
 

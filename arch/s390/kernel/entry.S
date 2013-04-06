@@ -193,7 +193,6 @@ RES_DN1:
  */
 
 sysc_lit:
-  sysc_softirq_state: .long  softirq_state
   sysc_do_signal:     .long  do_signal
   sysc_do_softirq:    .long  do_softirq
   sysc_schedule:      .long  schedule
@@ -237,17 +236,8 @@ sysc_return:
 #
 # check, if bottom-half has to be done
 #
-#ifdef CONFIG_SMP
-        l       %r1,processor(%r9) # get processor index
-        sll     %r1,5
-        al      %r1,sysc_softirq_state-sysc_lit(%r13)
-        l       %r0,0(%r1)        # get softirq_state[cpu].active
-        n       %r0,4(%r1)        # and it with softirq_state[cpu].mask
-#else
-        l       %r1,sysc_softirq_state-sysc_lit(%r13)
-        l       %r0,0(%r1)        # get softirq_state.active
-        n       %r0,4(%r1)        # and it with softirq_state.mask
-#endif
+        l       %r0,__LC_IRQ_STAT     # get softirq_active
+        n       %r0,__LC_IRQ_STAT+4   # and it with softirq_mask
         jnz     sysc_handle_bottom_half
 #
 # check, if reschedule is needed
@@ -613,7 +603,8 @@ sys_call_table:
         .long  sys_pivot_root
         .long  sys_mincore
         .long  sys_madvise
-	.rept  255-219
+	.long  sys_getdents64		 /* 220 */
+	.rept  255-220
 	.long  sys_ni_syscall
 	.endr
 
@@ -714,7 +705,6 @@ io_lit:
   io_do_IRQ:        .long do_IRQ
   io_schedule:	    .long schedule
   io_do_signal:     .long do_signal
-  io_softirq_state: .long  softirq_state
   io_do_softirq:    .long  do_softirq
 
         .globl io_int_handler
@@ -737,17 +727,8 @@ io_return:
 #
 # check, if bottom-half has to be done
 #
-#ifdef CONFIG_SMP
-        l       %r1,processor(%r9) # get processor index
-        sll     %r1,5
-        al      %r1,io_softirq_state-io_lit(%r13)
-        l       %r0,0(%r1)        # get softirq_state[cpu].active
-        n       %r0,4(%r1)        # and it with softirq_state[cpu].mask
-#else
-        l       %r1,io_softirq_state-io_lit(%r13)
-        l       %r0,0(%r1)        # get softirq_state.active
-        n       %r0,4(%r1)        # and it with softirq_state.mask
-#endif
+        l       %r0,__LC_IRQ_STAT     # get softirq_active
+        n       %r0,__LC_IRQ_STAT+4   # and it with softirq_mask
         jnz     io_handle_bottom_half
 io_return_bh:	
 #

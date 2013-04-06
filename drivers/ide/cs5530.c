@@ -1,7 +1,7 @@
 /*
  * linux/drivers/ide/cs5530.c		Version 0.6	Mar. 18, 2000
  *
- * Copyright (C) 2000			Andre Hedrick <andre@suse.com>
+ * Copyright (C) 2000			Andre Hedrick <andre@linux-ide.org>
  * Ditto of GNU General Public License.
  *
  * Copyright (C) 2000			Mark Lord <mlord@pobox.com>
@@ -43,7 +43,7 @@ static struct pci_dev *bmide_dev;
 static int cs5530_get_info (char *buffer, char **addr, off_t offset, int count)
 {
 	char *p = buffer;
-	u32 bibma = bmide_dev->resource[4].start;
+	u32 bibma = pci_resource_start(bmide_dev, 4);
 	u8  c0 = 0, c1 = 0;
 
 	/*
@@ -257,6 +257,14 @@ unsigned int __init pci_init_cs5530 (struct pci_dev *dev, const char *name)
 	unsigned short pcicmd = 0;
 	unsigned long flags;
 
+#if defined(DISPLAY_CS5530_TIMINGS) && defined(CONFIG_PROC_FS)
+	if (!cs5530_proc) {
+		cs5530_proc = 1;
+		bmide_dev = dev;
+		cs5530_display_info = &cs5530_get_info;
+	}
+#endif /* DISPLAY_CS5530_TIMINGS && CONFIG_PROC_FS */
+
 	pci_for_each_dev (dev) {
 		if (dev->vendor == PCI_VENDOR_ID_CYRIX) {
 			switch (dev->device) {
@@ -326,14 +334,6 @@ unsigned int __init pci_init_cs5530 (struct pci_dev *dev, const char *name)
 	pci_write_config_byte(master_0, 0x43, 0xc1);
 
 	restore_flags(flags);
-
-#if defined(DISPLAY_CS5530_TIMINGS) && defined(CONFIG_PROC_FS)
-	if (!cs5530_proc) {
-		cs5530_proc = 1;
-		bmide_dev = dev;
-		cs5530_display_info = &cs5530_get_info;
-	}
-#endif /* DISPLAY_CS5530_TIMINGS && CONFIG_PROC_FS */
 
 	return 0;
 }

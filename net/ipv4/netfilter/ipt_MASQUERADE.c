@@ -30,6 +30,10 @@ masquerade_check(const char *tablename,
 {
 	const struct ip_nat_multi_range *mr = targinfo;
 
+	if (strcmp(tablename, "nat") != 0) {
+		DEBUGP("masquerade_check: bad table `%s'.\n", table);
+		return 0;
+	}
 	if (targinfosize != IPT_ALIGN(sizeof(*mr))) {
 		DEBUGP("masquerade_check: size %u != %u.\n",
 		       targinfosize, sizeof(*mr));
@@ -88,7 +92,7 @@ masquerade_target(struct sk_buff **pskb,
 	}
 
 	newsrc = rt->rt_src;
-	DEBUGP("newsrc = %u.%u.%u.%u\n", IP_PARTS(newsrc));
+	DEBUGP("newsrc = %u.%u.%u.%u\n", NIPQUAD(newsrc));
 	ip_rt_put(rt);
 
 	WRITE_LOCK(&masq_lock);
@@ -123,8 +127,8 @@ int masq_device_event(struct notifier_block *this,
 {
 	struct net_device *dev = ptr;
 
-	if (event == NETDEV_DOWN) {
-		/* Device was downed.  Search entire table for
+	if (event == NETDEV_DOWN || event == NETDEV_CHANGEADDR) {
+		/* Device was downed/changed (diald)  Search entire table for
 		   conntracks which were associated with that device,
 		   and forget them. */
 		IP_NF_ASSERT(dev->ifindex != 0);

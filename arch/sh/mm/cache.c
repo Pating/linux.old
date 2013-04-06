@@ -2,7 +2,7 @@
  *
  *  linux/arch/sh/mm/cache.c
  *
- * Copyright (C) 1999  Niibe Yutaka
+ * Copyright (C) 1999, 2000  Niibe Yutaka
  *
  */
 
@@ -36,7 +36,10 @@ struct _cache_system_info {
 	int num_entries;
 };
 
-static struct _cache_system_info cache_system_info;
+/* Data at BSS is cleared after setting this variable.
+   So, we Should not placed this variable at BSS section.
+   Initialize this, it is placed at data section. */
+static struct _cache_system_info cache_system_info = {0,};
 
 #define CACHE_OC_WAY_SHIFT	(cache_system_info.way_shift)
 #define CACHE_IC_WAY_SHIFT	(cache_system_info.way_shift)
@@ -61,9 +64,9 @@ static struct _cache_system_info cache_system_info;
 #define CACHE_IC_WAY_SHIFT       13
 #define CACHE_OC_ENTRY_SHIFT      5
 #define CACHE_IC_ENTRY_SHIFT      5
-#define CACHE_OC_ENTRY_MASK  0x3fe0
-#define CACHE_OC_ENTRY_PHYS_MASK  0x0fe0
-#define CACHE_IC_ENTRY_MASK  0x1fe0
+#define CACHE_OC_ENTRY_MASK		0x3fe0
+#define CACHE_OC_ENTRY_PHYS_MASK	0x0fe0
+#define CACHE_IC_ENTRY_MASK		0x1fe0
 #define CACHE_IC_NUM_ENTRIES	256
 #define CACHE_OC_NUM_ENTRIES	512
 #define CACHE_OC_NUM_WAYS	  1
@@ -89,7 +92,8 @@ static inline void cache_wback_all(void)
 			addr = CACHE_OC_ADDRESS_ARRAY|(j<<CACHE_OC_WAY_SHIFT)|
 				(i<<CACHE_OC_ENTRY_SHIFT);
 			data = ctrl_inl(addr);
-			if (data & CACHE_UPDATED) {
+			if ((data & (CACHE_UPDATED|CACHE_VALID))
+			    == (CACHE_UPDATED|CACHE_VALID)) {
 				data &= ~CACHE_UPDATED;
 				ctrl_outl(data, addr);
 			}
@@ -97,7 +101,7 @@ static inline void cache_wback_all(void)
 	}
 }
 
-static void
+static void __init
 detect_cpu_and_cache_system(void)
 {
 #if defined(__sh3__)
@@ -111,17 +115,25 @@ detect_cpu_and_cache_system(void)
 	 */
 	addr0 = CACHE_OC_ADDRESS_ARRAY + (3 << 12);
 	addr1 = CACHE_OC_ADDRESS_ARRAY + (1 << 12);
+
+	/* First, write back & invalidate */
 	data0  = ctrl_inl(addr0);
-	data0  ^= 0x00000001;
-	ctrl_outl(data0,addr0);
+	ctrl_outl(data0&~(CACHE_VALID|CACHE_UPDATED), addr0);
+	data1  = ctrl_inl(addr1);
+	ctrl_outl(data1&~(CACHE_VALID|CACHE_UPDATED), addr1);
+
+	/* Next, check if there's shadow or not */
+	data0 = ctrl_inl(addr0);
+	data0 ^= CACHE_VALID;
+	ctrl_outl(data0, addr0);
 	data1 = ctrl_inl(addr1);
-	data2 = data1 ^ 0x00000001;
-	ctrl_outl(data2,addr1);
+	data2 = data1 ^ CACHE_VALID;
+	ctrl_outl(data2, addr1);
 	data3 = ctrl_inl(addr0);
 
-	/* Invaliate them, in case the cache has been enabled already. */
-	ctrl_outl(data0&~0x00000001, addr0);
-	ctrl_outl(data2&~0x00000001, addr1);
+	/* Lastly, invaliate them. */
+	ctrl_outl(data0&~CACHE_VALID, addr0);
+	ctrl_outl(data2&~CACHE_VALID, addr1);
 	back_to_P1();
 
 	if (data0 == data1 && data2 == data3) {	/* Shadow */
@@ -147,8 +159,6 @@ void __init cache_init(void)
 	detect_cpu_and_cache_system();
 
 	ccr = ctrl_inl(CCR);
-	if (ccr == CCR_CACHE_VAL)
-		return;
 	jump_to_P2();
 	if (ccr & CCR_CACHE_ENABLE)
 		/*
@@ -204,6 +214,9 @@ static void icache_purge_range(unsigned long start, unsigned long end)
 	 * compared the tag of cache and if it's not matched, nothing
 	 * will be occurred.  (We can avoid flushing other caches.)
 	 * 
+	 * NOTE: We can use A-bit feature here, because we have valid
+	 * entriy in TLB (at least in UTLB), as dcache_wback_range is
+	 * called before this function is called.
 	 */
 	for (v = start; v < end; v+=L1_CACHE_BYTES) {
 		addr = CACHE_IC_ADDRESS_ARRAY |	(v&CACHE_IC_ENTRY_MASK)
@@ -222,8 +235,12 @@ static void icache_purge_range(unsigned long start, unsigned long end)
  */
 void flush_icache_range(unsigned long start, unsigned long end)
 {
+	unsigned long flags;
+
+	save_and_cli(flags);
 	dcache_wback_range(start, end);
 	icache_purge_range(start, end);
+	restore_flags(flags);
 }
 
 /*
@@ -235,11 +252,6 @@ void flush_icache_page(struct vm_area_struct *vma, struct page *pg)
 {
 	unsigned long phys, addr, data, i;
 
-	/*
-	 * Alas, we don't know where the virtual address is,
-	 * So, we can't use icache_purge_range().
-	 */
-
 	/* Physical address of this page */
 	phys = (pg - mem_map)*PAGE_SIZE + __MEMORY_START;
 
@@ -250,6 +262,30 @@ void flush_icache_page(struct vm_area_struct *vma, struct page *pg)
 		data = ctrl_inl(addr);
 		if ((data & CACHE_VALID) && (data&PAGE_MASK) == phys) {
 			data &= ~CACHE_VALID;
+			ctrl_outl(data, addr);
+		}
+	}
+	back_to_P1();
+}
+
+/*
+ * Write back & invalidate the D-cache of the page.
+ * (To avoid "alias" issues)
+ */
+void flush_dcache_page(struct page *pg)
+{
+	unsigned long phys, addr, data, i;
+
+	/* Physical address of this page */
+	phys = (pg - mem_map)*PAGE_SIZE + __MEMORY_START;
+
+	jump_to_P2();
+	/* Loop all the D-cache */
+	for (i=0; i<CACHE_OC_NUM_ENTRIES; i++) {
+		addr = CACHE_OC_ADDRESS_ARRAY| (i<<CACHE_OC_ENTRY_SHIFT);
+		data = ctrl_inl(addr);
+		if ((data & CACHE_VALID) && (data&PAGE_MASK) == phys) {
+			data &= ~(CACHE_VALID|CACHE_UPDATED);
 			ctrl_outl(data, addr);
 		}
 	}
@@ -295,76 +331,170 @@ void flush_cache_mm(struct mm_struct *mm)
 	flush_cache_all();
 }
 
+/*
+ * Write back and invalidate D-caches.
+ *
+ * START, END: Virtual Address (U0 address)
+ *
+ * NOTE: We need to flush the _physical_ page entry.
+ * Flushing the cache lines for U0 only isn't enough.
+ * We need to flush for P1 too, which may contain aliases.
+ */
 void flush_cache_range(struct mm_struct *mm, unsigned long start,
 		       unsigned long end)
 {
 	/*
-	 * Calling
-	 *	dcache_flush_range(start, end);
-	 * is not good for the purpose of this function.  That is,
-	 * flushing cache lines indexed by the virtual address is not
-	 * sufficient.
+	 * We could call flush_cache_page for the pages of these range,
+	 * but it's not efficient (scan the caches all the time...).
 	 *
-	 * Instead, we need to flush the relevant cache lines which
-	 * hold the data of the corresponding physical memory, as we
-	 * have "alias" issues.
-	 *
-	 * This is needed because, kernel accesses the memory through
-	 * P1-area (and/or U0-area) and user-space accesses through U0-area.
-	 * And P1-area and U0-area may use different cache lines for
-	 * same physical memory.
-	 *
-	 * If we would call dcache_flush_range(), the line of P1-area
-	 * could remain in the cache, unflushed.
+	 * We can't use A-bit magic, as there's the case we don't have
+	 * valid entry on TLB.
 	 */
-	unsigned long addr, data, v;
-
-	start &= ~(L1_CACHE_BYTES-1);
-	jump_to_P2();
-
-	for (v = start; v < end; v+=L1_CACHE_BYTES) {
-		addr = CACHE_OC_ADDRESS_ARRAY |
-			(v&CACHE_OC_ENTRY_PHYS_MASK) | 0x8 /* A-bit */;
-		data = (v&0xfffffc00); /* Update=0, Valid=0 */
-
-		/* Try all the cases for aliases */
-		ctrl_outl(data, addr);
-		ctrl_outl(data, addr | 0x1000);
-		ctrl_outl(data, addr | 0x2000);
-		ctrl_outl(data, addr | 0x3000);
-	}
-	back_to_P1();
-}
-
-void flush_cache_page(struct vm_area_struct *vma, unsigned long addr)
-{
-	flush_cache_range(vma->vm_mm, addr, addr+PAGE_SIZE);
+	flush_cache_all();
 }
 
 /*
+ * Write back and invalidate D-caches for the page.
+ *
+ * ADDR: Virtual Address (U0 address)
+ *
+ * NOTE: We need to flush the _physical_ page entry.
+ * Flushing the cache lines for U0 only isn't enough.
+ * We need to flush for P1 too, which may contain aliases.
+ */
+void flush_cache_page(struct vm_area_struct *vma, unsigned long addr)
+{
+	pgd_t *dir;
+	pmd_t *pmd;
+	pte_t *pte;
+	pte_t entry;
+	unsigned long phys;
+	struct page *pg;
+
+	dir = pgd_offset(vma->vm_mm, addr);
+	pmd = pmd_offset(dir, addr);
+	if (pmd_none(*pmd))
+		return;
+	if (pmd_bad(*pmd))
+		return;
+	pte = pte_offset(pmd, addr);
+	entry = *pte;
+	if (pte_none(entry) || !pte_present(entry))
+		return;
+	phys = pte_val(entry)&PAGE_MASK;
+	pg = virt_to_page(__va(phys));
+	flush_dcache_page(pg);
+}
+
+/*
+ * Write-back & invalidate the cache.
+ *
  * After accessing the memory from kernel space (P1-area), we need to 
- * write back the cache line, to avoid "alias" issues.
+ * write back the cache line.
  *
  * We search the D-cache to see if we have the entries corresponding to
  * the page, and if found, write back them.
  */
-void flush_page_to_ram(struct page *pg)
+void __flush_page_to_ram(void *kaddr)
 {
 	unsigned long phys, addr, data, i;
 
 	/* Physical address of this page */
-	phys = (pg - mem_map)*PAGE_SIZE + __MEMORY_START;
+	phys = PHYSADDR(kaddr);
 
 	jump_to_P2();
 	/* Loop all the D-cache */
 	for (i=0; i<CACHE_OC_NUM_ENTRIES; i++) {
 		addr = CACHE_OC_ADDRESS_ARRAY| (i<<CACHE_OC_ENTRY_SHIFT);
 		data = ctrl_inl(addr);
-		if ((data & CACHE_UPDATED) && (data&PAGE_MASK) == phys) {
-			data &= ~CACHE_UPDATED;
+		if ((data & CACHE_VALID) && (data&PAGE_MASK) == phys) {
+			data &= ~(CACHE_UPDATED|CACHE_VALID);
 			ctrl_outl(data, addr);
 		}
 	}
 	back_to_P1();
+}
+
+void flush_page_to_ram(struct page *pg)
+{
+	unsigned long phys;
+
+	/* Physical address of this page */
+	phys = (pg - mem_map)*PAGE_SIZE + __MEMORY_START;
+	__flush_page_to_ram(phys_to_virt(phys));
+}
+
+/*
+ * Check entries of the I-cache & D-cache of the page.
+ * (To see "alias" issues)
+ */
+void check_cache_page(struct page *pg)
+{
+	unsigned long phys, addr, data, i;
+	unsigned long kaddr;
+	unsigned long cache_line_index;
+	int bingo = 0;
+
+	/* Physical address of this page */
+	phys = (pg - mem_map)*PAGE_SIZE + __MEMORY_START;
+	kaddr = phys + PAGE_OFFSET;
+	cache_line_index = (kaddr&CACHE_OC_ENTRY_MASK)>>CACHE_OC_ENTRY_SHIFT;
+
+	jump_to_P2();
+	/* Loop all the D-cache */
+	for (i=0; i<CACHE_OC_NUM_ENTRIES; i++) {
+		addr = CACHE_OC_ADDRESS_ARRAY| (i<<CACHE_OC_ENTRY_SHIFT);
+		data = ctrl_inl(addr);
+		if ((data & (CACHE_UPDATED|CACHE_VALID))
+		    == (CACHE_UPDATED|CACHE_VALID)
+		    && (data&PAGE_MASK) == phys) {
+			data &= ~(CACHE_VALID|CACHE_UPDATED);
+			ctrl_outl(data, addr);
+			if ((i^cache_line_index)&0x180)
+				bingo = 1;
+		}
+	}
+
+	cache_line_index &= 0xff;
+	/* Loop all the I-cache */
+	for (i=0; i<CACHE_IC_NUM_ENTRIES; i++) {
+		addr = CACHE_IC_ADDRESS_ARRAY| (i<<CACHE_IC_ENTRY_SHIFT);
+		data = ctrl_inl(addr);
+		if ((data & CACHE_VALID) && (data&PAGE_MASK) == phys) {
+			data &= ~CACHE_VALID;
+			ctrl_outl(data, addr);
+			if (((i^cache_line_index)&0x80))
+				bingo = 2;
+		}
+	}
+	back_to_P1();
+
+	if (bingo) {
+		extern void dump_stack(void);
+
+		if (bingo ==1)
+			printk("BINGO!\n");
+		else
+			printk("Bingo!\n");
+		dump_stack();
+		printk("--------------------\n");
+	}
+}
+
+/* Page is 4K, OC size is 16K, there are four lines. */
+#define CACHE_ALIAS 0x00003000
+
+void clear_user_page(void *to, unsigned long address)
+{
+	clear_page(to);
+	if (((address ^ (unsigned long)to) & CACHE_ALIAS))
+		__flush_page_to_ram(to);
+}
+
+void copy_user_page(void *to, void *from, unsigned long address)
+{
+	copy_page(to, from);
+	if (((address ^ (unsigned long)to) & CACHE_ALIAS))
+		__flush_page_to_ram(to);
 }
 #endif

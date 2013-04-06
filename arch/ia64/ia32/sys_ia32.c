@@ -7,6 +7,8 @@
  * Copyright (C) 1999 		Arun Sharma <arun.sharma@intel.com>
  * Copyright (C) 1997,1998 	Jakub Jelinek (jj@sunsite.mff.cuni.cz)
  * Copyright (C) 1997 		David S. Miller (davem@caip.rutgers.edu)
+ * Copyright (C) 2000		Hewlett-Packard Co.
+ * Copyright (C) 2000		David Mosberger-Tang <davidm@hpl.hp.com>
  *
  * These routines maintain argument size conversion between 32bit and 64bit
  * environment.
@@ -27,6 +29,7 @@
 #include <linux/smp_lock.h>
 #include <linux/sem.h>
 #include <linux/msg.h>
+#include <linux/mm.h>
 #include <linux/shm.h>
 #include <linux/malloc.h>
 #include <linux/uio.h>
@@ -55,24 +58,33 @@
 #include <net/sock.h>
 #include <asm/ia32.h>
 
-#define A(__x) ((unsigned long)(__x))
-#define AA(__x) ((unsigned long)(__x))
+#define A(__x)		((unsigned long)(__x))
+#define AA(__x)		((unsigned long)(__x))
+#define ROUND_UP(x,a)	((__typeof__(x))(((unsigned long)(x) + ((a) - 1)) & ~((a) - 1)))
+#define NAME_OFFSET(de) ((int) ((de)->d_name - (char *) (de)))
+
+extern asmlinkage long sys_execve (char *, char **, char **, struct pt_regs *);
+extern asmlinkage long sys_munmap (unsigned long, size_t len);
+extern asmlinkage long sys_mprotect (unsigned long, size_t, unsigned long);
 
 static int
 nargs(unsigned int arg, char **ap)
 {
-	char *ptr;
-	int n, err;
+	int n, err, addr;
 
 	n = 0;
 	do {
-		if (err = get_user(ptr, (int *)arg))
-			return(err);
-		if (ap)
-			*ap++ = ptr;
+		err = get_user(addr, (int *)A(arg));
+		if (err)
+			return err;
+		if (ap) {		/* no access_ok needed, we allocated */
+			err = __put_user((char *)A(addr), ap++);
+			if (err)
+				return err;
+		}
 		arg += sizeof(unsigned int);
 		n++;
-	} while (ptr);
+	} while (addr);
 	return(n - 1);
 }
 
@@ -90,10 +102,15 @@ int stack)
 {
 	struct pt_regs *regs = (struct pt_regs *)&stack;
 	char **av, **ae;
-	int na, ne, r, len;
+	int na, ne, len;
+	long r;
 
 	na = nargs(argv, NULL);
+	if (na < 0)
+		return(na);
 	ne = nargs(envp, NULL);
+	if (ne < 0)
+		return(ne);
 	len = (na + ne + 2) * sizeof(*av);
 	/*
 	 *  kmalloc won't work because the `sys_exec' code will attempt
@@ -104,24 +121,31 @@ int stack)
 	 *  `munmap' if the `execve' failes.
 	 */
 	down(&current->mm->mmap_sem);
-	lock_kernel();
 
-	av = do_mmap_pgoff(0, NULL, len,
-		PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, 0);
+	av = (char **) do_mmap_pgoff(0, 0UL, len, PROT_READ | PROT_WRITE,
+				     MAP_PRIVATE | MAP_ANONYMOUS, 0);
 
-	unlock_kernel();
 	up(&current->mm->mmap_sem);
 
 	if (IS_ERR(av))
-		return(av);
+		return (long)av;
 	ae = av + na + 1;
-	av[na] = (char *)0;
-	ae[ne] = (char *)0;
-	(void)nargs(argv, av);
-	(void)nargs(envp, ae);
+	r = __put_user(0, (av + na));
+	if (r)
+		goto out;
+	r = __put_user(0, (ae + ne));
+	if (r)
+		goto out;
+	r = nargs(argv, av);
+	if (r < 0)
+		goto out;
+	r = nargs(envp, ae);
+	if (r < 0)
+		goto out;
 	r = sys_execve(filename, av, ae, regs);
-	if (IS_ERR(r))
-		sys_munmap(av, len);
+	if (r < 0)
+out:
+		sys_munmap((unsigned long) av, len);
 	return(r);
 }
 
@@ -146,9 +170,9 @@ putstat(struct stat32 *ubuf, struct stat *kbuf)
 	return err;
 }
 
-extern asmlinkage int sys_newstat(char * filename, struct stat * statbuf);
+extern asmlinkage long sys_newstat(char * filename, struct stat * statbuf);
 
-asmlinkage int
+asmlinkage long
 sys32_newstat(char * filename, struct stat32 *statbuf)
 {
 	int ret;
@@ -163,9 +187,9 @@ sys32_newstat(char * filename, struct stat32 *statbuf)
 	return ret;
 }
 
-extern asmlinkage int sys_newlstat(char * filename, struct stat * statbuf);
+extern asmlinkage long sys_newlstat(char * filename, struct stat * statbuf);
 
-asmlinkage int
+asmlinkage long
 sys32_newlstat(char * filename, struct stat32 *statbuf)
 {
 	int ret;
@@ -180,9 +204,9 @@ sys32_newlstat(char * filename, struct stat32 *statbuf)
 	return ret;
 }
 
-extern asmlinkage int sys_newfstat(unsigned int fd, struct stat * statbuf);
+extern asmlinkage long sys_newfstat(unsigned int fd, struct stat * statbuf);
 
-asmlinkage int
+asmlinkage long
 sys32_newfstat(unsigned int fd, struct stat32 *statbuf)
 {
 	int ret;
@@ -202,7 +226,7 @@ sys32_newfstat(unsigned int fd, struct stat32 *statbuf)
 
 unsigned long
 do_mmap_fake(struct file *file, unsigned long addr, unsigned long len,
-	unsigned long prot, unsigned long flags, unsigned long off)
+	unsigned long prot, unsigned long flags, loff_t off)
 {
 	struct inode *inode;
 	void *front, *back;
@@ -212,41 +236,34 @@ do_mmap_fake(struct file *file, unsigned long addr, unsigned long len,
 
 	if (OFFSET4K(addr) || OFFSET4K(off))
 		return -EINVAL;
-	if (prot & PROT_WRITE)
-		prot |= PROT_EXEC;
-#ifdef	DDD
-#else	// DDD
 	prot |= PROT_WRITE;
-#endif	// DDD
 	front = NULL;
 	back = NULL;
 	if ((baddr = (addr & PAGE_MASK)) != addr && get_user(c, (char *)baddr) == 0) {
 		front = kmalloc(addr - baddr, GFP_KERNEL);
-		memcpy(front, (void *)baddr, addr - baddr);
+		__copy_user(front, (void *)baddr, addr - baddr);
 	}
-#ifndef	DDD
-	if (addr)
-#endif
-	if (((addr + len) & ~PAGE_MASK) && get_user(c, (char *)(addr + len)) == 0) {
+	if (addr && ((addr + len) & ~PAGE_MASK) && get_user(c, (char *)(addr + len)) == 0) {
 		back = kmalloc(PAGE_SIZE - ((addr + len) & ~PAGE_MASK), GFP_KERNEL);
-		memcpy(back, addr + len, PAGE_SIZE - ((addr + len) & ~PAGE_MASK));
+		__copy_user(back, (char *)addr + len, PAGE_SIZE - ((addr + len) & ~PAGE_MASK));
 	}
-	if ((r = do_mmap(0, baddr, len + (addr - baddr), prot, flags | MAP_ANONYMOUS, 0)) < 0)
+	down(&current->mm->mmap_sem);
+	r = do_mmap(0, baddr, len + (addr - baddr), prot, flags | MAP_ANONYMOUS, 0);
+	up(&current->mm->mmap_sem);
+	if (r < 0)
 		return(r);
-#ifndef	DDD
 	if (addr == 0)
 		addr = r;
-#endif	// DDD
 	if (back) {
-		memcpy(addr + len, back, PAGE_SIZE - ((addr + len) & ~PAGE_MASK));
+		__copy_user((char *)addr + len, back, PAGE_SIZE - ((addr + len) & ~PAGE_MASK));
 		kfree(back);
 	}
 	if (front) {
-		memcpy((void *)baddr, front, addr - baddr);
+		__copy_user((void *)baddr, front, addr - baddr);
 		kfree(front);
 	}
 	if (flags & MAP_ANONYMOUS) {
-		memset(addr, 0, len);
+		clear_user((char *)addr, len);
 		return(addr);
 	}
 	if (!file)
@@ -256,13 +273,34 @@ do_mmap_fake(struct file *file, unsigned long addr, unsigned long len,
 		return -EINVAL;
 	if (!file->f_op->read)
 		return -EINVAL;
-	if (file->f_op->llseek) {
-		if (file->f_op->llseek(file,off,0) != off)
-			return -EINVAL;
-	} else
-		file->f_pos = off;
-	r = file->f_op->read(file, (char *)addr, len, &file->f_pos);
+	r = file->f_op->read(file, (char *)addr, len, &off);
 	return (r < 0) ? -EINVAL : addr;
+}
+
+long
+ia32_do_mmap (struct file *file, unsigned int addr, unsigned int len, unsigned int prot,
+	      unsigned int flags, unsigned int fd, unsigned int offset)
+{
+	long error = -EFAULT;
+	unsigned int poff;
+
+	flags &= ~(MAP_EXECUTABLE | MAP_DENYWRITE);
+	prot |= PROT_EXEC;
+
+ 	if ((flags & MAP_FIXED) && ((addr & ~PAGE_MASK) || (offset & ~PAGE_MASK)))
+ 		error = do_mmap_fake(file, addr, len, prot, flags, (loff_t)offset);
+	else {
+ 		poff = offset & PAGE_MASK;
+ 		len += offset - poff;
+
+ 		down(&current->mm->mmap_sem);
+ 		error = do_mmap_pgoff(file, addr, len, prot, flags, poff >> PAGE_SHIFT);
+  		up(&current->mm->mmap_sem);
+
+ 		if (!IS_ERR((void *) error))
+ 			error += offset - poff;
+ 	}
+	return error;
 }
 
 /*
@@ -280,44 +318,25 @@ struct mmap_arg_struct {
 	unsigned int offset;
 };
 
-asmlinkage int
+asmlinkage long
 sys32_mmap(struct mmap_arg_struct *arg)
 {
-	int error = -EFAULT;
-	struct file * file = NULL;
 	struct mmap_arg_struct a;
+	struct file *file = NULL;
+	long retval;
 
 	if (copy_from_user(&a, arg, sizeof(a)))
 		return -EFAULT;
 
-	down(&current->mm->mmap_sem);
-	lock_kernel();
 	if (!(a.flags & MAP_ANONYMOUS)) {
-		error = -EBADF;
 		file = fget(a.fd);
 		if (!file)
-			goto out;
+			return -EBADF;
 	}
-	a.flags &= ~(MAP_EXECUTABLE | MAP_DENYWRITE);
-
-#ifdef	DDD
-	if ((a.flags & MAP_FIXED) && ((a.addr & ~PAGE_MASK) || (a.offset & ~PAGE_MASK))) {
-#else	// DDD
-	if (1) {
-#endif	// DDD
-		unlock_kernel();
-		up(&current->mm->mmap_sem);
-		error = do_mmap_fake(file, a.addr, a.len, a.prot, a.flags, a.offset);
-		down(&current->mm->mmap_sem);
-		lock_kernel();
-	} else
-		error = do_mmap(file, a.addr, a.len, a.prot, a.flags, a.offset);
+	retval = ia32_do_mmap(file, a.addr, a.len, a.prot, a.flags, a.fd, a.offset);
 	if (file)
 		fput(file);
-out:
-	unlock_kernel();
-	up(&current->mm->mmap_sem);
-	return error;
+	return retval;
 }
 
 asmlinkage long
@@ -326,14 +345,12 @@ sys32_pipe(int *fd)
 	int retval;
 	int fds[2];
 
-	lock_kernel();
 	retval = do_pipe(fds);
 	if (retval)
 		goto out;
 	if (copy_to_user(fd, fds, sizeof(fds)))
 		retval = -EFAULT;
   out:
-	unlock_kernel();
 	return retval;
 }
 
@@ -349,7 +366,7 @@ sys32_mprotect(unsigned long start, size_t len, unsigned long prot)
 	return(sys_mprotect(start & PAGE_MASK, len & PAGE_MASK, prot));
 }
 
-asmlinkage int
+asmlinkage long
 sys32_rt_sigaction(int sig, struct sigaction32 *act,
 		   struct sigaction32 *oact,  unsigned int sigsetsize)
 {
@@ -408,10 +425,10 @@ sys32_rt_sigaction(int sig, struct sigaction32 *act,
 }
 
 
-extern asmlinkage int sys_rt_sigprocmask(int how, sigset_t *set, sigset_t *oset,
-					 size_t sigsetsize);
+extern asmlinkage long sys_rt_sigprocmask(int how, sigset_t *set, sigset_t *oset,
+					  size_t sigsetsize);
 
-asmlinkage int
+asmlinkage long
 sys32_rt_sigprocmask(int how, sigset32_t *set, sigset32_t *oset,
 		     unsigned int sigsetsize)
 {
@@ -466,9 +483,9 @@ put_statfs (struct statfs32 *ubuf, struct statfs *kbuf)
 	return err;
 }
 
-extern asmlinkage int sys_statfs(const char * path, struct statfs * buf);
+extern asmlinkage long sys_statfs(const char * path, struct statfs * buf);
 
-asmlinkage int
+asmlinkage long
 sys32_statfs(const char * path, struct statfs32 *buf)
 {
 	int ret;
@@ -483,9 +500,9 @@ sys32_statfs(const char * path, struct statfs32 *buf)
 	return ret;
 }
 
-extern asmlinkage int sys_fstatfs(unsigned int fd, struct statfs * buf);
+extern asmlinkage long sys_fstatfs(unsigned int fd, struct statfs * buf);
 
-asmlinkage int
+asmlinkage long
 sys32_fstatfs(unsigned int fd, struct statfs32 *buf)
 {
 	int ret;
@@ -552,7 +569,7 @@ put_it32(struct itimerval32 *o, struct itimerval *i)
 
 extern int do_getitimer(int which, struct itimerval *value);
 
-asmlinkage int
+asmlinkage long
 sys32_getitimer(int which, struct itimerval32 *it)
 {
 	struct itimerval kit;
@@ -567,7 +584,7 @@ sys32_getitimer(int which, struct itimerval32 *it)
 
 extern int do_setitimer(int which, struct itimerval *, struct itimerval *);
 
-asmlinkage int
+asmlinkage long
 sys32_setitimer(int which, struct itimerval32 *in, struct itimerval32 *out)
 {
 	struct itimerval kin, kout;
@@ -609,10 +626,44 @@ sys32_alarm(unsigned int seconds)
 /* Translations due to time_t size differences.  Which affects all
    sorts of things, like timeval and itimerval.  */
 
+struct utimbuf_32 {
+	int	atime;
+	int	mtime;
+};
+
+extern asmlinkage long sys_utimes(char * filename, struct timeval * utimes);
+extern asmlinkage long sys_gettimeofday (struct timeval *tv, struct timezone *tz);
+
+asmlinkage long
+ia32_utime(char * filename, struct utimbuf_32 *times32)
+{
+	mm_segment_t old_fs = get_fs();
+	struct timeval tv[2];
+	long ret;
+
+	if (times32) {
+		get_user(tv[0].tv_sec, &times32->atime);
+		tv[0].tv_usec = 0;
+		get_user(tv[1].tv_sec, &times32->mtime);
+		tv[1].tv_usec = 0;
+		set_fs (KERNEL_DS);
+	} else {
+		set_fs (KERNEL_DS);
+		ret = sys_gettimeofday(&tv[0], 0);
+		if (ret < 0)
+			goto out;
+		tv[1] = tv[0];
+	}
+	ret = sys_utimes(filename, tv);
+  out:
+	set_fs (old_fs);
+	return ret;
+}
+
 extern struct timezone sys_tz;
 extern int do_sys_settimeofday(struct timeval *tv, struct timezone *tz);
 
-asmlinkage int
+asmlinkage long
 sys32_gettimeofday(struct timeval32 *tv, struct timezone *tz)
 {
 	if (tv) {
@@ -628,7 +679,7 @@ sys32_gettimeofday(struct timeval32 *tv, struct timezone *tz)
 	return 0;
 }
 
-asmlinkage int
+asmlinkage long
 sys32_settimeofday(struct timeval32 *tv, struct timezone *tz)
 {
 	struct timeval ktv;
@@ -646,56 +697,132 @@ sys32_settimeofday(struct timeval32 *tv, struct timezone *tz)
 	return do_sys_settimeofday(tv ? &ktv : NULL, tz ? &ktz : NULL);
 }
 
-struct dirent32 {
-	unsigned int	d_ino;
-	unsigned int	d_off;
-	unsigned short	d_reclen;
-	char		d_name[NAME_MAX + 1];
+struct linux32_dirent {
+	u32	d_ino;
+	u32	d_off;
+	u16	d_reclen;
+	char	d_name[1];
 };
 
-static void
-xlate_dirent(void *dirent64, void *dirent32, long n)
-{
-	long off;
-	struct dirent *dirp;
-	struct dirent32 *dirp32;
+struct old_linux32_dirent {
+	u32	d_ino;
+	u32	d_offset;
+	u16	d_namlen;
+	char	d_name[1];
+};
 
-	off = 0;
-	while (off < n) {
-		dirp = (struct dirent *)(dirent64 + off);
-		dirp32 = (struct dirent32 *)(dirent32 + off);
-		off += dirp->d_reclen;
-		dirp32->d_ino = dirp->d_ino;
-		dirp32->d_off = (unsigned int)dirp->d_off;
-		dirp32->d_reclen = dirp->d_reclen;
-		strncpy(dirp32->d_name, dirp->d_name, dirp->d_reclen - ((3 * 4) + 2));
-	}
-	return;
+struct getdents32_callback {
+	struct linux32_dirent * current_dir;
+	struct linux32_dirent * previous;
+	int count;
+	int error;
+};
+
+struct readdir32_callback {
+	struct old_linux32_dirent * dirent;
+	int count;
+};
+
+static int
+filldir32 (void *__buf, const char *name, int namlen, off_t offset, ino_t ino,
+	   unsigned int d_type)
+{
+	struct linux32_dirent * dirent;
+	struct getdents32_callback * buf = (struct getdents32_callback *) __buf;
+	int reclen = ROUND_UP(NAME_OFFSET(dirent) + namlen + 1, 4);
+
+	buf->error = -EINVAL;	/* only used if we fail.. */
+	if (reclen > buf->count)
+		return -EINVAL;
+	dirent = buf->previous;
+	if (dirent)
+		put_user(offset, &dirent->d_off);
+	dirent = buf->current_dir;
+	buf->previous = dirent;
+	put_user(ino, &dirent->d_ino);
+	put_user(reclen, &dirent->d_reclen);
+	copy_to_user(dirent->d_name, name, namlen);
+	put_user(0, dirent->d_name + namlen);
+	((char *) dirent) += reclen;
+	buf->current_dir = dirent;
+	buf->count -= reclen;
+	return 0;
 }
 
 asmlinkage long
-sys32_getdents(unsigned int fd, void * dirent32, unsigned int count)
+sys32_getdents (unsigned int fd, void * dirent, unsigned int count)
 {
-	long n;
-	void *dirent64;
+	struct file * file;
+	struct linux32_dirent * lastdirent;
+	struct getdents32_callback buf;
+	int error;
 
-	dirent64 = (unsigned long)(dirent32 + (sizeof(long) - 1)) & ~(sizeof(long) - 1);
-	if ((n = sys_getdents(fd, dirent64, count - (dirent64 - dirent32))) < 0)
-		return(n);
-	xlate_dirent(dirent64, dirent32, n);
-	return(n);
+	error = -EBADF;
+	file = fget(fd);
+	if (!file)
+		goto out;
+
+	buf.current_dir = (struct linux32_dirent *) dirent;
+	buf.previous = NULL;
+	buf.count = count;
+	buf.error = 0;
+
+	error = vfs_readdir(file, filldir32, &buf);
+	if (error < 0)
+		goto out_putf;
+	error = buf.error;
+	lastdirent = buf.previous;
+	if (lastdirent) {
+		put_user(file->f_pos, &lastdirent->d_off);
+		error = count - buf.count;
+	}
+
+out_putf:
+	fput(file);
+out:
+	return error;
 }
 
-asmlinkage int
-sys32_readdir(unsigned int fd, void * dirent32, unsigned int count)
+static int
+fillonedir32 (void * __buf, const char * name, int namlen, off_t offset, ino_t ino,
+	      unsigned int d_type)
 {
-	int n;
-	struct dirent dirent64;
+	struct readdir32_callback * buf = (struct readdir32_callback *) __buf;
+	struct old_linux32_dirent * dirent;
 
-	if ((n = old_readdir(fd, &dirent64, count)) < 0)
-		return(n);
-	xlate_dirent(&dirent64, dirent32, dirent64.d_reclen);
-	return(n);
+	if (buf->count)
+		return -EINVAL;
+	buf->count++;
+	dirent = buf->dirent;
+	put_user(ino, &dirent->d_ino);
+	put_user(offset, &dirent->d_offset);
+	put_user(namlen, &dirent->d_namlen);
+	copy_to_user(dirent->d_name, name, namlen);
+	put_user(0, dirent->d_name + namlen);
+	return 0;
+}
+
+asmlinkage long
+sys32_readdir (unsigned int fd, void * dirent, unsigned int count)
+{
+	int error;
+	struct file * file;
+	struct readdir32_callback buf;
+
+	error = -EBADF;
+	file = fget(fd);
+	if (!file)
+		goto out;
+
+	buf.count = 0;
+	buf.dirent = dirent;
+
+	error = vfs_readdir(file, fillonedir32, &buf);
+	if (error >= 0)
+		error = buf.count;
+	fput(file);
+out:
+	return error;
 }
 
 /*
@@ -708,9 +835,9 @@ sys32_readdir(unsigned int fd, void * dirent32, unsigned int count)
  */
 #define MAX_SELECT_SECONDS \
 	((unsigned long) (MAX_SCHEDULE_TIMEOUT / HZ)-1)
-#define ROUND_UP(x,y) (((x)+(y)-1)/(y))
+#define ROUND_UP_TIME(x,y) (((x)+(y)-1)/(y))
 
-asmlinkage int
+asmlinkage long
 sys32_select(int n, fd_set *inp, fd_set *outp, fd_set *exp, struct timeval32 *tvp32)
 {
 	fd_set_bits fds;
@@ -730,7 +857,7 @@ sys32_select(int n, fd_set *inp, fd_set *outp, fd_set *exp, struct timeval32 *tv
 			goto out_nofds;
 
 		if ((unsigned long) sec < MAX_SELECT_SECONDS) {
-			timeout = ROUND_UP(usec, 1000000/HZ);
+			timeout = ROUND_UP_TIME(usec, 1000000/HZ);
 			timeout += sec * (unsigned long) HZ;
 		}
 	}
@@ -807,13 +934,15 @@ struct sel_arg_struct {
 	unsigned int tvp;
 };
 
-asmlinkage int old_select(struct sel_arg_struct *arg)
+asmlinkage long
+old_select(struct sel_arg_struct *arg)
 {
 	struct sel_arg_struct a;
 
 	if (copy_from_user(&a, arg, sizeof(a)))
 		return -EFAULT;
-	return sys32_select(a.n, a.inp, a.outp, a.exp, a.tvp);
+	return sys32_select(a.n, (fd_set *)A(a.inp), (fd_set *)A(a.outp), (fd_set *)A(a.exp),
+			    (struct timeval32 *)A(a.tvp));
 }
 
 struct timespec32 {
@@ -821,10 +950,9 @@ struct timespec32 {
 	int	tv_nsec;
 };
 
-extern asmlinkage int sys_nanosleep(struct timespec *rqtp,
-				    struct timespec *rmtp); 
+extern asmlinkage long sys_nanosleep(struct timespec *rqtp, struct timespec *rmtp); 
 
-asmlinkage int
+asmlinkage long
 sys32_nanosleep(struct timespec32 *rqtp, struct timespec32 *rmtp)
 {
 	struct timespec t;
@@ -846,154 +974,85 @@ sys32_nanosleep(struct timespec32 *rqtp, struct timespec32 *rmtp)
 }
 
 struct iovec32 { unsigned int iov_base; int iov_len; };
+asmlinkage ssize_t sys_readv(unsigned long,const struct iovec *,unsigned long);
+asmlinkage ssize_t sys_writev(unsigned long,const struct iovec *,unsigned long);
 
-typedef ssize_t (*IO_fn_t)(struct file *, char *, size_t, loff_t *);
-
-static long
-do_readv_writev32(int type, struct file *file, const struct iovec32 *vector,
-		  u32 count)
+static struct iovec *
+get_iovec32(struct iovec32 *iov32, struct iovec *iov_buf, u32 count, int type)
 {
-	unsigned long tot_len;
-	struct iovec iovstack[UIO_FASTIOV];
-	struct iovec *iov=iovstack, *ivp;
-	struct inode *inode;
-	long retval, i;
-	IO_fn_t fn;
+	int i;
+	u32 buf, len;
+	struct iovec *ivp, *iov;
 
-	/* First get the "struct iovec" from user memory and
-	 * verify all the pointers
-	 */
+	/* Get the "struct iovec" from user memory */
+
 	if (!count)
 		return 0;
-	if(verify_area(VERIFY_READ, vector, sizeof(struct iovec32)*count))
-		return -EFAULT;
+	if(verify_area(VERIFY_READ, iov32, sizeof(struct iovec32)*count))
+		return(struct iovec *)0;
 	if (count > UIO_MAXIOV)
-		return -EINVAL;
+		return(struct iovec *)0;
 	if (count > UIO_FASTIOV) {
 		iov = kmalloc(count*sizeof(struct iovec), GFP_KERNEL);
 		if (!iov)
-			return -ENOMEM;
-	}
+			return((struct iovec *)0);
+	} else
+		iov = iov_buf;
 
-	tot_len = 0;
-	i = count;
 	ivp = iov;
-	while(i > 0) {
-		u32 len;
-		u32 buf;
-
-		__get_user(len, &vector->iov_len);
-		__get_user(buf, &vector->iov_base);
-		tot_len += len;
-		ivp->iov_base = (void *)A(buf);
-		ivp->iov_len = (__kernel_size_t) len;
-		vector++;
-		ivp++;
-		i--;
-	}
-
-	inode = file->f_dentry->d_inode;
-	/* VERIFY_WRITE actually means a read, as we write to user space */
-	retval = locks_verify_area((type == VERIFY_WRITE
-				    ? FLOCK_VERIFY_READ : FLOCK_VERIFY_WRITE),
-				   inode, file, file->f_pos, tot_len);
-	if (retval) {
-		if (iov != iovstack)
-			kfree(iov);
-		return retval;
-	}
-
-	/* Then do the actual IO.  Note that sockets need to be handled
-	 * specially as they have atomicity guarantees and can handle
-	 * iovec's natively
-	 */
-	if (inode->i_sock) {
-		int err;
-		err = sock_readv_writev(type, inode, file, iov, count, tot_len);
-		if (iov != iovstack)
-			kfree(iov);
-		return err;
-	}
-
-	if (!file->f_op) {
-		if (iov != iovstack)
-			kfree(iov);
-		return -EINVAL;
-	}
-	/* VERIFY_WRITE actually means a read, as we write to user space */
-	fn = file->f_op->read;
-	if (type == VERIFY_READ)
-		fn = (IO_fn_t) file->f_op->write;		
-	ivp = iov;
-	while (count > 0) {
-		void * base;
-		int len, nr;
-
-		base = ivp->iov_base;
-		len = ivp->iov_len;
-		ivp++;
-		count--;
-		nr = fn(file, base, len, &file->f_pos);
-		if (nr < 0) {
-			if (retval)
-				break;
-			retval = nr;
-			break;
+	for (i = 0; i < count; i++) {
+		if (__get_user(len, &iov32->iov_len) ||
+		    __get_user(buf, &iov32->iov_base)) {
+			if (iov != iov_buf)
+				kfree(iov);
+			return((struct iovec *)0);
 		}
-		retval += nr;
-		if (nr != len)
-			break;
+		if (verify_area(type, (void *)A(buf), len)) {
+			if (iov != iov_buf)
+				kfree(iov);
+			return((struct iovec *)0);
+		}
+		ivp->iov_base = (void *)A(buf);
+		ivp->iov_len = (__kernel_size_t)len;
+		iov32++;
+		ivp++;
 	}
-	if (iov != iovstack)
-		kfree(iov);
-	return retval;
+	return(iov);
 }
 
 asmlinkage long
 sys32_readv(int fd, struct iovec32 *vector, u32 count)
 {
-	struct file *file;
-	long ret = -EBADF;
+	struct iovec iovstack[UIO_FASTIOV];
+	struct iovec *iov;
+	int ret;
+	mm_segment_t old_fs = get_fs();
 
-	lock_kernel();
-	file = fget(fd);
-	if(!file)
-		goto bad_file;
-
-	if(!(file->f_mode & 1))
-		goto out;
-
-	ret = do_readv_writev32(VERIFY_WRITE, file,
-				vector, count);
-out:
-	fput(file);
-bad_file:
-	unlock_kernel();
+	if ((iov = get_iovec32(vector, iovstack, count, VERIFY_WRITE)) == (struct iovec *)0)
+		return -EFAULT;
+	set_fs(KERNEL_DS);
+	ret = sys_readv(fd, iov, count);
+	set_fs(old_fs);
+	if (iov != iovstack)
+		kfree(iov);
 	return ret;
 }
 
 asmlinkage long
 sys32_writev(int fd, struct iovec32 *vector, u32 count)
 {
-	struct file *file;
-	int ret = -EBADF;
+	struct iovec iovstack[UIO_FASTIOV];
+	struct iovec *iov;
+	int ret;
+	mm_segment_t old_fs = get_fs();
 
-	lock_kernel();
-	file = fget(fd);
-	if(!file)
-		goto bad_file;
-
-	if(!(file->f_mode & 2))
-		goto out;
-
-	down(&file->f_dentry->d_inode->i_sem);
-	ret = do_readv_writev32(VERIFY_READ, file,
-				vector, count);
-	up(&file->f_dentry->d_inode->i_sem);
-out:
-	fput(file);
-bad_file:
-	unlock_kernel();
+	if ((iov = get_iovec32(vector, iovstack, count, VERIFY_READ)) == (struct iovec *)0)
+		return -EFAULT;
+	set_fs(KERNEL_DS);
+	ret = sys_writev(fd, iov, count);
+	set_fs(old_fs);
+	if (iov != iovstack)
+		kfree(iov);
 	return ret;
 }
 
@@ -1005,9 +1064,9 @@ struct rlimit32 {
 	int	rlim_max;
 };
 
-extern asmlinkage int sys_getrlimit(unsigned int resource, struct rlimit *rlim);
+extern asmlinkage long sys_getrlimit(unsigned int resource, struct rlimit *rlim);
 
-asmlinkage int
+asmlinkage long
 sys32_getrlimit(unsigned int resource, struct rlimit32 *rlim)
 {
 	struct rlimit r;
@@ -1024,9 +1083,9 @@ sys32_getrlimit(unsigned int resource, struct rlimit32 *rlim)
 	return ret;
 }
 
-extern asmlinkage int sys_setrlimit(unsigned int resource, struct rlimit *rlim);
+extern asmlinkage long sys_setrlimit(unsigned int resource, struct rlimit *rlim);
 
-asmlinkage int
+asmlinkage long
 sys32_setrlimit(unsigned int resource, struct rlimit32 *rlim)
 {
 	struct rlimit r;
@@ -1047,118 +1106,6 @@ sys32_setrlimit(unsigned int resource, struct rlimit32 *rlim)
 	return ret;
 }
 
-/* Argument list sizes for sys_socketcall */
-#define AL(x) ((x) * sizeof(u32))
-static unsigned char nas[18]={AL(0),AL(3),AL(3),AL(3),AL(2),AL(3),
-                                AL(3),AL(3),AL(4),AL(4),AL(4),AL(6),
-                                AL(6),AL(2),AL(5),AL(5),AL(3),AL(3)};
-#undef AL
-
-extern asmlinkage int sys_bind(int fd, struct sockaddr *umyaddr, int addrlen);
-extern asmlinkage int sys_connect(int fd, struct sockaddr *uservaddr,
-				  int addrlen);
-extern asmlinkage int sys_accept(int fd, struct sockaddr *upeer_sockaddr,
-				 int *upeer_addrlen); 
-extern asmlinkage int sys_getsockname(int fd, struct sockaddr *usockaddr,
-				      int *usockaddr_len);
-extern asmlinkage int sys_getpeername(int fd, struct sockaddr *usockaddr,
-				      int *usockaddr_len);
-extern asmlinkage int sys_send(int fd, void *buff, size_t len, unsigned flags);
-extern asmlinkage int sys_sendto(int fd, u32 buff, __kernel_size_t32 len,
-				   unsigned flags, u32 addr, int addr_len);
-extern asmlinkage int sys_recv(int fd, void *ubuf, size_t size, unsigned flags);
-extern asmlinkage int sys_recvfrom(int fd, u32 ubuf, __kernel_size_t32 size,
-				     unsigned flags, u32 addr, u32 addr_len);
-extern asmlinkage int sys_setsockopt(int fd, int level, int optname,
-				     char *optval, int optlen);
-extern asmlinkage int sys_getsockopt(int fd, int level, int optname,
-				       u32 optval, u32 optlen);
-
-extern asmlinkage int sys_socket(int family, int type, int protocol);
-extern asmlinkage int sys_socketpair(int family, int type, int protocol,
-				     int usockvec[2]);
-extern asmlinkage int sys_shutdown(int fd, int how);
-extern asmlinkage int sys_listen(int fd, int backlog);
-
-asmlinkage int sys32_socketcall(int call, u32 *args)
-{
-	int i, ret;
-	u32 a[6];
-	u32 a0,a1;
-				 
-	if (call<SYS_SOCKET||call>SYS_RECVMSG)
-		return -EINVAL;
-	if (copy_from_user(a, args, nas[call]))
-		return -EFAULT;
-	a0=a[0];
-	a1=a[1];
-	
-	switch(call) 
-	{
-		case SYS_SOCKET:
-			ret = sys_socket(a0, a1, a[2]);
-			break;
-		case SYS_BIND:
-			ret = sys_bind(a0, (struct sockaddr *)A(a1), a[2]);
-			break;
-		case SYS_CONNECT:
-			ret = sys_connect(a0, (struct sockaddr *)A(a1), a[2]);
-			break;
-		case SYS_LISTEN:
-			ret = sys_listen(a0, a1);
-			break;
-		case SYS_ACCEPT:
-			ret = sys_accept(a0, (struct sockaddr *)A(a1),
-					  (int *)A(a[2]));
-			break;
-		case SYS_GETSOCKNAME:
-			ret = sys_getsockname(a0, (struct sockaddr *)A(a1),
-					       (int *)A(a[2]));
-			break;
-		case SYS_GETPEERNAME:
-			ret = sys_getpeername(a0, (struct sockaddr *)A(a1),
-					       (int *)A(a[2]));
-			break;
-		case SYS_SOCKETPAIR:
-			ret = sys_socketpair(a0, a1, a[2], (int *)A(a[3]));
-			break;
-		case SYS_SEND:
-			ret = sys_send(a0, (void *)A(a1), a[2], a[3]);
-			break;
-		case SYS_SENDTO:
-			ret = sys_sendto(a0, a1, a[2], a[3], a[4], a[5]);
-			break;
-		case SYS_RECV:
-			ret = sys_recv(a0, (void *)A(a1), a[2], a[3]);
-			break;
-		case SYS_RECVFROM:
-			ret = sys_recvfrom(a0, a1, a[2], a[3], a[4], a[5]);
-			break;
-		case SYS_SHUTDOWN:
-			ret = sys_shutdown(a0,a1);
-			break;
-		case SYS_SETSOCKOPT:
-			ret = sys_setsockopt(a0, a1, a[2], (char *)A(a[3]),
-					      a[4]);
-			break;
-		case SYS_GETSOCKOPT:
-			ret = sys_getsockopt(a0, a1, a[2], a[3], a[4]);
-			break;
-		case SYS_SENDMSG:
-			ret = sys32_sendmsg(a0, (struct msghdr32 *)A(a1),
-					     a[2]);
-			break;
-		case SYS_RECVMSG:
-			ret = sys32_recvmsg(a0, (struct msghdr32 *)A(a1),
-					     a[2]);
-			break;
-		default:
-			ret = EINVAL;
-			break;
-	}
-	return ret;
-}
-
 /*
  *  Declare the IA32 version of the msghdr
  */
@@ -1176,21 +1123,22 @@ struct msghdr32 {
 static inline int
 shape_msg(struct msghdr *mp, struct msghdr32 *mp32)
 {
+	int ret;
 	unsigned int i;
 
 	if (!access_ok(VERIFY_READ, mp32, sizeof(*mp32)))
 		return(-EFAULT);
-	__get_user(i, &mp32->msg_name);
-	mp->msg_name = (void *)i;
-	__get_user(mp->msg_namelen, &mp32->msg_namelen);
-	__get_user(i, &mp32->msg_iov);
-	mp->msg_iov = (struct iov *)i;
-	__get_user(mp->msg_iovlen, &mp32->msg_iovlen);
-	__get_user(i, &mp32->msg_control);
-	mp->msg_control = (void *)i;
-	__get_user(mp->msg_controllen, &mp32->msg_controllen);
-	__get_user(mp->msg_flags, &mp32->msg_flags);
-	return(0);
+	ret = __get_user(i, &mp32->msg_name);
+	mp->msg_name = (void *)A(i);
+	ret |= __get_user(mp->msg_namelen, &mp32->msg_namelen);
+	ret |= __get_user(i, &mp32->msg_iov);
+	mp->msg_iov = (struct iovec *)A(i);
+	ret |= __get_user(mp->msg_iovlen, &mp32->msg_iovlen);
+	ret |= __get_user(i, &mp32->msg_control);
+	mp->msg_control = (void *)A(i);
+	ret |= __get_user(mp->msg_controllen, &mp32->msg_controllen);
+	ret |= __get_user(mp->msg_flags, &mp32->msg_flags);
+	return(ret ? -EFAULT : 0);
 }
 
 /*
@@ -1233,7 +1181,7 @@ verify_iovec32(struct msghdr *m, struct iovec *iov, char *address, int mode)
 	iov32 = (struct iovec32 *)iov;
 	for (ct = m->msg_iovlen; ct-- > 0; ) {
 		iov[ct].iov_len = (__kernel_size_t)iov32[ct].iov_len;
-		iov[ct].iov_base = (void *)iov32[ct].iov_base;
+		iov[ct].iov_base = (void *) A(iov32[ct].iov_base);
 		err += iov[ct].iov_len;
 	}
 out:
@@ -1258,7 +1206,7 @@ extern struct socket *sockfd_lookup(int fd, int *err);
  *	BSD sendmsg interface
  */
 
-asmlinkage int sys32_sendmsg(int fd, struct msghdr32 *msg, unsigned flags)
+int sys32_sendmsg(int fd, struct msghdr32 *msg, unsigned flags)
 {
 	struct socket *sock;
 	char address[MAX_SOCK_ADDR];
@@ -1337,7 +1285,8 @@ out:
  *	BSD recvmsg interface
  */
 
-asmlinkage int sys32_recvmsg(int fd, struct msghdr32 *msg, unsigned int flags)
+int
+sys32_recvmsg (int fd, struct msghdr32 *msg, unsigned int flags)
 {
 	struct socket *sock;
 	struct iovec iovstack[UIO_FASTIOV];
@@ -1417,6 +1366,118 @@ out_put:
 	sockfd_put(sock);
 out:
 	return err;
+}
+
+/* Argument list sizes for sys_socketcall */
+#define AL(x) ((x) * sizeof(u32))
+static unsigned char nas[18]={AL(0),AL(3),AL(3),AL(3),AL(2),AL(3),
+                                AL(3),AL(3),AL(4),AL(4),AL(4),AL(6),
+                                AL(6),AL(2),AL(5),AL(5),AL(3),AL(3)};
+#undef AL
+
+extern asmlinkage long sys_bind(int fd, struct sockaddr *umyaddr, int addrlen);
+extern asmlinkage long sys_connect(int fd, struct sockaddr *uservaddr,
+				  int addrlen);
+extern asmlinkage long sys_accept(int fd, struct sockaddr *upeer_sockaddr,
+				 int *upeer_addrlen); 
+extern asmlinkage long sys_getsockname(int fd, struct sockaddr *usockaddr,
+				      int *usockaddr_len);
+extern asmlinkage long sys_getpeername(int fd, struct sockaddr *usockaddr,
+				      int *usockaddr_len);
+extern asmlinkage long sys_send(int fd, void *buff, size_t len, unsigned flags);
+extern asmlinkage long sys_sendto(int fd, u32 buff, __kernel_size_t32 len,
+				   unsigned flags, u32 addr, int addr_len);
+extern asmlinkage long sys_recv(int fd, void *ubuf, size_t size, unsigned flags);
+extern asmlinkage long sys_recvfrom(int fd, u32 ubuf, __kernel_size_t32 size,
+				     unsigned flags, u32 addr, u32 addr_len);
+extern asmlinkage long sys_setsockopt(int fd, int level, int optname,
+				     char *optval, int optlen);
+extern asmlinkage long sys_getsockopt(int fd, int level, int optname,
+				       u32 optval, u32 optlen);
+
+extern asmlinkage long sys_socket(int family, int type, int protocol);
+extern asmlinkage long sys_socketpair(int family, int type, int protocol,
+				     int usockvec[2]);
+extern asmlinkage long sys_shutdown(int fd, int how);
+extern asmlinkage long sys_listen(int fd, int backlog);
+
+asmlinkage long sys32_socketcall(int call, u32 *args)
+{
+	int ret;
+	u32 a[6];
+	u32 a0,a1;
+				 
+	if (call<SYS_SOCKET||call>SYS_RECVMSG)
+		return -EINVAL;
+	if (copy_from_user(a, args, nas[call]))
+		return -EFAULT;
+	a0=a[0];
+	a1=a[1];
+	
+	switch(call) 
+	{
+		case SYS_SOCKET:
+			ret = sys_socket(a0, a1, a[2]);
+			break;
+		case SYS_BIND:
+			ret = sys_bind(a0, (struct sockaddr *)A(a1), a[2]);
+			break;
+		case SYS_CONNECT:
+			ret = sys_connect(a0, (struct sockaddr *)A(a1), a[2]);
+			break;
+		case SYS_LISTEN:
+			ret = sys_listen(a0, a1);
+			break;
+		case SYS_ACCEPT:
+			ret = sys_accept(a0, (struct sockaddr *)A(a1),
+					  (int *)A(a[2]));
+			break;
+		case SYS_GETSOCKNAME:
+			ret = sys_getsockname(a0, (struct sockaddr *)A(a1),
+					       (int *)A(a[2]));
+			break;
+		case SYS_GETPEERNAME:
+			ret = sys_getpeername(a0, (struct sockaddr *)A(a1),
+					       (int *)A(a[2]));
+			break;
+		case SYS_SOCKETPAIR:
+			ret = sys_socketpair(a0, a1, a[2], (int *)A(a[3]));
+			break;
+		case SYS_SEND:
+			ret = sys_send(a0, (void *)A(a1), a[2], a[3]);
+			break;
+		case SYS_SENDTO:
+			ret = sys_sendto(a0, a1, a[2], a[3], a[4], a[5]);
+			break;
+		case SYS_RECV:
+			ret = sys_recv(a0, (void *)A(a1), a[2], a[3]);
+			break;
+		case SYS_RECVFROM:
+			ret = sys_recvfrom(a0, a1, a[2], a[3], a[4], a[5]);
+			break;
+		case SYS_SHUTDOWN:
+			ret = sys_shutdown(a0,a1);
+			break;
+		case SYS_SETSOCKOPT:
+			ret = sys_setsockopt(a0, a1, a[2], (char *)A(a[3]),
+					      a[4]);
+			break;
+		case SYS_GETSOCKOPT:
+			ret = sys_getsockopt(a0, a1, a[2], a[3], a[4]);
+			break;
+		case SYS_SENDMSG:
+			ret = sys32_sendmsg(a0, (struct msghdr32 *)A(a1),
+					     a[2]);
+			break;
+		case SYS_RECVMSG:
+			ret = sys32_recvmsg(a0, (struct msghdr32 *)A(a1),
+					     a[2]);
+			break;
+		default:
+			ret = EINVAL;
+			break;
+	}
+	return ret;
 }
 
 /*
@@ -1613,7 +1674,7 @@ out:
 static int
 do_sys32_msgctl (int first, int second, void *uptr)
 {
-	int err, err2;
+	int err = -EINVAL, err2;
 	struct msqid_ds m;
 	struct msqid64_ds m64;
 	struct msqid_ds32 *up = (struct msqid_ds32 *)uptr;
@@ -1644,7 +1705,7 @@ do_sys32_msgctl (int first, int second, void *uptr)
 	case MSG_STAT:
 		old_fs = get_fs ();
 		set_fs (KERNEL_DS);
-		err = sys_msgctl (first, second, &m64);
+		err = sys_msgctl (first, second, (void *) &m64);
 		set_fs (old_fs);
 		err2 = put_user (m64.msg_perm.key, &up->msg_perm.key);
 		err2 |= __put_user(m64.msg_perm.uid, &up->msg_perm.uid);
@@ -1725,7 +1786,7 @@ do_sys32_shmctl (int first, int second, void *uptr)
 	case SHM_STAT:
 		old_fs = get_fs ();
 		set_fs (KERNEL_DS);
-		err = sys_shmctl (first, second, &s64);
+		err = sys_shmctl (first, second, (void *) &s64);
 		set_fs (old_fs);
 		if (err < 0)
 			break;
@@ -1753,7 +1814,7 @@ do_sys32_shmctl (int first, int second, void *uptr)
 	case SHM_INFO:
 		old_fs = get_fs ();
 		set_fs (KERNEL_DS);
-		err = sys_shmctl (first, second, &si);
+		err = sys_shmctl (first, second, (void *)&si);
 		set_fs (old_fs);
 		if (err < 0)
 			break;
@@ -1773,12 +1834,11 @@ do_sys32_shmctl (int first, int second, void *uptr)
 	return err;
 }
 
-asmlinkage int
+asmlinkage long
 sys32_ipc (u32 call, int first, int second, int third, u32 ptr, u32 fifth)
 {
 	int version, err;
 
-	lock_kernel();
 	version = call >> 16; /* hack for backward compatibility */
 	call &= 0xffff;
 
@@ -1830,7 +1890,6 @@ sys32_ipc (u32 call, int first, int second, int third, u32 ptr, u32 fifth)
 		break;
 	}
 
-	unlock_kernel();
 	return err;
 }
 
@@ -1898,10 +1957,10 @@ put_rusage (struct rusage32 *ru, struct rusage *r)
 	return err;
 }
 
-extern asmlinkage int sys_wait4(pid_t pid,unsigned int * stat_addr,
+extern asmlinkage long sys_wait4(pid_t pid,unsigned int * stat_addr,
 				int options, struct rusage * ru);
 
-asmlinkage int
+asmlinkage long
 sys32_wait4(__kernel_pid_t32 pid, unsigned int *stat_addr, int options,
 	    struct rusage32 *ru)
 {
@@ -1923,17 +1982,17 @@ sys32_wait4(__kernel_pid_t32 pid, unsigned int *stat_addr, int options,
 	}
 }
 
-asmlinkage int
+asmlinkage long
 sys32_waitpid(__kernel_pid_t32 pid, unsigned int *stat_addr, int options)
 {
 	return sys32_wait4(pid, stat_addr, options, NULL);
 }
 
 
-extern asmlinkage int
+extern asmlinkage long
 sys_getrusage(int who, struct rusage *ru);
 
-asmlinkage int
+asmlinkage long
 sys32_getrusage(int who, struct rusage32 *ru)
 {
 	struct rusage r;
@@ -1968,14 +2027,14 @@ sys32_times(struct tms32 *tbuf)
 	ret = sys_times(tbuf ? &t : NULL);
 	set_fs (old_fs);
 	if (tbuf) {
-		err = put_user (t.tms_utime, &tbuf->tms_utime);
-		err |= __put_user (t.tms_stime, &tbuf->tms_stime);
-		err |= __put_user (t.tms_cutime, &tbuf->tms_cutime);
-		err |= __put_user (t.tms_cstime, &tbuf->tms_cstime);
+		err = put_user (IA32_TICK(t.tms_utime), &tbuf->tms_utime);
+		err |= __put_user (IA32_TICK(t.tms_stime), &tbuf->tms_stime);
+		err |= __put_user (IA32_TICK(t.tms_cutime), &tbuf->tms_cutime);
+		err |= __put_user (IA32_TICK(t.tms_cstime), &tbuf->tms_cstime);
 		if (err)
 			ret = -EFAULT;
 	}
-	return ret;
+	return IA32_TICK(ret);
 }
 
 unsigned int
@@ -2233,17 +2292,17 @@ restore_ia32_fpstate(struct task_struct *tsk, struct _fpstate_ia32 *save)
 {
 	struct switch_stack *swp;
 	struct pt_regs *ptp;
-	int i, tos;
+	int i, tos, ret;
 	int fsrlo, fsrhi;
 
 	if (!access_ok(VERIFY_READ, save, sizeof(*save)))
 		return(-EIO);
-	__get_user(tsk->thread.fcr, (unsigned int *)&save->cw);
-	__get_user(fsrlo, (unsigned int *)&save->sw);
-	__get_user(fsrhi, (unsigned int *)&save->tag);
+	ret = __get_user(tsk->thread.fcr, (unsigned int *)&save->cw);
+	ret |= __get_user(fsrlo, (unsigned int *)&save->sw);
+	ret |= __get_user(fsrhi, (unsigned int *)&save->tag);
 	tsk->thread.fsr = ((long)fsrhi << 32) | (long)fsrlo;
-	__get_user(tsk->thread.fir, (unsigned int *)&save->ipoff);
-	__get_user(tsk->thread.fdr, (unsigned int *)&save->dataoff);
+	ret |= __get_user(tsk->thread.fir, (unsigned int *)&save->ipoff);
+	ret |= __get_user(tsk->thread.fdr, (unsigned int *)&save->dataoff);
 	/*
 	 *  Stack frames start with 16-bytes of temp space
 	 */
@@ -2252,7 +2311,7 @@ restore_ia32_fpstate(struct task_struct *tsk, struct _fpstate_ia32 *save)
 	tos = (tsk->thread.fsr >> 11) & 3;
 	for (i = 0; i < 8; i++)
 		get_fpreg(i, &save->_st[i], ptp, swp, tos);
-	return(0);
+	return(ret ? -EFAULT : 0);
 }
 
 asmlinkage long sys_ptrace(long, pid_t, unsigned long, unsigned long, long, long, long, long, long);
@@ -2296,7 +2355,7 @@ sys32_ptrace (long request, pid_t pid, unsigned long addr, unsigned long data,
 		goto out;
 	}
 	ret = -ESRCH;
-	if (!(child->flags & PF_PTRACED))
+	if (!(child->ptrace & PT_PTRACED))
 		goto out;
 	if (child->state != TASK_STOPPED) {
 		if (request != PTRACE_KILL)
@@ -2384,6 +2443,224 @@ sys32_ptrace (long request, pid_t pid, unsigned long addr, unsigned long data,
 	return ret;
 }
 
+static inline int
+get_flock32(struct flock *kfl, struct flock32 *ufl)
+{
+	int err;
+	
+	err = get_user(kfl->l_type, &ufl->l_type);
+	err |= __get_user(kfl->l_whence, &ufl->l_whence);
+	err |= __get_user(kfl->l_start, &ufl->l_start);
+	err |= __get_user(kfl->l_len, &ufl->l_len);
+	err |= __get_user(kfl->l_pid, &ufl->l_pid);
+	return err;
+}
+
+static inline int
+put_flock32(struct flock *kfl, struct flock32 *ufl)
+{
+	int err;
+	
+	err = __put_user(kfl->l_type, &ufl->l_type);
+	err |= __put_user(kfl->l_whence, &ufl->l_whence);
+	err |= __put_user(kfl->l_start, &ufl->l_start);
+	err |= __put_user(kfl->l_len, &ufl->l_len);
+	err |= __put_user(kfl->l_pid, &ufl->l_pid);
+	return err;
+}
+
+extern asmlinkage long sys_fcntl(unsigned int fd, unsigned int cmd,
+				 unsigned long arg);
+
+asmlinkage long
+sys32_fcntl(unsigned int fd, unsigned int cmd, int arg)
+{
+	struct flock f;
+	mm_segment_t old_fs;
+	long ret;
+
+	switch (cmd) {
+	case F_GETLK:
+	case F_SETLK:
+	case F_SETLKW:
+		if(cmd != F_GETLK && get_flock32(&f, (struct flock32 *)((long)arg)))
+			return -EFAULT;
+		old_fs = get_fs();
+		set_fs(KERNEL_DS);
+		ret = sys_fcntl(fd, cmd, (unsigned long)&f);
+		set_fs(old_fs);
+		if(cmd == F_GETLK && put_flock32(&f, (struct flock32 *)((long)arg)))
+			return -EFAULT;
+		return ret;
+	default:
+		/*
+		 *  `sys_fcntl' lies about arg, for the F_SETOWN
+		 *  sub-function arg can have a negative value.
+		 */
+		return sys_fcntl(fd, cmd, (unsigned long)((long)arg));
+	}
+}
+
+asmlinkage long
+sys32_sigaction (int sig, struct old_sigaction32 *act, struct old_sigaction32 *oact)
+{
+        struct k_sigaction new_ka, old_ka;
+        int ret;
+
+        if (act) {
+		old_sigset32_t mask;
+		
+		ret = get_user((long)new_ka.sa.sa_handler, &act->sa_handler);
+		ret |= __get_user(new_ka.sa.sa_flags, &act->sa_flags);
+		ret |= __get_user(mask, &act->sa_mask);
+		if (ret)
+			return ret;
+		siginitset(&new_ka.sa.sa_mask, mask);
+        }
+
+        ret = do_sigaction(sig, act ? &new_ka : NULL, oact ? &old_ka : NULL);
+
+	if (!ret && oact) {
+		ret = put_user((long)old_ka.sa.sa_handler, &oact->sa_handler);
+		ret |= __put_user(old_ka.sa.sa_flags, &oact->sa_flags);
+		ret |= __put_user(old_ka.sa.sa_mask.sig[0], &oact->sa_mask);
+        }
+
+	return ret;
+}
+
+asmlinkage long sys_ni_syscall(void);
+
+asmlinkage long
+sys32_ni_syscall(int dummy0, int dummy1, int dummy2, int dummy3,
+	int dummy4, int dummy5, int dummy6, int dummy7, int stack)
+{
+	struct pt_regs *regs = (struct pt_regs *)&stack;
+
+	printk("IA32 syscall #%d issued, maybe we should implement it\n",
+		(int)regs->r1);
+	return(sys_ni_syscall());
+}
+
+/*
+ *  The IA64 maps 4 I/O ports for each 4K page
+ */
+#define IOLEN	((65536 / 4) * 4096)
+
+asmlinkage long
+sys_iopl (int level, long arg1, long arg2, long arg3)
+{
+	extern unsigned long ia64_iobase;
+	int fd;
+	struct file * file;
+	unsigned int old;
+	unsigned long addr;
+	mm_segment_t old_fs = get_fs ();
+
+	if (level != 3)
+		return(-EINVAL);
+	/* Trying to gain more privileges? */
+	__asm__ __volatile__("mov %0=ar.eflag ;;" : "=r"(old));
+	if (level > ((old >> 12) & 3)) {
+		if (!capable(CAP_SYS_RAWIO))
+			return -EPERM;
+	}
+	set_fs(KERNEL_DS);
+	fd = sys_open("/dev/mem", O_SYNC | O_RDWR, 0);
+	set_fs(old_fs);
+	if (fd < 0)
+		return fd;
+	file = fget(fd);
+	if (file == NULL) {
+		sys_close(fd);
+		return(-EFAULT);
+	}
+
+	down(&current->mm->mmap_sem);
+	lock_kernel();
+
+	addr = do_mmap_pgoff(file, IA32_IOBASE,
+			IOLEN, PROT_READ|PROT_WRITE, MAP_SHARED,
+			(ia64_iobase & ~PAGE_OFFSET) >> PAGE_SHIFT);
+
+	unlock_kernel();
+	up(&current->mm->mmap_sem);
+
+	if (addr >= 0) {
+		__asm__ __volatile__("mov ar.k0=%0 ;;" :: "r"(addr));
+		old = (old & ~0x3000) | (level << 12);
+		__asm__ __volatile__("mov ar.eflag=%0 ;;" :: "r"(old));
+	}
+
+	fput(file);
+	sys_close(fd);
+	return 0;
+}
+
+asmlinkage long
+sys_ioperm (unsigned long from, unsigned long num, int on)
+{
+
+	/*
+	 *  Since IA64 doesn't have permission bits we'd have to go to
+	 *    a lot of trouble to simulate them in software.  There's
+	 *    no point, only trusted programs can make this call so we'll
+	 *    just turn it into an iopl call and let the process have
+	 *    access to all I/O ports.
+	 *
+	 * XXX proper ioperm() support should be emulated by
+	 *	manipulating the page protections...
+	 */
+	return(sys_iopl(3, 0, 0, 0));
+}
+
+typedef struct {
+	unsigned int	ss_sp;
+	unsigned int	ss_flags;
+	unsigned int	ss_size;
+} ia32_stack_t;
+
+asmlinkage long
+sys32_sigaltstack (const ia32_stack_t *uss32, ia32_stack_t *uoss32,
+long arg2, long arg3, long arg4,
+long arg5, long arg6, long arg7,
+long stack)
+{
+	struct pt_regs *pt = (struct pt_regs *) &stack;
+	stack_t uss, uoss;
+	ia32_stack_t buf32;
+	int ret;
+	mm_segment_t old_fs = get_fs();
+
+	if (uss32)
+		if (copy_from_user(&buf32, (void *)A(uss32), sizeof(ia32_stack_t)))
+			return(-EFAULT);
+	uss.ss_sp = (void *) (long) buf32.ss_sp;
+	uss.ss_flags = buf32.ss_flags;
+	uss.ss_size = buf32.ss_size;
+	set_fs(KERNEL_DS);
+	ret = do_sigaltstack(uss32 ? &uss : NULL, &uoss, pt->r12);
+	set_fs(old_fs);
+	if (ret < 0)
+		return(ret);
+	if (uoss32) {
+		buf32.ss_sp = (long) uoss.ss_sp;
+		buf32.ss_flags = uoss.ss_flags;
+		buf32.ss_size = uoss.ss_size;
+		if (copy_to_user((void*)A(uoss32), &buf32, sizeof(ia32_stack_t)))
+			return(-EFAULT);
+	}
+	return(ret);
+}
+
+asmlinkage int
+sys_pause (void)
+{
+	current->state = TASK_INTERRUPTIBLE;
+	schedule();
+	return -ERESTARTNOHAND;
+}
+
 #ifdef	NOTYET  /* UNTESTED FOR IA64 FROM HERE DOWN */
 
 /* In order to reduce some races, while at the same time doing additional
@@ -2429,67 +2706,12 @@ getname32(const char *filename)
 
 /* 32-bit timeval and related flotsam.  */
 
-extern asmlinkage int sys_ioperm(unsigned long from, unsigned long num, int on);
+extern asmlinkage long sys_ioperm(unsigned long from, unsigned long num, int on);
 
-asmlinkage int
+asmlinkage long
 sys32_ioperm(u32 from, u32 num, int on)
 {
 	return sys_ioperm((unsigned long)from, (unsigned long)num, on);
-}
-
-static inline int
-get_flock(struct flock *kfl, struct flock32 *ufl)
-{
-	int err;
-	
-	err = get_user(kfl->l_type, &ufl->l_type);
-	err |= __get_user(kfl->l_whence, &ufl->l_whence);
-	err |= __get_user(kfl->l_start, &ufl->l_start);
-	err |= __get_user(kfl->l_len, &ufl->l_len);
-	err |= __get_user(kfl->l_pid, &ufl->l_pid);
-	return err;
-}
-
-static inline int
-put_flock(struct flock *kfl, struct flock32 *ufl)
-{
-	int err;
-	
-	err = __put_user(kfl->l_type, &ufl->l_type);
-	err |= __put_user(kfl->l_whence, &ufl->l_whence);
-	err |= __put_user(kfl->l_start, &ufl->l_start);
-	err |= __put_user(kfl->l_len, &ufl->l_len);
-	err |= __put_user(kfl->l_pid, &ufl->l_pid);
-	return err;
-}
-
-extern asmlinkage long sys_fcntl(unsigned int fd, unsigned int cmd,
-				 unsigned long arg);
-
-asmlinkage long
-sys32_fcntl(unsigned int fd, unsigned int cmd, unsigned long arg)
-{
-	switch (cmd) {
-	case F_GETLK:
-	case F_SETLK:
-	case F_SETLKW:
-		{
-			struct flock f;
-			mm_segment_t old_fs;
-			long ret;
-			
-			if(get_flock(&f, (struct flock32 *)arg))
-				return -EFAULT;
-			old_fs = get_fs(); set_fs (KERNEL_DS);
-			ret = sys_fcntl(fd, cmd, (unsigned long)&f);
-			set_fs (old_fs);
-			if(put_flock(&f, (struct flock32 *)arg))
-				return -EFAULT;
-			return ret;
-		}
-	default:
-		return sys_fcntl(fd, cmd, (unsigned long)arg);
-	}
 }
 
 struct dqblk32 {
@@ -2503,10 +2725,10 @@ struct dqblk32 {
     __kernel_time_t32 dqb_itime;
 };
                                 
-extern asmlinkage int sys_quotactl(int cmd, const char *special, int id,
+extern asmlinkage long sys_quotactl(int cmd, const char *special, int id,
 				   caddr_t addr);
 
-asmlinkage int
+asmlinkage long
 sys32_quotactl(int cmd, const char *special, int id, unsigned long addr)
 {
 	int cmds = cmd >> SUBCMDSHIFT;
@@ -2550,13 +2772,13 @@ sys32_quotactl(int cmd, const char *special, int id, unsigned long addr)
 	return err;
 }
 
-extern asmlinkage int sys_utime(char * filename, struct utimbuf * times);
+extern asmlinkage long sys_utime(char * filename, struct utimbuf * times);
 
 struct utimbuf32 {
 	__kernel_time_t32 actime, modtime;
 };
 
-asmlinkage int
+asmlinkage long
 sys32_utime(char * filename, struct utimbuf32 *times)
 {
 	struct utimbuf t;
@@ -2640,10 +2862,10 @@ set_fd_set32(unsigned long n, u32 *ufdset, unsigned long *fdset)
 		__put_user(*fdset, ufdset);
 }
 
-extern asmlinkage int sys_sysfs(int option, unsigned long arg1,
+extern asmlinkage long sys_sysfs(int option, unsigned long arg1,
 				unsigned long arg2);
 
-asmlinkage int
+asmlinkage long
 sys32_sysfs(int option, u32 arg1, u32 arg2)
 {
 	return sys_sysfs(option, arg1, arg2);
@@ -2739,7 +2961,7 @@ extern asmlinkage long sys_mount(char * dev_name, char * dir_name, char * type,
 #define SMBFS_NAME	"smbfs"
 #define NCPFS_NAME	"ncpfs"
 
-asmlinkage int
+asmlinkage long
 sys32_mount(char *dev_name, char *dir_name, char *type,
 	    unsigned long new_flags, u32 data)
 {
@@ -2813,9 +3035,9 @@ struct sysinfo32 {
         char _f[22];
 };
 
-extern asmlinkage int sys_sysinfo(struct sysinfo *info);
+extern asmlinkage long sys_sysinfo(struct sysinfo *info);
 
-asmlinkage int
+asmlinkage long
 sys32_sysinfo(struct sysinfo32 *info)
 {
 	struct sysinfo s;
@@ -2841,10 +3063,10 @@ sys32_sysinfo(struct sysinfo32 *info)
 	return ret;
 }
                 
-extern asmlinkage int sys_sched_rr_get_interval(pid_t pid,
+extern asmlinkage long sys_sched_rr_get_interval(pid_t pid,
 						struct timespec *interval);
 
-asmlinkage int
+asmlinkage long
 sys32_sched_rr_get_interval(__kernel_pid_t32 pid, struct timespec32 *interval)
 {
 	struct timespec t;
@@ -2860,10 +3082,10 @@ sys32_sched_rr_get_interval(__kernel_pid_t32 pid, struct timespec32 *interval)
 	return ret;
 }
 
-extern asmlinkage int sys_sigprocmask(int how, old_sigset_t *set,
+extern asmlinkage long sys_sigprocmask(int how, old_sigset_t *set,
 				      old_sigset_t *oset);
 
-asmlinkage int
+asmlinkage long
 sys32_sigprocmask(int how, old_sigset_t32 *set, old_sigset_t32 *oset)
 {
 	old_sigset_t s;
@@ -2879,9 +3101,9 @@ sys32_sigprocmask(int how, old_sigset_t32 *set, old_sigset_t32 *oset)
 	return 0;
 }
 
-extern asmlinkage int sys_sigpending(old_sigset_t *set);
+extern asmlinkage long sys_sigpending(old_sigset_t *set);
 
-asmlinkage int
+asmlinkage long
 sys32_sigpending(old_sigset_t32 *set)
 {
 	old_sigset_t s;
@@ -2895,9 +3117,9 @@ sys32_sigpending(old_sigset_t32 *set)
 	return ret;
 }
 
-extern asmlinkage int sys_rt_sigpending(sigset_t *set, size_t sigsetsize);
+extern asmlinkage long sys_rt_sigpending(sigset_t *set, size_t sigsetsize);
 
-asmlinkage int
+asmlinkage long
 sys32_rt_sigpending(sigset_t32 *set, __kernel_size_t32 sigsetsize)
 {
 	sigset_t s;
@@ -3000,11 +3222,11 @@ siginfo32to64(siginfo_t *d, siginfo_t32 *s)
 	return d;
 }
 
-extern asmlinkage int
+extern asmlinkage long
 sys_rt_sigtimedwait(const sigset_t *uthese, siginfo_t *uinfo,
 		    const struct timespec *uts, size_t sigsetsize);
 
-asmlinkage int
+asmlinkage long
 sys32_rt_sigtimedwait(sigset_t32 *uthese, siginfo_t32 *uinfo,
 		      struct timespec32 *uts, __kernel_size_t32 sigsetsize)
 {
@@ -3041,10 +3263,10 @@ sys32_rt_sigtimedwait(sigset_t32 *uthese, siginfo_t32 *uinfo,
 	return ret;
 }
 
-extern asmlinkage int
+extern asmlinkage long
 sys_rt_sigqueueinfo(int pid, int sig, siginfo_t *uinfo);
 
-asmlinkage int
+asmlinkage long
 sys32_rt_sigqueueinfo(int pid, int sig, siginfo_t32 *uinfo)
 {
 	siginfo_t info;
@@ -3062,9 +3284,9 @@ sys32_rt_sigqueueinfo(int pid, int sig, siginfo_t32 *uinfo)
 	return ret;
 }
 
-extern asmlinkage int sys_setreuid(uid_t ruid, uid_t euid);
+extern asmlinkage long sys_setreuid(uid_t ruid, uid_t euid);
 
-asmlinkage int sys32_setreuid(__kernel_uid_t32 ruid, __kernel_uid_t32 euid)
+asmlinkage long sys32_setreuid(__kernel_uid_t32 ruid, __kernel_uid_t32 euid)
 {
 	uid_t sruid, seuid;
 
@@ -3073,9 +3295,9 @@ asmlinkage int sys32_setreuid(__kernel_uid_t32 ruid, __kernel_uid_t32 euid)
 	return sys_setreuid(sruid, seuid);
 }
 
-extern asmlinkage int sys_setresuid(uid_t ruid, uid_t euid, uid_t suid);
+extern asmlinkage long sys_setresuid(uid_t ruid, uid_t euid, uid_t suid);
 
-asmlinkage int
+asmlinkage long
 sys32_setresuid(__kernel_uid_t32 ruid, __kernel_uid_t32 euid,
 		__kernel_uid_t32 suid)
 {
@@ -3087,9 +3309,9 @@ sys32_setresuid(__kernel_uid_t32 ruid, __kernel_uid_t32 euid,
 	return sys_setresuid(sruid, seuid, ssuid);
 }
 
-extern asmlinkage int sys_getresuid(uid_t *ruid, uid_t *euid, uid_t *suid);
+extern asmlinkage long sys_getresuid(uid_t *ruid, uid_t *euid, uid_t *suid);
 
-asmlinkage int
+asmlinkage long
 sys32_getresuid(__kernel_uid_t32 *ruid, __kernel_uid_t32 *euid,
 		__kernel_uid_t32 *suid)
 {
@@ -3105,9 +3327,9 @@ sys32_getresuid(__kernel_uid_t32 *ruid, __kernel_uid_t32 *euid,
 	return ret;
 }
 
-extern asmlinkage int sys_setregid(gid_t rgid, gid_t egid);
+extern asmlinkage long sys_setregid(gid_t rgid, gid_t egid);
 
-asmlinkage int
+asmlinkage long
 sys32_setregid(__kernel_gid_t32 rgid, __kernel_gid_t32 egid)
 {
 	gid_t srgid, segid;
@@ -3117,9 +3339,9 @@ sys32_setregid(__kernel_gid_t32 rgid, __kernel_gid_t32 egid)
 	return sys_setregid(srgid, segid);
 }
 
-extern asmlinkage int sys_setresgid(gid_t rgid, gid_t egid, gid_t sgid);
+extern asmlinkage long sys_setresgid(gid_t rgid, gid_t egid, gid_t sgid);
 
-asmlinkage int
+asmlinkage long
 sys32_setresgid(__kernel_gid_t32 rgid, __kernel_gid_t32 egid,
 		__kernel_gid_t32 sgid)
 {
@@ -3131,9 +3353,9 @@ sys32_setresgid(__kernel_gid_t32 rgid, __kernel_gid_t32 egid,
 	return sys_setresgid(srgid, segid, ssgid);
 }
 
-extern asmlinkage int sys_getresgid(gid_t *rgid, gid_t *egid, gid_t *sgid);
+extern asmlinkage long sys_getresgid(gid_t *rgid, gid_t *egid, gid_t *sgid);
 
-asmlinkage int
+asmlinkage long
 sys32_getresgid(__kernel_gid_t32 *rgid, __kernel_gid_t32 *egid,
 		__kernel_gid_t32 *sgid) 
 {
@@ -3152,9 +3374,9 @@ sys32_getresgid(__kernel_gid_t32 *rgid, __kernel_gid_t32 *egid,
 	return ret;
 }
 
-extern asmlinkage int sys_getgroups(int gidsetsize, gid_t *grouplist);
+extern asmlinkage long sys_getgroups(int gidsetsize, gid_t *grouplist);
 
-asmlinkage int
+asmlinkage long
 sys32_getgroups(int gidsetsize, __kernel_gid_t32 *grouplist)
 {
 	gid_t gl[NGROUPS];
@@ -3171,9 +3393,9 @@ sys32_getgroups(int gidsetsize, __kernel_gid_t32 *grouplist)
 	return ret;
 }
 
-extern asmlinkage int sys_setgroups(int gidsetsize, gid_t *grouplist);
+extern asmlinkage long sys_setgroups(int gidsetsize, gid_t *grouplist);
 
-asmlinkage int
+asmlinkage long
 sys32_setgroups(int gidsetsize, __kernel_gid_t32 *grouplist)
 {
 	gid_t gl[NGROUPS];
@@ -3212,7 +3434,7 @@ sockfd_lookup(int fd, int *err)
 	}
 
 	inode = file->f_dentry->d_inode;
-	if (!inode || !inode->i_sock || !socki_lookup(inode))
+	if (!inode->i_sock || !socki_lookup(inode))
 	{
 		*err = -ENOTSOCK;
 		fput(file);
@@ -3617,7 +3839,7 @@ fail:
 	kmsg->msg_control = (void *) orig_cmsg_uptr;
 }
 
-asmlinkage int
+asmlinkage long
 sys32_sendmsg(int fd, struct msghdr32 *user_msg, unsigned user_flags)
 {
 	struct socket *sock;
@@ -3645,7 +3867,6 @@ sys32_sendmsg(int fd, struct msghdr32 *user_msg, unsigned user_flags)
 	}
 	kern_msg.msg_flags = user_flags;
 
-	lock_kernel();
 	sock = sockfd_lookup(fd, &err);
 	if (sock != NULL) {
 		if (sock->file->f_flags & O_NONBLOCK)
@@ -3653,7 +3874,6 @@ sys32_sendmsg(int fd, struct msghdr32 *user_msg, unsigned user_flags)
 		err = sock_sendmsg(sock, &kern_msg, total_len);
 		sockfd_put(sock);
 	}
-	unlock_kernel();
 
 	/* N.B. Use kfree here, as kern_msg.msg_controllen might change? */
 	if(ctl_buf != ctl)
@@ -3665,7 +3885,7 @@ out:
 	return err;
 }
 
-asmlinkage int
+asmlinkage long
 sys32_recvmsg(int fd, struct msghdr32 *user_msg, unsigned int user_flags)
 {
 	struct iovec iovstack[UIO_FASTIOV];
@@ -3693,7 +3913,6 @@ sys32_recvmsg(int fd, struct msghdr32 *user_msg, unsigned int user_flags)
 	cmsg_ptr = (unsigned long) kern_msg.msg_control;
 	kern_msg.msg_flags = 0;
 
-	lock_kernel();
 	sock = sockfd_lookup(fd, &err);
 	if (sock != NULL) {
 		struct scm_cookie scm;
@@ -3701,6 +3920,7 @@ sys32_recvmsg(int fd, struct msghdr32 *user_msg, unsigned int user_flags)
 		if (sock->file->f_flags & O_NONBLOCK)
 			user_flags |= MSG_DONTWAIT;
 		memset(&scm, 0, sizeof(scm));
+		lock_kernel();
 		err = sock->ops->recvmsg(sock, &kern_msg, total_len,
 					 user_flags, &scm);
 		if(err >= 0) {
@@ -3731,9 +3951,9 @@ sys32_recvmsg(int fd, struct msghdr32 *user_msg, unsigned int user_flags)
 					scm_detach_fds32(&kern_msg, &scm);
 			}
 		}
+		unlock_kernel();
 		sockfd_put(sock);
 	}
-	unlock_kernel();
 
 	if(uaddr != NULL && err >= 0)
 		err = move_addr_to_user(addr, kern_msg.msg_namelen, uaddr,
@@ -3756,40 +3976,6 @@ out:
 
 extern void check_pending(int signum);
 
-asmlinkage int
-sys32_sigaction (int sig, struct old_sigaction32 *act,
-		 struct old_sigaction32 *oact)
-{
-        struct k_sigaction new_ka, old_ka;
-        int ret;
-
-	if(sig < 0) {
-		current->tss.new_signal = 1;
-		sig = -sig;
-	}
-
-        if (act) {
-		old_sigset_t32 mask;
-		
-		ret = get_user((long)new_ka.sa.sa_handler, &act->sa_handler);
-		ret |= __get_user(new_ka.sa.sa_flags, &act->sa_flags);
-		ret |= __get_user(mask, &act->sa_mask);
-		if (ret)
-			return ret;
-		siginitset(&new_ka.sa.sa_mask, mask);
-        }
-
-        ret = do_sigaction(sig, act ? &new_ka : NULL, oact ? &old_ka : NULL);
-
-	if (!ret && oact) {
-		ret = put_user((long)old_ka.sa.sa_handler, &oact->sa_handler);
-		ret |= __put_user(old_ka.sa.sa_flags, &oact->sa_flags);
-		ret |= __put_user(old_ka.sa.sa_mask.sig[0], &oact->sa_mask);
-        }
-
-	return ret;
-}
-
 #ifdef CONFIG_MODULES
 
 extern asmlinkage unsigned long sys_create_module(const char *name_user,
@@ -3801,21 +3987,21 @@ sys32_create_module(const char *name_user, __kernel_size_t32 size)
 	return sys_create_module(name_user, (size_t)size);
 }
 
-extern asmlinkage int sys_init_module(const char *name_user,
+extern asmlinkage long sys_init_module(const char *name_user,
 				      struct module *mod_user); 
 
 /* Hey, when you're trying to init module, take time and prepare us a nice 64bit
  * module structure, even if from 32bit modutils... Why to pollute kernel... :))
  */
-asmlinkage int
+asmlinkage long
 sys32_init_module(const char *name_user, struct module *mod_user)
 {
 	return sys_init_module(name_user, mod_user);
 }
 
-extern asmlinkage int sys_delete_module(const char *name_user);
+extern asmlinkage long sys_delete_module(const char *name_user);
 
-asmlinkage int
+asmlinkage long
 sys32_delete_module(const char *name_user)
 {
 	return sys_delete_module(name_user);
@@ -4090,7 +4276,7 @@ qm_info(struct module *mod, char *buf, size_t bufsize, __kernel_size_t32 *ret)
 	return error;
 }
 
-asmlinkage int
+asmlinkage long
 sys32_query_module(char *name_user, int which, char *buf,
 		   __kernel_size_t32 bufsize, u32 ret) 
 {
@@ -4158,9 +4344,9 @@ struct kernel_sym32 {
 	char name[60];
 };
 		 
-extern asmlinkage int sys_get_kernel_syms(struct kernel_sym *table);
+extern asmlinkage long sys_get_kernel_syms(struct kernel_sym *table);
 
-asmlinkage int
+asmlinkage long
 sys32_get_kernel_syms(struct kernel_sym32 *table)
 {
 	int len, i;
@@ -4192,19 +4378,19 @@ sys32_create_module(const char *name_user, size_t size)
 	return -ENOSYS;
 }
 
-asmlinkage int
+asmlinkage long
 sys32_init_module(const char *name_user, struct module *mod_user)
 {
 	return -ENOSYS;
 }
 
-asmlinkage int
+asmlinkage long
 sys32_delete_module(const char *name_user)
 {
 	return -ENOSYS;
 }
 
-asmlinkage int
+asmlinkage long
 sys32_query_module(const char *name_user, int which, char *buf, size_t bufsize,
 		 size_t *ret)
 {
@@ -4216,7 +4402,7 @@ sys32_query_module(const char *name_user, int which, char *buf, size_t bufsize,
 	return -ENOSYS;
 }
 
-asmlinkage int
+asmlinkage long
 sys32_get_kernel_syms(struct kernel_sym *table)
 {
 	return -ENOSYS;
@@ -4432,7 +4618,7 @@ nfs_getfh32_res_trans(union nfsctl_res *kres, union nfsctl_res32 *res32)
 	return err;
 }
 
-extern asmlinkage int sys_nfsservctl(int cmd, void *arg, void *resp);
+extern asmlinkage long sys_nfsservctl(int cmd, void *arg, void *resp);
 
 int asmlinkage
 sys32_nfsservctl(int cmd, struct nfsctl_arg32 *arg32, union nfsctl_res32 *res32)
@@ -4503,9 +4689,9 @@ done:
 	return err;
 }
 
-asmlinkage int sys_utimes(char *, struct timeval *);
+asmlinkage long sys_utimes(char *, struct timeval *);
 
-asmlinkage int
+asmlinkage long
 sys32_utimes(char *filename, struct timeval32 *tvs)
 {
 	char *kfilename;
@@ -4533,7 +4719,7 @@ sys32_utimes(char *filename, struct timeval32 *tvs)
 }
 
 /* These are here just in case some old ia32 binary calls it. */
-asmlinkage int
+asmlinkage long
 sys32_pause(void)
 {
 	current->state = TASK_INTERRUPTIBLE;
@@ -4542,19 +4728,19 @@ sys32_pause(void)
 }
 
 /* PCI config space poking. */
-extern asmlinkage int sys_pciconfig_read(unsigned long bus,
+extern asmlinkage long sys_pciconfig_read(unsigned long bus,
 					 unsigned long dfn,
 					 unsigned long off,
 					 unsigned long len,
 					 unsigned char *buf);
 
-extern asmlinkage int sys_pciconfig_write(unsigned long bus,
+extern asmlinkage long sys_pciconfig_write(unsigned long bus,
 					  unsigned long dfn,
 					  unsigned long off,
 					  unsigned long len,
 					  unsigned char *buf);
 
-asmlinkage int
+asmlinkage long
 sys32_pciconfig_read(u32 bus, u32 dfn, u32 off, u32 len, u32 ubuf)
 {
 	return sys_pciconfig_read((unsigned long) bus,
@@ -4564,7 +4750,7 @@ sys32_pciconfig_read(u32 bus, u32 dfn, u32 off, u32 len, u32 ubuf)
 				  (unsigned char *)AA(ubuf));
 }
 
-asmlinkage int
+asmlinkage long
 sys32_pciconfig_write(u32 bus, u32 dfn, u32 off, u32 len, u32 ubuf)
 {
 	return sys_pciconfig_write((unsigned long) bus,
@@ -4574,11 +4760,11 @@ sys32_pciconfig_write(u32 bus, u32 dfn, u32 off, u32 len, u32 ubuf)
 				   (unsigned char *)AA(ubuf));
 }
 
-extern asmlinkage int sys_prctl(int option, unsigned long arg2,
+extern asmlinkage long sys_prctl(int option, unsigned long arg2,
 				unsigned long arg3, unsigned long arg4,
 				unsigned long arg5);
 
-asmlinkage int
+asmlinkage long
 sys32_prctl(int option, u32 arg2, u32 arg3, u32 arg4, u32 arg5)
 {
 	return sys_prctl(option,
@@ -4589,9 +4775,9 @@ sys32_prctl(int option, u32 arg2, u32 arg3, u32 arg4, u32 arg5)
 }
 
 
-extern asmlinkage int sys_newuname(struct new_utsname * name);
+extern asmlinkage long sys_newuname(struct new_utsname * name);
 
-asmlinkage int
+asmlinkage long
 sys32_newuname(struct new_utsname * name)
 {
 	int ret = sys_newuname(name);
@@ -4627,17 +4813,15 @@ sys32_pwrite(unsigned int fd, char *ubuf, __kernel_size_t32 count,
 }
 
 
-extern asmlinkage int sys_personality(unsigned long);
+extern asmlinkage long sys_personality(unsigned long);
 
-asmlinkage int
+asmlinkage long
 sys32_personality(unsigned long personality)
 {
 	int ret;
-	lock_kernel();
 	if (current->personality == PER_LINUX32 && personality == PER_LINUX)
 		personality = PER_LINUX32;
 	ret = sys_personality(personality);
-	unlock_kernel();
 	if (ret == PER_LINUX32)
 		ret = PER_LINUX;
 	return ret;
@@ -4646,7 +4830,7 @@ sys32_personality(unsigned long personality)
 extern asmlinkage ssize_t sys_sendfile(int out_fd, int in_fd, off_t *offset,
 				       size_t count); 
 
-asmlinkage int
+asmlinkage long
 sys32_sendfile(int out_fd, int in_fd, __kernel_off_t32 *offset, s32 count)
 {
 	mm_segment_t old_fs = get_fs();
@@ -4683,7 +4867,7 @@ struct timex32 {
 
 extern int do_adjtimex(struct timex *);
 
-asmlinkage int
+asmlinkage long
 sys32_adjtimex(struct timex32 *utp)
 {
 	struct timex txc;

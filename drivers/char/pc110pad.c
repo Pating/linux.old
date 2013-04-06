@@ -41,6 +41,7 @@
 #include <linux/poll.h>
 #include <linux/ioport.h>
 #include <linux/interrupt.h>
+#include <linux/smp_lock.h>
 
 #include <asm/signal.h>
 #include <asm/io.h>
@@ -67,7 +68,7 @@ static struct pc110pad_params current_params;
 /* driver/filesystem interface management */
 static wait_queue_head_t queue;
 static struct fasync_struct *asyncptr;
-static int active=0;	/* number of concurrent open()s */
+static int active;	/* number of concurrent open()s */
 static struct semaphore reader_lock;
 
 /**
@@ -83,8 +84,7 @@ static struct semaphore reader_lock;
 static void wake_readers(void)
 {
 	wake_up_interruptible(&queue);
-	if(asyncptr)
-		kill_fasync(asyncptr, SIGIO, POLL_IN);
+	kill_fasync(&asyncptr, SIGIO, POLL_IN);
 }
 
 
@@ -111,10 +111,10 @@ static void wake_readers(void)
  * up/down mouse events to be created by incrementing synthesize_tap.
  */
  
-static int button_pending=0;
-static int recent_transition=0;
-static int transition_count=0;
-static int synthesize_tap=0;
+static int button_pending;
+static int recent_transition;
+static int transition_count;
+static int synthesize_tap;
 static void tap_timeout(unsigned long data);
 static struct timer_list tap_timer = { function: tap_timeout };
 
@@ -218,13 +218,13 @@ static void read_button(int *b)
  */
 
 static int raw_data[3];
-static int raw_data_count=0;
-static int raw_x=0, raw_y=0;	/* most recent absolute co-ords read */
-static int raw_down=0;		/* raw up/down state */
-static int debounced_down=0;	/* up/down state after debounce processing */
+static int raw_data_count;
+static int raw_x, raw_y;	/* most recent absolute co-ords read */
+static int raw_down;		/* raw up/down state */
+static int debounced_down;	/* up/down state after debounce processing */
 static enum { NO_BOUNCE, JUST_GONE_UP, JUST_GONE_DOWN } bounce=NO_BOUNCE;
 				/* set just after an up/down transition */
-static int xy_pending=0;	/* set if new data have not yet been read */
+static int xy_pending;	/* set if new data have not yet been read */
 
 /* 
  * Timer goes off a short while after an up/down transition and copies
@@ -425,7 +425,7 @@ static void read_raw_pad(int *down, int *debounced, int *x, int *y)
  * will make much sense in that case.
  */
 static int read_bytes[3];
-static int read_byte_count=0;
+static int read_byte_count;
 
 /**
  *	sample_raw:
@@ -584,11 +584,11 @@ static int fasync_pad(int fd, struct file *filp, int on)
  
 static int close_pad(struct inode * inode, struct file * file)
 {
+	lock_kernel();
 	fasync_pad(-1, file, 0);
-	if (--active)
-		return 0;
-	outb(0x30, current_params.io+2);	/* switch off digitiser */
-	MOD_DEC_USE_COUNT;
+	if (!--active)
+		outb(0x30, current_params.io+2);  /* switch off digitiser */
+	unlock_kernel();
 	return 0;
 }
 
@@ -610,7 +610,6 @@ static int open_pad(struct inode * inode, struct file * file)
 	
 	if (active++)
 		return 0;
-	MOD_INC_USE_COUNT;
 
 	save_flags(flags);
 	cli();
@@ -772,6 +771,7 @@ static int pad_ioctl(struct inode *inode, struct file * file,
 
 
 static struct file_operations pad_fops = {
+	owner:		THIS_MODULE,
 	read:		read_pad,
 	write:		write_pad,
 	poll:		pad_poll,

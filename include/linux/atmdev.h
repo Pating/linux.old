@@ -257,7 +257,7 @@ enum {
 #define ATM_ATMOPT_CLP	1	/* set CLP bit */
 
 
-typedef struct { unsigned int bits; } atm_vcc_flags_t;
+typedef struct { unsigned long bits; } atm_vcc_flags_t;
 
 
 struct atm_vcc {
@@ -375,6 +375,7 @@ struct atmdev_ops { /* only send is required */
 	void (*free_rx_skb)(struct atm_vcc *vcc, struct sk_buff *skb);
 		/* @@@ temporary hack */
 	int (*proc_read)(struct atm_dev *dev,loff_t *pos,char *page);
+	struct module *owner;
 };
 
 

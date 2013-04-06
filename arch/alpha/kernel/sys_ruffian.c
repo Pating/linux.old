@@ -56,9 +56,9 @@ ruffian_init_irq(void)
 	
 	init_i8259a_irqs();
 
-	/* Not interested in the bogus interrupts (0,3,4,6), 
+	/* Not interested in the bogus interrupts (0,3,6),
 	   NMI (1), HALT (2), flash (5), or 21142 (8).  */
-	init_pyxis_irqs(0x17f0000);
+	init_pyxis_irqs(0x16f0000);
 
 	common_init_isa_dma();
 }
@@ -119,7 +119,7 @@ ruffian_get_bank_size(unsigned long offset)
     
 	/* Check BANK_ENABLE */
 	if (bank & 0x01) {
-		static unsigned long size[] __initlocaldata = {
+		static unsigned long size[] __initdata = {
 			0x40000000UL, /* 0x00,   1G */ 
 			0x20000000UL, /* 0x02, 512M */
 			0x10000000UL, /* 0x04, 256M */

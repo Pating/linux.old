@@ -10,7 +10,7 @@
 #ifdef CONFIG_X86_LOCAL_APIC
 
 #if APIC_DEBUG
-#define Dprintk(x...) printk(##x)
+#define Dprintk(x...) printk(x)
 #else
 #define Dprintk(x...)
 #endif
@@ -32,6 +32,11 @@ extern __inline void apic_write_atomic(unsigned long reg, unsigned long v)
 extern __inline unsigned long apic_read(unsigned long reg)
 {
 	return *((volatile unsigned long *)(APIC_BASE+reg));
+}
+
+static __inline__ void apic_wait_icr_idle(void)
+{
+	do { } while ( apic_read( APIC_ICR ) & APIC_ICR_BUSY );
 }
 
 extern unsigned int apic_timer_irqs [NR_CPUS];
@@ -63,6 +68,7 @@ extern int get_maxlvt(void);
 extern void connect_bsp_APIC (void);
 extern void disconnect_bsp_APIC (void);
 extern void disable_local_APIC (void);
+extern int verify_local_APIC (void);
 extern void cache_APIC_registers (void);
 extern void sync_Arb_IDs(void);
 extern void setup_local_APIC (void);

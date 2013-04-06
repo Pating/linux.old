@@ -1,6 +1,3 @@
-/*
- * $Id: socket.h,v 1.6 2000/02/25 21:52:09 ralf Exp $
- */
 #ifndef _ASM_SOCKET_H
 #define _ASM_SOCKET_H
 
@@ -56,23 +53,23 @@ To add: #define SO_REUSEPORT 0x0200	/* Allow local address and port reuse.  */
 #define SO_ATTACH_FILTER        26
 #define SO_DETACH_FILTER        27
 
-#ifdef __KERNEL__
-
 #define SO_PEERNAME             28
+#define SO_TIMESTAMP		29
+#define SCM_TIMESTAMP		SO_TIMESTAMP
 
-/* Types of sockets.  */
-#define SOCK_DGRAM 1		/* Connectionless, unreliable datagrams
-				   of fixed maximum length.  */
-#define SOCK_STREAM 2		/* Sequenced, reliable, connection-based
-				   byte streams.  */
-#define SOCK_RAW 3		/* Raw protocol interface.  */
-#define SOCK_RDM 4		/* Reliably-delivered messages.  */
-#define SOCK_SEQPACKET 5	/* Sequenced, reliable, connection-based,
-				   datagrams of fixed maximum length.  */
-#define SOCK_PACKET 10		/* Linux specific way of getting packets at
-				   the dev level.  For writing rarp and
-				   other similar things on the user level.  */
-
-#endif /* __KERNEL__ */
+/* Nast libc5 fixup - bletch */
+#if defined(__KERNEL__)
+/* Socket types. */
+#define SOCK_DGRAM	1		/* datagram (conn.less) socket	*/
+#define SOCK_STREAM	2		/* stream (connection) socket	*/
+#define SOCK_RAW	3		/* raw socket			*/
+#define SOCK_RDM	4		/* reliably-delivered message	*/
+#define SOCK_SEQPACKET	5		/* sequential packet socket	*/
+#define SOCK_PACKET	10		/* linux specific way of	*/
+					/* getting packets at the dev	*/
+					/* level.  For writing rarp and	*/
+					/* other similar things on the	*/
+					/* user level.			*/
+#endif
 
 #endif /* _ASM_SOCKET_H */

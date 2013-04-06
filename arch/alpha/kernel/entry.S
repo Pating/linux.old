@@ -6,6 +6,7 @@
 
 #include <linux/config.h>
 #include <asm/system.h>
+#include <asm/cache.h>
 
 #define SIGCHLD 20
 
@@ -33,12 +34,13 @@
 #define TASK_ADDR_LIMIT		24	
 #define TASK_EXEC_DOMAIN	32
 #define TASK_NEED_RESCHED	40
+#define TASK_PTRACE		48
 #define TASK_PROCESSOR		100
 
 /*
  * task flags (must match include/linux/sched.h):
  */
-#define	PF_PTRACED	0x00000010
+#define	PT_PTRACED	0x00000001
 
 #define CLONE_VM        0x00000100 
 
@@ -557,10 +559,10 @@ entSys:
 	lda	$5,sys_call_table
 	lda	$27,sys_ni_syscall
 	cmpult	$0,$4,$4
-	ldq	$3,TASK_FLAGS($8)
+	ldq	$3,TASK_PTRACE($8)
 	stq	$17,SP_OFF+32($30)
 	s8addq	$0,$5,$5
-	and     $3,PF_PTRACED,$3
+	and     $3,PT_PTRACED,$3
 	stq	$18,SP_OFF+40($30)
 	bne     $3,strace
 	beq	$4,1f
@@ -575,10 +577,10 @@ entSys:
 ret_from_sys_call:
 	cmovne	$26,0,$19		/* $19 = 0 => non-restartable */
 	ldl	$3,TASK_PROCESSOR($8)
-	lda	$4,softirq_state
-	sll	$3,5,$3
+	lda	$4,irq_stat		/* softirq_active */
+	sll	$3,L1_CACHE_SHIFT,$3
 	addq	$3,$4,$4
-	ldq	$4,0($4)
+	ldq	$4,0($4)		/* softirq_active[32] + softirq_mask[32] */
 	sll	$4,32,$3
 	and	$4,$3,$4
 	bne	$4,handle_softirq
@@ -831,7 +833,7 @@ sys_call_table:
 	.quad alpha_ni_syscall
 	.quad alpha_ni_syscall			/* 50 */
 	.quad sys_acct
-	.quad osf_sigpending
+	.quad sys_sigpending
 	.quad alpha_ni_syscall
 	.quad sys_ioctl
 	.quad alpha_ni_syscall			/* 55 */
@@ -1158,3 +1160,4 @@ sys_call_table:
 	.quad sys_pivot_root
 	.quad sys_mincore			/* 375 */
 	.quad sys_pciconfig_iobase
+	.quad sys_getdents64

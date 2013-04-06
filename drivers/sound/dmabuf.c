@@ -26,6 +26,7 @@
 #define SAMPLE_ROUNDUP 0
 
 #include "sound_config.h"
+#include <linux/wrapper.h>
 
 #define DMAP_FREE_ON_CLOSE      0
 #define DMAP_KEEP_ON_CLOSE      1
@@ -56,8 +57,9 @@ static long dmabuf_timeout(struct dma_buffparms *dmap)
 static int sound_alloc_dmap(struct dma_buffparms *dmap)
 {
 	char *start_addr, *end_addr;
-	int i, dma_pagesize;
+	int dma_pagesize;
 	int sz, size;
+	struct page *page;
 
 	dmap->mapping_flags &= ~DMA_MAP_MAPPED;
 
@@ -113,14 +115,15 @@ static int sound_alloc_dmap(struct dma_buffparms *dmap)
 	dmap->raw_buf = start_addr;
 	dmap->raw_buf_phys = virt_to_bus(start_addr);
 
-	for (i = MAP_NR(start_addr); i <= MAP_NR(end_addr); i++)
-		set_bit(PG_reserved, &mem_map[i].flags);;
+	for (page = virt_to_page(start_addr); page <= virt_to_page(end_addr); page++)
+		mem_map_reserve(page);
 	return 0;
 }
 
 static void sound_free_dmap(struct dma_buffparms *dmap)
 {
-	int sz, size, i;
+	int sz, size;
+	struct page *page;
 	unsigned long start_addr, end_addr;
 
 	if (dmap->raw_buf == NULL)
@@ -132,8 +135,8 @@ static void sound_free_dmap(struct dma_buffparms *dmap)
 	start_addr = (unsigned long) dmap->raw_buf;
 	end_addr = start_addr + dmap->buffsize;
 
-	for (i = MAP_NR(start_addr); i <= MAP_NR(end_addr); i++)
-		clear_bit(PG_reserved, &mem_map[i].flags);;
+	for (page = virt_to_page(start_addr); page <= virt_to_page(end_addr); page++)
+		mem_map_unreserve(page);
 
 	free_pages((unsigned long) dmap->raw_buf, sz);
 	dmap->raw_buf = NULL;

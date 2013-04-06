@@ -28,9 +28,9 @@ static int max_interrupt_work = 25;
 
 #define MAX_UNITS 8
 /* Used to pass the full-duplex flag, etc. */
-static int full_duplex[MAX_UNITS] = {0, };
-static int options[MAX_UNITS] = {0, };
-static int mtu[MAX_UNITS] = {0, };			/* Jumbo MTU for interfaces. */
+static int full_duplex[MAX_UNITS];
+static int options[MAX_UNITS];
+static int mtu[MAX_UNITS];			/* Jumbo MTU for interfaces. */
 
 /*  The possible media types that can be set in options[] are: */
 static const char * const medianame[] = {
@@ -466,7 +466,7 @@ static void outl_CSR6 (u32 newcsr6, long ioaddr, int chip_idx)
 		restore_flags(flags);
 		return;
     }
-    newcsr6 &= 0x726cfeca; /* mask out the reserved CSR6 bits that always */
+    newcsr6 &= 0x726cfecb; /* mask out the reserved CSR6 bits that always */
 			   /* read 0 on the Xircom cards */
     newcsr6 |= 0x320c0000; /* or in the reserved bits that always read 1 */
     currcsr6 = inl(ioaddr + CSR6);
@@ -506,12 +506,12 @@ static struct net_device *tulip_probe1(struct pci_dev *pdev,
 				       struct net_device *dev, long ioaddr, int irq,
 				       int chip_idx, int board_idx)
 {
-	static int did_version = 0;			/* Already printed version info. */
+	static int did_version;			/* Already printed version info. */
 	struct tulip_private *tp;
 	/* See note below on the multiport cards. */
 	static unsigned char last_phys_addr[6] = {0x00, 'L', 'i', 'n', 'u', 'x'};
-	static int last_irq = 0;
-	static int multiport_cnt = 0;		/* For four-port boards w/one EEPROM */
+	static int last_irq;
+	static int multiport_cnt;		/* For four-port boards w/one EEPROM */
 	u8 chip_rev;
 	int i;
 	unsigned short sum;
@@ -913,9 +913,9 @@ static const char * block_name[] = {"21140 non-MII", "21140 MII PHY",
 static void parse_eeprom(struct net_device *dev)
 {
 	/* The last media info list parsed, for multiport boards.  */
-	static struct mediatable *last_mediatable = NULL;
-	static unsigned char *last_ee_data = NULL;
-	static int controller_index = 0;
+	static struct mediatable *last_mediatable;
+	static unsigned char *last_ee_data;
+	static int controller_index;
 	struct tulip_private *tp = (struct tulip_private *)dev->priv;
 	long ioaddr = dev->base_addr;
 	unsigned char *ee_data = tp->eeprom;
@@ -1350,7 +1350,7 @@ tulip_up(struct net_device *dev)
 		tp->tx_ring[0].length = 0x08000000 | 192;
 		/* Lie about the address of our setup frame to make the */
 		/* chip happy */
-		tp->tx_ring[0].buffer1 = (virt_to_bus(tp->setup_frame) + 4);
+		tp->tx_ring[0].buffer1 = virt_to_bus(tp->setup_frame);
 		tp->tx_ring[0].status = DescOwned;
 
 		tp->cur_tx++;
@@ -2714,6 +2714,8 @@ tulip_down(struct net_device *dev)
 	long ioaddr = dev->base_addr;
 	struct tulip_private *tp = (struct tulip_private *)dev->priv;
 
+	del_timer_sync(&tp->timer);
+
 	/* Disable interrupts by clearing the interrupt mask. */
 	outl(0x00000000, ioaddr + CSR7);
 	/* Stop the chip's Tx and Rx processes. */
@@ -2739,12 +2741,12 @@ tulip_close(struct net_device *dev)
 		printk(KERN_DEBUG "%s: Shutting down ethercard, status was %2.2x.\n",
 			   dev->name, inl(ioaddr + CSR5));
 
+	del_timer_sync(&tp->timer);
+
 	netif_stop_queue(dev);
 
 	if (netif_device_present(dev))
 		tulip_down(dev);
-
-	del_timer(&tp->timer);
 
 	free_irq(dev->irq, dev);
 
@@ -3010,7 +3012,8 @@ static void set_rx_mode(struct net_device *dev)
 			/* Same setup recently queued, we need not add it. */
 		} else {
 			unsigned long flags;
-			unsigned int entry, dummy = -1;
+			unsigned int entry;
+			int dummy = -1;
 
 			save_flags(flags); cli();
 			entry = tp->cur_tx++ % TX_RING_SIZE;
@@ -3031,10 +3034,7 @@ static void set_rx_mode(struct net_device *dev)
 			if (entry == TX_RING_SIZE-1)
 				tx_flags |= DESC_RING_WRAP;		/* Wrap ring. */
 			tp->tx_ring[entry].length = tx_flags;
-			if(tp->chip_id == X3201_3)
-				tp->tx_ring[entry].buffer1 = (virt_to_bus(tp->setup_frame) + 4);
-			else
-				tp->tx_ring[entry].buffer1 = virt_to_bus(tp->setup_frame);
+			tp->tx_ring[entry].buffer1 = virt_to_bus(tp->setup_frame);
 			tp->tx_ring[entry].status = DescOwned;
 			if (tp->cur_tx - tp->dirty_tx >= TX_RING_SIZE - 2) {
 				tp->tx_full = 1;
@@ -3074,7 +3074,7 @@ MODULE_DEVICE_TABLE(pci, tulip_pci_table);
 static int __devinit tulip_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 {
 	struct net_device *dev;
-	static int board_idx = 0;
+	static int board_idx;
 
 	printk(KERN_INFO "tulip_attach(%s)\n", pdev->slot_name);
 

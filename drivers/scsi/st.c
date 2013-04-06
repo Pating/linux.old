@@ -12,10 +12,13 @@
    Copyright 1992 - 2000 Kai Makisara
    email Kai.Makisara@metla.fi
 
-   Last modified: Sun Apr 23 23:41:32 2000 by makisara@kai.makisara.local
+   Last modified: Mon Nov 13 21:01:09 2000 by makisara@kai.makisara.local
    Some small formal changes - aeb, 950809
 
    Last modified: 18-JAN-1998 Richard Gooch <rgooch@atnf.csiro.au> Devfs support
+
+   Reminder: write_lock_irqsave() can be replaced by write_lock() when the old SCSI
+   error handling will be discarded.
  */
 
 #include <linux/module.h>
@@ -31,6 +34,7 @@
 #include <linux/ioctl.h>
 #include <linux/fcntl.h>
 #include <linux/spinlock.h>
+#include <linux/smp_lock.h>
 #include <asm/uaccess.h>
 #include <asm/dma.h>
 #include <asm/system.h>
@@ -65,10 +69,10 @@
 
 #include "constants.h"
 
-static int buffer_kbs = 0;
-static int write_threshold_kbs = 0;
+static int buffer_kbs;
+static int write_threshold_kbs;
 static int max_buffers = (-1);
-static int max_sg_segs = 0;
+static int max_sg_segs;
 
 MODULE_AUTHOR("Kai Makisara");
 MODULE_DESCRIPTION("SCSI Tape Driver");
@@ -138,9 +142,9 @@ static int st_max_sg_segs = ST_MAX_SG;
 
 static Scsi_Tape **scsi_tapes = NULL;
 
-static int modes_defined = FALSE;
+static int modes_defined;
 
-static ST_buffer *new_tape_buffer(int, int);
+static ST_buffer *new_tape_buffer(int, int, int);
 static int enlarge_buffer(ST_buffer *, int, int);
 static void normalize_buffer(ST_buffer *);
 static int append_to_buffer(const char *, ST_buffer *, int);
@@ -151,7 +155,7 @@ static int st_attach(Scsi_Device *);
 static int st_detect(Scsi_Device *);
 static void st_detach(Scsi_Device *);
 
-struct Scsi_Device_Template st_template =
+static struct Scsi_Device_Template st_template =
 {
 	name:"tape", 
 	tag:"st", 
@@ -169,6 +173,47 @@ static int find_partition(Scsi_Tape *);
 static int update_partition(Scsi_Tape *);
 
 static int st_int_ioctl(Scsi_Tape *, unsigned int, unsigned long);
+
+
+#include "osst_detect.h"
+#ifndef SIGS_FROM_OSST
+#define SIGS_FROM_OSST \
+	{"OnStream", "SC-", "", "osst"}, \
+	{"OnStream", "DI-", "", "osst"}, \
+	{"OnStream", "DP-", "", "osst"}, \
+	{"OnStream", "USB", "", "osst"}, \
+	{"OnStream", "FW-", "", "osst"}
+#endif
+
+struct st_reject_data {
+	char *vendor;
+	char *model;
+	char *rev;
+	char *driver_hint; /* Name of the correct driver, NULL if unknown */
+};
+
+static struct st_reject_data reject_list[] = {
+	/* {"XXX", "Yy-", "", NULL},  example */
+	SIGS_FROM_OSST,
+	{NULL, }};
+
+/* If the device signature is on the list of incompatible drives, the
+   function returns a pointer to the name of the correct driver (if known) */
+static char * st_incompatible(Scsi_Device* SDp)
+{
+	struct st_reject_data *rp;
+
+	for (rp=&(reject_list[0]); rp->vendor != NULL; rp++)
+		if (!strncmp(rp->vendor, SDp->vendor, strlen(rp->vendor)) &&
+		    !strncmp(rp->model, SDp->model, strlen(rp->model)) &&
+		    !strncmp(rp->rev, SDp->rev, strlen(rp->rev))) {
+			if (rp->driver_hint)
+				return rp->driver_hint;
+			else
+				return "unknown";
+		}
+	return NULL;
+}
 
 
 /* Convert the result to success code */
@@ -586,10 +631,11 @@ static int set_mode_densblk(Scsi_Tape * STp, ST_mode * STm)
 }
 
 
-/* Open the device */
-static int scsi_tape_open(struct inode *inode, struct file *filp)
+/* Open the device. Needs to be called with BKL only because of incrementing the SCSI host
+   module count. */
+static int st_open(struct inode *inode, struct file *filp)
 {
-	unsigned short flags;
+	unsigned short st_flags;
 	int i, need_dma_buffer, new_session = FALSE;
 	int retval;
 	unsigned char cmd[MAX_COMMAND_SIZE];
@@ -599,29 +645,31 @@ static int scsi_tape_open(struct inode *inode, struct file *filp)
 	ST_partstat *STps;
 	int dev = TAPE_NR(inode->i_rdev);
 	int mode = TAPE_MODE(inode->i_rdev);
+	unsigned long flags;
 
-	read_lock(&st_dev_arr_lock);
+	write_lock_irqsave(&st_dev_arr_lock, flags);
 	STp = scsi_tapes[dev];
 	if (dev >= st_template.dev_max || STp == NULL) {
-		read_unlock(&st_dev_arr_lock);
+		write_unlock_irqrestore(&st_dev_arr_lock, flags);
 		return (-ENXIO);
 	}
-	read_unlock(&st_dev_arr_lock);
 
-	if (!scsi_block_when_processing_errors(STp->device)) {
-		return -ENXIO;
-	}
 	if (STp->in_use) {
+		write_unlock_irqrestore(&st_dev_arr_lock, flags);
 		DEB( printk(ST_DEB_MSG "st%d: Device already in use.\n", dev); )
 		return (-EBUSY);
 	}
 	STp->in_use = 1;
+	write_unlock_irqrestore(&st_dev_arr_lock, flags);
 	STp->rew_at_close = STp->autorew_dev = (MINOR(inode->i_rdev) & 0x80) == 0;
 
 	if (STp->device->host->hostt->module)
 		__MOD_INC_USE_COUNT(STp->device->host->hostt->module);
-	if (st_template.module)
-		__MOD_INC_USE_COUNT(st_template.module);
+
+	if (!scsi_block_when_processing_errors(STp->device)) {
+		retval = (-ENXIO);
+		goto err_out;
+	}
 
 	if (mode != STp->current_mode) {
                 DEBC(printk(ST_DEB_MSG "st%d: Mode change from %d to %d.\n",
@@ -633,16 +681,17 @@ static int scsi_tape_open(struct inode *inode, struct file *filp)
 
 	/* Allocate a buffer for this user */
 	need_dma_buffer = STp->restr_dma;
-	read_lock(&st_dev_arr_lock);
+	write_lock_irqsave(&st_dev_arr_lock, flags);
 	for (i = 0; i < st_nbr_buffers; i++)
 		if (!st_buffers[i]->in_use &&
 		    (!need_dma_buffer || st_buffers[i]->dma)) {
 			STp->buffer = st_buffers[i];
+			(STp->buffer)->in_use = 1;
 			break;
 		}
-	read_unlock(&st_dev_arr_lock);
+	write_unlock_irqrestore(&st_dev_arr_lock, flags);
 	if (i >= st_nbr_buffers) {
-		STp->buffer = new_tape_buffer(FALSE, need_dma_buffer);
+		STp->buffer = new_tape_buffer(FALSE, need_dma_buffer, TRUE);
 		if (STp->buffer == NULL) {
 			printk(KERN_WARNING "st%d: Can't allocate tape buffer.\n", dev);
 			retval = (-EBUSY);
@@ -650,7 +699,6 @@ static int scsi_tape_open(struct inode *inode, struct file *filp)
 		}
 	}
 
-	(STp->buffer)->in_use = 1;
 	(STp->buffer)->writing = 0;
 	(STp->buffer)->syscall_result = 0;
 	(STp->buffer)->use_sg = STp->device->host->sg_tablesize;
@@ -664,8 +712,8 @@ static int scsi_tape_open(struct inode *inode, struct file *filp)
 			(STp->buffer)->buffer_size += (STp->buffer)->sg[i].length;
 	}
 
-	flags = filp->f_flags;
-	STp->write_prot = ((flags & O_ACCMODE) == O_RDONLY);
+	st_flags = filp->f_flags;
+	STp->write_prot = ((st_flags & O_ACCMODE) == O_RDONLY);
 
 	STp->dirty = 0;
 	for (i = 0; i < ST_NBR_PARTITIONS; i++) {
@@ -814,7 +862,7 @@ static int scsi_tape_open(struct inode *inode, struct file *filp)
 
                 DEBC(printk(ST_DEB_MSG "st%d: Write protected\n", dev));
 
-		if ((flags & O_ACCMODE) == O_WRONLY || (flags & O_ACCMODE) == O_RDWR) {
+		if ((st_flags & O_ACCMODE) == O_WRONLY || (st_flags & O_ACCMODE) == O_RDWR) {
 			retval = (-EROFS);
 			goto err_out;
 		}
@@ -859,18 +907,16 @@ static int scsi_tape_open(struct inode *inode, struct file *filp)
 	STp->in_use = 0;
 	if (STp->device->host->hostt->module)
 	    __MOD_DEC_USE_COUNT(STp->device->host->hostt->module);
-	if (st_template.module)
-	    __MOD_DEC_USE_COUNT(st_template.module);
 	return retval;
 
 }
 
 
 /* Flush the tape buffer before close */
-static int scsi_tape_flush(struct file *filp)
+static int st_flush(struct file *filp)
 {
 	int result = 0, result2;
-	static unsigned char cmd[MAX_COMMAND_SIZE];
+	unsigned char cmd[MAX_COMMAND_SIZE];
 	Scsi_Request *SRpnt;
 	Scsi_Tape *STp;
 	ST_mode *STm;
@@ -930,7 +976,7 @@ static int scsi_tape_flush(struct file *filp)
 		     ((SRpnt->sr_sense_buffer[0] & 0x80) != 0 &&
 		      (SRpnt->sr_sense_buffer[3] | SRpnt->sr_sense_buffer[4] |
 		       SRpnt->sr_sense_buffer[5] |
-		       SRpnt->sr_sense_buffer[6]) == 0))) {
+		       SRpnt->sr_sense_buffer[6]) != 0))) {
 			/* Filter out successful write at EOM */
 			scsi_release_request(SRpnt);
 			SRpnt = NULL;
@@ -985,11 +1031,13 @@ static int scsi_tape_flush(struct file *filp)
 }
 
 
-/* Close the device and release it */
-static int scsi_tape_close(struct inode *inode, struct file *filp)
+/* Close the device and release it. BKL is not needed: this is the only thread
+   accessing this tape. */
+static int st_release(struct inode *inode, struct file *filp)
 {
 	int result = 0;
 	Scsi_Tape *STp;
+	unsigned long flags;
 
 	kdev_t devt = inode->i_rdev;
 	int dev;
@@ -1004,14 +1052,18 @@ static int scsi_tape_close(struct inode *inode, struct file *filp)
 
 	if (STp->buffer != NULL) {
 		normalize_buffer(STp->buffer);
+		write_lock_irqsave(&st_dev_arr_lock, flags);
 		(STp->buffer)->in_use = 0;
+		STp->buffer = NULL;
+	}
+	else {
+		write_lock_irqsave(&st_dev_arr_lock, flags);
 	}
 
 	STp->in_use = 0;
+	write_unlock_irqrestore(&st_dev_arr_lock, flags);
 	if (STp->device->host->hostt->module)
 		__MOD_DEC_USE_COUNT(STp->device->host->hostt->module);
-	if (st_template.module)
-		__MOD_DEC_USE_COUNT(st_template.module);
 
 	return result;
 }
@@ -1027,7 +1079,7 @@ static ssize_t
 	ssize_t retval = 0;
 	int write_threshold;
 	int doing_write = 0;
-	static unsigned char cmd[MAX_COMMAND_SIZE];
+	unsigned char cmd[MAX_COMMAND_SIZE];
 	const char *b_point;
 	Scsi_Request *SRpnt = NULL;
 	Scsi_Tape *STp;
@@ -1380,7 +1432,7 @@ static ssize_t
 static long read_tape(Scsi_Tape *STp, long count, Scsi_Request ** aSRpnt)
 {
 	int transfer, blks, bytes;
-	static unsigned char cmd[MAX_COMMAND_SIZE];
+	unsigned char cmd[MAX_COMMAND_SIZE];
 	Scsi_Request *SRpnt;
 	ST_mode *STm;
 	ST_partstat *STps;
@@ -1455,8 +1507,11 @@ static long read_tape(Scsi_Tape *STp, long count, Scsi_Request ** aSRpnt)
 
 				if (SRpnt->sr_sense_buffer[2] & 0x20) {	/* ILI */
 					if (STp->block_size == 0) {
-						if (transfer <= 0)
-							transfer = 0;
+						if (transfer < 0) {
+							if (STps->drv_block >= 0)
+								STps->drv_block += 1;
+							return (-ENOMEM);
+						}
 						(STp->buffer)->buffer_bytes = bytes - transfer;
 					} else {
 						scsi_release_request(SRpnt);
@@ -2440,10 +2495,8 @@ static int st_int_ioctl(Scsi_Tape *STp, unsigned int cmd_in, unsigned long arg)
 			STps->drv_block = 0;
 			STps->eof = ST_NOEOF;
 		} else if ((cmd_in == MTBSF) || (cmd_in == MTBSFM)) {
-			if (fileno >= 0)
+			if (STps->drv_file >= 0)
 				STps->drv_file = fileno + undone;
-			else
-				STps->drv_file = fileno;
 			STps->drv_block = 0;
 			STps->eof = ST_NOEOF;
 		} else if (cmd_in == MTFSR) {
@@ -2464,10 +2517,8 @@ static int st_int_ioctl(Scsi_Tape *STp, unsigned int cmd_in, unsigned long arg)
 				STps->drv_file--;
 				STps->drv_block = (-1);
 			} else {
-				if (blkno >= 0)
+				if (STps->drv_block >= 0)
 					STps->drv_block = blkno + undone;
-				else
-					STps->drv_block = (-1);
 			}
 			STps->eof = ST_NOEOF;
 		} else if (cmd_in == MTEOM) {
@@ -2895,6 +2946,8 @@ static int st_ioctl(struct inode *inode, struct file *file,
 				i = mtc.mt_op == MTREW || mtc.mt_op == MTOFFL ||
 				    mtc.mt_op == MTRETEN || mtc.mt_op == MTEOM ||
 				    mtc.mt_op == MTLOCK || mtc.mt_op == MTLOAD ||
+				    mtc.mt_op == MTFSF || mtc.mt_op == MTFSFM ||
+				    mtc.mt_op == MTBSF || mtc.mt_op == MTBSFM ||
 				    mtc.mt_op == MTCOMPRESSION;
 			}
 			i = flush_buffer(STp, i);
@@ -2945,24 +2998,34 @@ static int st_ioctl(struct inode *inode, struct file *file,
 
 		if (mtc.mt_op == MTSETPART) {
 			if (!STp->can_partitions ||
-			    mtc.mt_count < 0 || mtc.mt_count >= ST_NBR_PARTITIONS)
-				return (-EINVAL);
+			    mtc.mt_count < 0 || mtc.mt_count >= ST_NBR_PARTITIONS) {
+				retval = (-EINVAL);
+				goto out;
+			}
 			if (mtc.mt_count >= STp->nbr_partitions &&
-			(STp->nbr_partitions = nbr_partitions(STp)) < 0)
-				return (-EIO);
-			if (mtc.mt_count >= STp->nbr_partitions)
-				return (-EINVAL);
+			    (STp->nbr_partitions = nbr_partitions(STp)) < 0) {
+				retval = (-EIO);
+				goto out;
+			}
+			if (mtc.mt_count >= STp->nbr_partitions) {
+				retval = (-EINVAL);
+				goto out;
+			}
 			STp->new_partition = mtc.mt_count;
 			retval = 0;
 			goto out;
 		}
 
 		if (mtc.mt_op == MTMKPART) {
-			if (!STp->can_partitions)
-				return (-EINVAL);
+			if (!STp->can_partitions) {
+				retval = (-EINVAL);
+				goto out;
+			}
 			if ((i = st_int_ioctl(STp, MTREW, 0)) < 0 ||
-			    (i = partition_tape(STp, mtc.mt_count)) < 0)
-				return i;
+			    (i = partition_tape(STp, mtc.mt_count)) < 0) {
+				retval = i;
+				goto out;
+			}
 			for (i = 0; i < ST_NBR_PARTITIONS; i++) {
 				STp->ps[i].rw = ST_IDLE;
 				STp->ps[i].at_sm = 0;
@@ -3105,7 +3168,7 @@ static int st_ioctl(struct inode *inode, struct file *file,
 /* Try to allocate a new tape buffer. Calling function must not hold
    dev_arr_lock. */
 static ST_buffer *
- new_tape_buffer(int from_initialization, int need_dma)
+ new_tape_buffer(int from_initialization, int need_dma, int in_use)
 {
 	int i, priority, b_size, order, got = 0, segs = 0;
 	unsigned long flags;
@@ -3124,7 +3187,7 @@ static ST_buffer *
 		priority = GFP_KERNEL;
 
 	i = sizeof(ST_buffer) + (st_max_sg_segs - 1) * sizeof(struct scatterlist);
-	tb = (ST_buffer *) kmalloc(i, priority);
+	tb = kmalloc(i, priority);
 	if (tb) {
 		if (need_dma)
 			priority |= GFP_DMA;
@@ -3198,7 +3261,7 @@ static ST_buffer *
                     "st: segment sizes: first %d, last %d bytes.\n",
                     tb->sg[0].length, tb->sg[segs - 1].length);
 	)
-	tb->in_use = 0;
+	tb->in_use = in_use;
 	tb->dma = need_dma;
 	tb->buffer_size = got;
 	tb->writing = 0;
@@ -3418,12 +3481,13 @@ __setup("st=", st_setup);
 
 static struct file_operations st_fops =
 {
+	owner:		THIS_MODULE,
 	read:		st_read,
 	write:		st_write,
 	ioctl:		st_ioctl,
-	open:		scsi_tape_open,
-	flush:		scsi_tape_flush,
-	release:	scsi_tape_close,
+	open:		st_open,
+	flush:		st_flush,
+	release:	st_release,
 };
 
 static int st_attach(Scsi_Device * SDp)
@@ -3433,9 +3497,17 @@ static int st_attach(Scsi_Device * SDp)
 	ST_partstat *STps;
 	int i, mode, target_nbr;
 	unsigned long flags = 0;
+	char *stp;
 
 	if (SDp->type != TYPE_TAPE)
 		return 1;
+	if ((stp = st_incompatible(SDp))) {
+		printk(KERN_INFO
+		       "st: Found incompatible tape at scsi%d, channel %d, id %d, lun %d\n",
+		       SDp->host->host_no, SDp->channel, SDp->id, SDp->lun);
+		printk(KERN_INFO "st: The suggested driver is %s.\n", stp);
+		return 1;
+	}
 
 	write_lock_irqsave(&st_dev_arr_lock, flags);
 	if (st_template.nr_dev >= st_template.dev_max) {
@@ -3454,13 +3526,13 @@ static int st_attach(Scsi_Device * SDp)
 			return 1;
 		}
 
-		tmp_da = (Scsi_Tape **) kmalloc(tmp_dev_max * sizeof(Scsi_Tape *),
-						GFP_ATOMIC);
-		tmp_ba = (ST_buffer **) kmalloc(tmp_dev_max * sizeof(ST_buffer *),
-						GFP_ATOMIC);
+		tmp_da = kmalloc(tmp_dev_max * sizeof(Scsi_Tape *), GFP_ATOMIC);
+		tmp_ba = kmalloc(tmp_dev_max * sizeof(ST_buffer *), GFP_ATOMIC);
 		if (tmp_da == NULL || tmp_ba == NULL) {
 			if (tmp_da != NULL)
 				kfree(tmp_da);
+			if (tmp_ba != NULL)
+				kfree(tmp_ba);
 			SDp->attached--;
 			write_unlock_irqrestore(&st_dev_arr_lock, flags);
 			printk(KERN_ERR "st: Can't extend device array.\n");
@@ -3492,7 +3564,7 @@ static int st_attach(Scsi_Device * SDp)
 	if (i >= st_template.dev_max)
 		panic("scsi_devices corrupt (st)");
 
-	tpnt = (Scsi_Tape *)kmalloc(sizeof(Scsi_Tape), GFP_ATOMIC);
+	tpnt = kmalloc(sizeof(Scsi_Tape), GFP_ATOMIC);
 	if (tpnt == NULL) {
 		SDp->attached--;
 		write_unlock_irqrestore(&st_dev_arr_lock, flags);
@@ -3509,17 +3581,17 @@ static int st_attach(Scsi_Device * SDp)
 	    /*  Rewind entry  */
 	    sprintf (name, "mt%s", formats[mode]);
 	    tpnt->de_r[mode] =
-		devfs_register (SDp->de, name, 0, DEVFS_FL_DEFAULT,
+		devfs_register (SDp->de, name, DEVFS_FL_DEFAULT,
 				MAJOR_NR, i + (mode << 5),
 				S_IFCHR | S_IRUGO | S_IWUGO,
-				0, 0, &st_fops, NULL);
+				&st_fops, NULL);
 	    /*  No-rewind entry  */
 	    sprintf (name, "mt%sn", formats[mode]);
 	    tpnt->de_n[mode] =
-		devfs_register (SDp->de, name, 0, DEVFS_FL_DEFAULT,
+		devfs_register (SDp->de, name, DEVFS_FL_DEFAULT,
 				MAJOR_NR, i + (mode << 5) + 128,
 				S_IFCHR | S_IRUGO | S_IWUGO,
-				0, 0, &st_fops, NULL);
+				&st_fops, NULL);
 	}
 	devfs_register_tape (tpnt->de_r[0]);
 	tpnt->device = SDp;
@@ -3587,7 +3659,7 @@ static int st_attach(Scsi_Device * SDp)
 	if (target_nbr > st_max_buffers)
 		target_nbr = st_max_buffers;
 	for (i=st_nbr_buffers; i < target_nbr; i++)
-		if (!new_tape_buffer(TRUE, TRUE)) {
+		if (!new_tape_buffer(TRUE, TRUE, FALSE)) {
 			printk(KERN_INFO "st: Unable to allocate new static buffer.\n");
 			break;
 		}
@@ -3599,7 +3671,7 @@ static int st_attach(Scsi_Device * SDp)
 
 static int st_detect(Scsi_Device * SDp)
 {
-	if (SDp->type != TYPE_TAPE)
+	if (SDp->type != TYPE_TAPE || st_incompatible(SDp))
 		return 0;
 
 	printk(KERN_WARNING
@@ -3673,17 +3745,15 @@ static void st_detach(Scsi_Device * SDp)
 }
 
 
-#ifdef MODULE
-
-int __init init_module(void)
+static int __init init_st(void)
 {
 	validate_options();
 
-	st_template.module = &__this_module;
+	st_template.module = THIS_MODULE;
         return scsi_register_module(MODULE_SCSI_DEV, &st_template);
 }
 
-void cleanup_module(void)
+static void __exit exit_st(void)
 {
 	int i;
 
@@ -3709,4 +3779,6 @@ void cleanup_module(void)
 	st_template.dev_max = 0;
 	printk(KERN_INFO "st: Unloaded.\n");
 }
-#endif				/* MODULE */
+
+module_init(init_st);
+module_exit(exit_st);

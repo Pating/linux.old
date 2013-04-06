@@ -28,26 +28,26 @@
 #include <asm/pgalloc.h>
 
 /* Have we found an MP table */
-int smp_found_config = 0;
+int smp_found_config;
 
 /*
  * Various Linux-internal data structures created from the
  * MP-table.
  */
 int apic_version [MAX_APICS];
-int mp_bus_id_to_type [MAX_MP_BUSSES] = { -1, };
+int mp_bus_id_to_type [MAX_MP_BUSSES];
 int mp_bus_id_to_pci_bus [MAX_MP_BUSSES] = { -1, };
-int mp_current_pci_id = 0;
+int mp_current_pci_id;
 int pic_mode;
-unsigned long mp_lapic_addr = 0;
+unsigned long mp_lapic_addr;
 
 /* Processor that is doing the boot up */
 unsigned int boot_cpu_id = -1U;
 /* Internal processor count */
-static unsigned int num_processors = 0;
+static unsigned int num_processors;
 
 /* Bitmask of physically existing CPUs */
-unsigned long phys_cpu_present_map = 0;
+unsigned long phys_cpu_present_map;
 
 /*
  * Intel MP BIOS table parsing routines:
@@ -97,6 +97,8 @@ static char __init *mpc_family(int family,int model)
 			return("Pentium(tm) Pro");
 
 		case 0x0F:
+			if (model == 0x00)
+				return("Pentium 4(tm)");
 			if (model == 0x0F)
 				return("Special controller");
 	}
@@ -125,6 +127,44 @@ static void __init MP_processor_info (struct mpc_config_processor *m)
 		Dprintk("    64 bit compare & exchange supported.\n");
 	if (m->mpc_featureflag&(1<<9))
 		Dprintk("    Internal APIC present.\n");
+	if (m->mpc_featureflag&(1<<11))
+		Dprintk("    SEP present.\n");
+	if (m->mpc_featureflag&(1<<12))
+		Dprintk("    MTRR  present.\n");
+	if (m->mpc_featureflag&(1<<13))
+		Dprintk("    PGE  present.\n");
+	if (m->mpc_featureflag&(1<<14))
+		Dprintk("    MCA  present.\n");
+	if (m->mpc_featureflag&(1<<15))
+		Dprintk("    CMOV  present.\n");
+	if (m->mpc_featureflag&(1<<16))
+		Dprintk("    PAT  present.\n");
+	if (m->mpc_featureflag&(1<<17))
+		Dprintk("    PSE  present.\n");
+	if (m->mpc_featureflag&(1<<18))
+		Dprintk("    PSN  present.\n");
+	if (m->mpc_featureflag&(1<<19))
+		Dprintk("    Cache Line Flush Instruction present.\n");
+	/* 20 Reserved */
+	if (m->mpc_featureflag&(1<<21))
+		Dprintk("    Debug Trace and EMON Store present.\n");
+	if (m->mpc_featureflag&(1<<22))
+		Dprintk("    ACPI Thermal Throttle Registers  present.\n");
+	if (m->mpc_featureflag&(1<<23))
+		Dprintk("    MMX  present.\n");
+	if (m->mpc_featureflag&(1<<24))
+		Dprintk("    FXSR  present.\n");
+	if (m->mpc_featureflag&(1<<25))
+		Dprintk("    XMM  present.\n");
+	if (m->mpc_featureflag&(1<<26))
+		Dprintk("    Willamette New Instructions  present.\n");
+	if (m->mpc_featureflag&(1<<27))
+		Dprintk("    Self Snoop  present.\n");
+	/* 28 Reserved */
+	if (m->mpc_featureflag&(1<<29))
+		Dprintk("    Thermal Monitor present.\n");
+	/* 30, 31 Reserved */
+
 
 	if (m->mpc_cpuflag & CPU_BOOTPROCESSOR) {
 		Dprintk("    Bootup CPU\n");
@@ -158,19 +198,18 @@ static void __init MP_bus_info (struct mpc_config_bus *m)
 	str[6] = 0;
 	Dprintk("Bus #%d is %s\n", m->mpc_busid, str);
 
-	if (strncmp(str, "ISA", 3) == 0) {
+	if (strncmp(str, BUSTYPE_ISA, sizeof(BUSTYPE_ISA)-1) == 0) {
 		mp_bus_id_to_type[m->mpc_busid] = MP_BUS_ISA;
-	} else if (strncmp(str, "EISA", 4) == 0) {
+	} else if (strncmp(str, BUSTYPE_EISA, sizeof(BUSTYPE_EISA)-1) == 0) {
 		mp_bus_id_to_type[m->mpc_busid] = MP_BUS_EISA;
-	} else if (strncmp(str, "PCI", 3) == 0) {
+	} else if (strncmp(str, BUSTYPE_PCI, sizeof(BUSTYPE_PCI)-1) == 0) {
 		mp_bus_id_to_type[m->mpc_busid] = MP_BUS_PCI;
 		mp_bus_id_to_pci_bus[m->mpc_busid] = mp_current_pci_id;
 		mp_current_pci_id++;
-	} else if (strncmp(str, "MCA", 3) == 0) {
+	} else if (strncmp(str, BUSTYPE_MCA, sizeof(BUSTYPE_MCA)-1) == 0) {
 		mp_bus_id_to_type[m->mpc_busid] = MP_BUS_MCA;
 	} else {
-		printk("Unknown bustype %s\n", str);
-		panic("cannot handle bus - mail to linux-smp@vger.rutgers.edu");
+		printk("Unknown bustype %s - ignoring\n", str);
 	}
 }
 
@@ -379,7 +418,7 @@ static inline void __init construct_default_ISA_mptable(int mpc_default_type)
 	processor.mpc_cpufeature = (boot_cpu_data.x86 << 8) |
 				   (boot_cpu_data.x86_model << 4) |
 				   boot_cpu_data.x86_mask;
-	processor.mpc_featureflag = boot_cpu_data.x86_capability;
+	processor.mpc_featureflag = boot_cpu_data.x86_capability[0];
 	processor.mpc_reserved[0] = 0;
 	processor.mpc_reserved[1] = 0;
 	for (i = 0; i < 2; i++) {
@@ -565,7 +604,7 @@ void __init find_intel_smp (void)
 	address <<= 4;
 	smp_scan_config(address, 0x1000);
 	if (smp_found_config)
-		printk(KERN_WARNING "WARNING: MP table in the EBDA can be UNSAFE, contact linux-smp@vger.rutgers.edu if you experience SMP problems!\n");
+		printk(KERN_WARNING "WARNING: MP table in the EBDA can be UNSAFE, contact linux-smp@vger.kernel.org if you experience SMP problems!\n");
 }
 
 #else

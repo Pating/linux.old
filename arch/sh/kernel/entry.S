@@ -14,7 +14,12 @@
 #include <linux/linkage.h>
 #include <linux/config.h>
 
-#define COMPAT_OLD_SYSCALL_ABI 1
+
+/*
+ * Define this to turn on compatibility with the previous
+ * system call ABI.  This feature is not properly maintained.
+ */
+#undef COMPAT_OLD_SYSCALL_ABI
 
 ! NOTE:
 ! GNU as (as of 2.9.1) changes bf/s into bt/s and bra, when the address
@@ -27,6 +32,12 @@
  *
  * NOTE: This code handles signal-recognition, which happens every time
  * after a timer-interrupt and after each system call.
+ *
+ * NOTE: This code uses a convention that instructions in the delay slot
+ * of a transfer-control instruction are indented by an extra space, thus:
+ *
+ *    jmp	@$k0	    ! control-transfer instruction
+ *     ldc	$k1, $ssr   ! delay slot
  *
  * Stack layout in 'ret_from_syscall':
  * 	ptrace needs to have all regs on the stack.
@@ -52,16 +63,18 @@
 flags		=  4
 sigpending	=  8
 need_resched	= 20
+tsk_ptrace	= 24
 
-PF_TRACESYS  = 0x00000020
+PT_TRACESYS  = 0x00000002
 PF_USEDFPU   = 0x00100000
 
 ENOSYS = 38
+EINVAL = 22
 
 #if defined(__sh3__)
 TRA     = 0xffffffd0
 EXPEVT  = 0xffffffd4
-#ifdef CONFIG_CPU_SUBTYPE_SH7709
+#if defined(CONFIG_CPU_SUBTYPE_SH7707) || defined(CONFIG_CPU_SUBTYPE_SH7709)
 INTEVT  = 0xa4000000		! INTEVTE2(0xa4000000)
 #else
 INTEVT  = 0xffffffd8
@@ -75,7 +88,14 @@ MMU_TEA = 0xff00000c		! TLB Exception Address Register
 #endif
 
 /* Offsets to the stack */
-R0         =  0		/* Return value */
+R0         =  0		/* Return value. New ABI also arg4 */
+R1         =  4     	/* New ABI: arg5 */
+R2         =  8     	/* New ABI: arg6 */
+R3         =  12     	/* New ABI: syscall_nr */
+R4         =  16     	/* New ABI: arg0 */
+R5         =  20     	/* New ABI: arg1 */
+R6         =  24     	/* New ABI: arg2 */
+R7         =  28     	/* New ABI: arg3 */
 SP	   =  (15*4)
 SR	   =  (16*4+8)
 SYSCALL_NR =  (16*4+6*4)
@@ -127,64 +147,62 @@ SYSCALL_NR =  (16*4+6*4)
 	or	$r11, $r10;		\
 	ldc	$r10, $sr
 
-	.balign	4
+	.align	2
 tlb_miss_load:
-	mov.l	2f, $r0
-	mov.l	@$r0, $r6
-	STI()
-	mov	$r15, $r4
-	mov.l	1f, $r0
-	jmp	@$r0
+	bra	call_dpf
 	 mov	#0, $r5
 
-	.balign	4
+	.align	2
 tlb_miss_store:
-	mov.l	2f, $r0
-	mov.l	@$r0, $r6
-	STI()
-	mov	$r15, $r4
-	mov.l	1f, $r0
-	jmp	@$r0
+	bra	call_dpf
 	 mov	#1, $r5
 
-	.balign	4
+	.align	2
 initial_page_write:
-	mov.l	2f, $r0
-	mov.l	@$r0, $r6
-	STI()
-	mov	$r15, $r4
-	mov.l	1f, $r0
-	jmp	@$r0
+	bra	call_dpf
 	 mov	#1, $r5
 
-	.balign	4
+	.align	2
 tlb_protection_violation_load:
-	mov.l	2f, $r0
-	mov.l	@$r0, $r6
-	STI()
-	mov	$r15, $r4
-	mov.l	1f, $r0
-	jmp	@$r0
+	bra	call_dpf
 	 mov	#0, $r5
 
-	.balign	4
+	.align	2
 tlb_protection_violation_store:
-	mov.l	2f, $r0
-	mov.l	@$r0, $r6
-	STI()
-	mov	$r15, $r4
-	mov.l	1f, $r0
-	jmp	@$r0
+	bra	call_dpf
 	 mov	#1, $r5
 
-	.balign 4
-1:	.long	SYMBOL_NAME(do_page_fault)
-2:	.long	MMU_TEA
+call_dpf:
+	mov.l	1f, $r0
+	mov	$r5, $r8
+	mov.l	@$r0, $r6
+	mov	$r6, $r9
+	mov.l	2f, $r0
+	sts	$pr, $r10
+	jsr	@$r0
+	 mov	$r15, $r4
+	!
+	tst	#0xff, $r0
+	bf/s	0f
+	 lds	$r10, $pr
+	rts
+	 nop
+0:	STI()
+	mov.l	3f, $r0
+	mov	$r9, $r6
+	mov	$r8, $r5
+	jmp	@$r0
+	 mov	$r15, $r4
 
-#ifdef CONFIG_DEBUG_KERNEL_WITH_GDB_STUB
-	.balign	4
+	.align 2
+1:	.long	MMU_TEA
+2:	.long	SYMBOL_NAME(__do_page_fault)
+3:	.long	SYMBOL_NAME(do_page_fault)
+
+#if defined(CONFIG_DEBUG_KERNEL_WITH_GDB_STUB) || defined(CONFIG_SH_STANDARD_BIOS)
+	.align	2
 	/* Unwind the stack and jmp to the debug entry */
-debug:
+debug_kernel:
 	mov.l	@$r15+, $r0
 	mov.l	@$r15+, $r1
 	mov.l	@$r15+, $r2
@@ -216,24 +234,38 @@ debug:
 	mov.l	2f, $k0
 	jmp	@$k0
 	 ldc	$k1, $ssr
-	.balign	4
+	.align	2
 1:	.long	0x300000f0
-2:	.long	0xa0000100
+2:	.long	CONFIG_GDB_STUB_VBR + 0x100
 #endif
 
-	.balign	4
+	.align	2
+debug_trap:	
+#if defined(CONFIG_DEBUG_KERNEL_WITH_GDB_STUB) || defined(CONFIG_SH_STANDARD_BIOS)
+	mov	#SR, $r0
+	mov.l	@($r0,$r15), $r0	! get status register
+	shll	$r0
+	shll	$r0			! kernel space?
+	bt/s	debug_kernel
+#endif
+	 mov.l	@$r15, $r0
+	mov.l	1f, $r8
+	jmp	@$r8
+	 nop
+
+	.align	2
+1:	.long	SYMBOL_NAME(break_point_trap_software)
+
+	.align	2
 error:	
 	!
 	STI()
 	mov.l	1f, $r0
 	jmp	@$r0
 	 nop
-	.balign	4
+	.align	2
 1:	.long	SYMBOL_NAME(do_exception_error)
 
-badsys:	mov	#-ENOSYS, $r0
-	rts			! go to ret_from_syscall..
-	 mov.l	$r0, @(R0,$r15)
 
 !
 !
@@ -257,127 +289,195 @@ ENTRY(ret_from_fork)
  *	Arguments #4 to #6: R0, R1, R2
  *	TRA: (number of arguments + 0x10) x 4
  *
+ * This code also handles delegating other traps to the BIOS/gdb stub
+ * according to:
+ *
+ * Trap number
+ * (TRA>>2) 	    Purpose
+ * -------- 	    -------
+ * 0x0-0xf  	    old syscall ABI
+ * 0x10-0x1f  	    new syscall ABI
+ * 0x20-0xff  	    delegated through debug_trap to BIOS/gdb stub.
+ *
+ * Note: When we're first called, the TRA value must be shifted
+ * right 2 bits in order to get the value that was used as the "trapa"
+ * argument.
  */
 
 system_call:
-	mov.l	1f, $r9
+	mov.l	__TRA, $r9
 	mov.l	@$r9, $r8
 	!
-#ifdef CONFIG_DEBUG_KERNEL_WITH_GDB_STUB
+	! Is the trap argument >= 0x20? (TRA will be >= 0x80)
 	mov	#0x20, $r9
 	extu.b	$r9, $r9
 	shll2	$r9
 	cmp/hs	$r9, $r8
-	bt	debug
-#endif
+	bt	debug_trap
 	!
 	mov	#SYSCALL_NR, $r14
 	add	$r15, $r14
 	!
-	mov	#0x40, $r9
 #ifdef COMPAT_OLD_SYSCALL_ABI
+	mov	#0x40, $r9
 	cmp/hs	$r9, $r8
-	mov	$r0, $r10
-	bf/s	0f
-	 mov	$r0, $r9
+	bf/s	old_abi_system_call
+	 nop
 #endif
 	! New Syscall ABI
 	add	#-0x40, $r8
 	shlr2	$r8
 	shll8	$r8
-	shll8	$r8
+	shll8	$r8 	    	! $r8 = num_args<<16
 	mov	$r3, $r10
 	or	$r8, $r10	! Encode syscall # and # of arguments
-	!
-	mov	$r3, $r9
-	mov	#0, $r8
-0:
 	mov.l	$r10, @$r14	! set syscall_nr
 	STI()
+	!
+	stc	$k_current, $r11
+	mov.l	@(tsk_ptrace,$r11), $r10	! Is current PTRACE_SYSCALL'd?
+	mov	#PT_TRACESYS, $r11
+	tst	$r11, $r10
+	bt	5f
+	!                     	Yes it is traced.
+	mov.l	__syscall_trace, $r11	! Call syscall_trace() which notifies
+	jsr	@$r11	    	    	! superior (will chomp $R[0-7])
+	 nop
+	!			Reload $R0-$R4 from kernel stack, where the
+	!   	    	    	parent may have modified them using
+	!   	    	    	ptrace(POKEUSR).  (Note that $R0-$R2 are
+	!   	    	    	used by the system call handler directly
+	!   	    	    	from the kernel stack anyway, so don't need
+	!   	    	    	to be reloaded here.)  This allows the parent
+	!   	    	    	to rewrite system calls and args on the fly.
+	mov.l	@(R4,$r15), $r4   ! arg0
+	mov.l	@(R5,$r15), $r5
+	mov.l	@(R6,$r15), $r6
+	mov.l	@(R7,$r15), $r7   ! arg3
+	mov.l	@(R3,$r15), $r3   ! syscall_nr
+	!   	    	    Arrange for syscall_trace() to be called
+	!   	    	    again as the system call returns.
+	mov.l	__syscall_ret_trace, $r10
+	bra	6f
+	 lds	$r10, $pr
+	!   	    	    No it isn't traced.
+	!   	    	    Arrange for normal system call return.
+5:	mov.l	__syscall_ret, $r10
+	lds	$r10, $pr
+	!   	    	    Call the system call handler through the table.
+	!   	    	    (both normal and ptrace'd)
+	!   	    	    First check for bad syscall number
+6:	mov	$r3, $r9
 	mov.l	__n_sys, $r10
 	cmp/hs	$r10, $r9
-	bt	badsys
-	!
+	bf	2f
+	!   	    	    Bad syscall number
+	rts			! go to syscall_ret or syscall_ret_trace
+    	 mov	#-ENOSYS, $r0
+	!   	    	    Good syscall number
+2:	shll2	$r9		! x4
+	mov.l	__sct, $r11
+	add	$r11, $r9
+	mov.l	@$r9, $r11
+	jmp	@$r11	    	! jump to specific syscall handler
+	 nop
+
+	! In case of trace
+syscall_ret_trace:
+	mov.l	$r0, @(R0,$r15)		! save the return value
+	mov.l	__syscall_trace, $r1
+	mova	SYMBOL_NAME(ret_from_syscall), $r0
+	jmp	@$r1    	! Call syscall_trace() which notifies superior
+	 lds	$r0, $pr    	! Then return to ret_from_syscall()
+
+
+
 #ifdef COMPAT_OLD_SYSCALL_ABI
+! Handle old ABI system call.
+! Note that ptrace(SYSCALL) is not supported for the old ABI.
+! At this point:
+!   $r0, $r4-7 as per ABI
+!   $r8  = value of TRA register (= num_args<<2)
+!   $r14 = points to SYSCALL_NR in stack frame
+old_abi_system_call:
+	mov 	$r0, $r9    	    	! Save system call number in $r9
+	!   	    	    	    	! arrange for return which pops stack
+	mov.l	__old_abi_syscall_ret, $r10
+	lds	$r10, $pr
 	!				  Build the stack frame if TRA > 0
 	mov	$r8, $r10
 	cmp/pl	$r10
 	bf	0f
-	mov.l	@(SP,$r15), $r0		! get original stack
+	mov.l	@(SP,$r15), $r0		! get original user stack
 7:	add	#-4, $r10
 4:	mov.l	@($r0,$r10), $r1	! May cause address error exception..
 	mov.l	$r1, @-$r15
 	cmp/pl	$r10
 	bt	7b
-#endif
-0:	stc	$k_current, $r11
-	mov.l	@(flags,$r11), $r10	! Is it trace?
-	mov	#PF_TRACESYS, $r11
-	tst	$r11, $r10
-	bt	5f
-	!                     Trace system call
-	mov	#-ENOSYS, $r11
-	mov.l	$r11, @(R0,$r15)
-	mov.l	2f, $r11
-	jsr	@$r11
-	 nop
-	mov.l	__syscall_ret_trace, $r10
-	bra	6f
-	 lds	$r10, $pr
-	!
-5:	mov.l	__syscall_ret, $r10
-	lds	$r10, $pr
-	!
-6:	mov	$r9, $r10
-	shll2	$r10		! x4
+0:
+	mov.l	$r9, @$r14	    	! set syscall_nr
+	STI()
+	!   	    	    Call the system call handler through the table.
+	!   	    	    First check for bad syscall number
+	mov.l	__n_sys, $r10
+	cmp/hs	$r10, $r9
+	bf	2f
+	!   	    	    Bad syscall number
+	rts			! return to old_abi_syscall_ret
+    	 mov	#-ENOSYS, $r0
+	!   	    	    Good syscall number
+2:	shll2	$r9		! x4
 	mov.l	__sct, $r11
-	add	$r11, $r10
-	mov.l	@$r10, $r11
-	jmp	@$r11
+	add	$r11, $r9
+	mov.l	@$r9, $r11
+	jmp	@$r11	    	! call specific syscall handler,
 	 nop
 
-	! In case of trace
-	.balign	4
-3:
-#ifdef COMPAT_OLD_SYSCALL_ABI
-	add	$r8, $r15		! pop off the arguments
-#endif
-	mov.l	$r0, @(R0,$r15)		! save the return value
-	mov.l	2f, $r1
-	mova	SYMBOL_NAME(ret_from_syscall), $r0
-	jmp	@$r1
-	 lds	$r0, $pr
-	.balign	4
-1:	.long	TRA
-2:	.long	SYMBOL_NAME(syscall_trace)
-__n_sys:	.long	NR_syscalls
-__sct:		.long	SYMBOL_NAME(sys_call_table)
-__syscall_ret_trace:
-		.long	3b
-__syscall_ret:
-		.long	SYMBOL_NAME(syscall_ret)
+    	.align 2
+__old_abi_syscall_ret:
+	.long	old_abi_syscall_ret
 
-#ifdef COMPAT_OLD_SYSCALL_ABI
+    	! This code gets called on address error exception when copying
+	! syscall arguments from user stack to kernel stack.  It is
+	! supposed to return -EINVAL through old_abi_syscall_ret, but it
+	! appears to have been broken for a long time in that the $r0
+	! return value will be saved into the kernel stack relative to $r15
+	! but the value of $r15 is not correct partway through the loop.
+	! So the user prog is returned its old $r0 value, not -EINVAL.
+	! Greg Banks 28 Aug 2000.
 	.section	.fixup,"ax"
 fixup_syscall_argerr:
+    	! First get $r15 back to 
 	rts
-	 mov.l	1f, $r0
-1:	.long	-22	! -EINVAL
-.previous
+    	 mov	#-EINVAL, $r0
+    	.previous
 
 	.section	__ex_table, "a"
-	.balign	4
+	.align	2
 	.long	4b,fixup_syscall_argerr
-.previous
+    	.previous
 #endif
 
-	.balign	4
+	.align	2
+__TRA:	.long	TRA
+__syscall_trace:
+    	.long	SYMBOL_NAME(syscall_trace)
+__n_sys:.long	NR_syscalls
+__sct:	.long	SYMBOL_NAME(sys_call_table)
+__syscall_ret_trace:
+	.long	syscall_ret_trace
+__syscall_ret:
+	.long	SYMBOL_NAME(syscall_ret)
+
+
+
+	.align	2
 reschedule:
 	mova	SYMBOL_NAME(ret_from_syscall), $r0
 	mov.l	1f, $r1
 	jmp	@$r1
 	 lds	$r0, $pr
-	.balign	4
+	.align	2
 1:	.long	SYMBOL_NAME(schedule)
 
 ENTRY(ret_from_irq)
@@ -401,22 +501,24 @@ ENTRY(ret_from_exception)
 	STI()
 	bra	ret_from_syscall
 	 nop
-	.balign	4
+	.align	2
 __INV_IMASK:
 	.long	0xffffff0f	! ~(IMASK)
 
-	.balign 4
-syscall_ret:
+	.align 2
 #ifdef COMPAT_OLD_SYSCALL_ABI
+old_abi_syscall_ret:
 	add	$r8, $r15	! pop off the arguments
+	/* fall through */
 #endif
+syscall_ret:
 	mov.l	$r0, @(R0,$r15)	! save the return value
 	/* fall through */
 
 ENTRY(ret_from_syscall)
-	mov.l	__softirq_state, $r0
+	mov.l	__irq_stat, $r0	! softirq_active
 	mov.l	@$r0, $r1
-	mov.l	@(4,$r0), $r2
+	mov.l	@(4,$r0), $r2	! softirq_mask
 	tst	$r2, $r1
 	bt	ret_with_reschedule
 handle_softirq:
@@ -438,15 +540,15 @@ signal_return:
 	mova	restore_all, $r0
 	jmp	@$r1
 	 lds	$r0, $pr
-	.balign	4
+	.align	2
 __do_signal:
 	.long	SYMBOL_NAME(do_signal)
-__softirq_state:
-	.long	SYMBOL_NAME(softirq_state)
+__irq_stat:
+	.long	SYMBOL_NAME(irq_stat)
 __do_softirq:
 	.long	SYMBOL_NAME(do_softirq)
 
-	.balign 4
+	.align 2
 restore_all:
 #if defined(__SH4__)
 	mov.l	__fpu_prepare_fd, $r0
@@ -497,9 +599,9 @@ restore_all:
 	shlr2	$k0
 	and	#0x3c, $k0
 	cmp/eq	#0x3c, $k0
-	bf/s	7f
-	 mov	$g_imask, $k0
-	shll2	$k0
+	bt/s	7f
+	 shll2	$k0
+	mov	$g_imask, $k0
 	!
 7:	or	$k0, $k2	! Set the IMASK-bits
 	ldc	$k2, $ssr
@@ -554,7 +656,7 @@ restore_all:
 	rte
 	 nop
 
-	.balign	4
+	.align	2
 __blrb_flags:	.long	0x30000000
 #if defined(__SH4__)
 __fpu_prepare_fd:
@@ -582,7 +684,7 @@ general_exception:
 	mov.l	2f, $k3
 	bra	handle_exception
 	 mov.l	@$k2, $k2
-	.balign	4
+	.align	2
 2:	.long	SYMBOL_NAME(ret_from_exception)
 1:	.long	EXPEVT
 !
@@ -601,7 +703,7 @@ interrupt:
 	bra	handle_exception
 	 mov.l	@$k2, $k2
 
-	.balign	4
+	.align	2
 1:	.long	EXPEVT
 2:	.long	INTEVT
 3:	.long	SYMBOL_NAME(ret_from_irq)
@@ -614,19 +716,20 @@ handle_exception:
 	! save all registers onto stack.
 	!
 	stc	$ssr, $k0	! from kernel space?
-	shll	$k0		! Check MD bit (bit30)
+	shll	$k0		! Check MD bit (bit30) by shifting it into the T bit
 	shll	$k0
 #if defined(__SH4__)
 	bf/s	8f		! it's from user to kernel transition
 	 mov	$r15, $k0	! save original stack to k0
-	/* Kernel to kernel transition */
+	/* It's a kernel to kernel transition. */
+	/* Is the FPU disabled? */
 	mov.l	2f, $k1
 	stc	$ssr, $k0
 	tst	$k1, $k0
 	mov.l	4f, $k1
-	bf/s	9f		! FPU is not used
+	bf/s	9f		! FPU is not enabled, no need to save it
 	 mov	$r15, $k0	! save original stack to k0
-	! FPU is used, save FPU
+	! FPU is enabled, save it
 	! /* XXX: Need to save another bank of FPU if all FPU feature is used */
 	! /* Currently it's not the case for GCC (only udivsi3_i4, divsi3_i4) */
 	sts.l	$fpul,  @-$r15
@@ -653,17 +756,19 @@ handle_exception:
 	 fmov.s	$fr0, @-$r15
 #else
 	mov.l	3f, $k1
-	bt/s	9f		! it's from kernel to kernel transition
+	bt/s	9f		! it's a kernel to kernel transition, and skip the FPU save.
 	 mov	$r15, $k0	! save original stack to k0 anyway
 #endif
 8:	/* User space to kernel */
 	mov	#0x20, $k1
-	shll8	$k1			! $k1 <= 8192
+	shll8	$k1			! $k1 <= 8192 == THREAD_SIZE
 	add	$current, $k1
 	mov	$k1, $r15		! change to kernel stack
 	!
 	mov.l	4f, $k1			! let kernel release FPU
-9:	mov	#-1, $k4
+9:	! Save the user registers on the stack.
+	! At this point, k1 should have been set to the new SR value
+  	mov	#-1, $k4
 	mov.l	$k4, @-$r15		! syscall_nr (default: -1)
 	!
 	sts.l	$macl, @-$r15
@@ -707,7 +812,7 @@ handle_exception:
 	mov.l	@$r9, $r9
 	jmp	@$r9
 	 nop
-	.balign	4
+	.align	2
 1:	.long	SYMBOL_NAME(exception_handling_table)
 2:	.long	0x00008000	! FD=1
 3:	.long	0x000000f0	! FD=0, IMASK=15
@@ -778,7 +883,7 @@ ENTRY(interrupt_table)
 	.long	SYMBOL_NAME(do_IRQ)	!      rovi
 	.long	SYMBOL_NAME(do_IRQ)
 	.long	SYMBOL_NAME(do_IRQ)
-#if defined(CONFIG_CPU_SUBTYPE_SH7709)
+#if  defined(CONFIG_CPU_SUBTYPE_SH7707) || defined(CONFIG_CPU_SUBTYPE_SH7709)
 	.long	SYMBOL_NAME(do_IRQ)	! 32 IRQ  irq0
 	.long	SYMBOL_NAME(do_IRQ)	! 33      irq1
 	.long	SYMBOL_NAME(do_IRQ)	! 34      irq2
@@ -808,6 +913,11 @@ ENTRY(interrupt_table)
 	.long	SYMBOL_NAME(do_IRQ)	! 58      bri2
 	.long	SYMBOL_NAME(do_IRQ)	! 59      txi2
 	.long	SYMBOL_NAME(do_IRQ)	! 60 ADC  adi
+#if defined(CONFIG_CPU_SUBTYPE_SH7707)
+	.long   SYMBOL_NAME(do_IRQ)	! 61 LCDC lcdi
+	.long   SYMBOL_NAME(do_IRQ)	! 62 PCC  pcc0i
+	.long   SYMBOL_NAME(do_IRQ)	! 63      pcc1i
+#endif
 #elif defined(__SH4__)
 	.long	SYMBOL_NAME(do_IRQ)	! Hitachi UDI
 	.long	SYMBOL_NAME(do_IRQ)	! GPIO
@@ -1050,6 +1160,8 @@ ENTRY(sys_call_table)
 	.long SYMBOL_NAME(sys_pivot_root)
 	.long SYMBOL_NAME(sys_mincore)
 	.long SYMBOL_NAME(sys_madvise)
+	.long SYMBOL_NAME(sys_getdents64)	/* 220 */
+	.long SYMBOL_NAME(sys_fcntl64)
 
 	/*
 	 * NOTE!! This doesn't have to be exact - we just have
@@ -1057,7 +1169,7 @@ ENTRY(sys_call_table)
 	 * entries. Don't panic if you notice that this hasn't
 	 * been shrunk every time we add a new system call.
 	 */
-	.rept NR_syscalls-219
+	.rept NR_syscalls-221
 		.long SYMBOL_NAME(sys_ni_syscall)
 	.endr
 

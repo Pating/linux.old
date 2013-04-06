@@ -335,7 +335,7 @@ static void atif_drop_device(struct net_device *dev)
 	while ((tmp = *iface) != NULL) {
 		if (tmp->dev == dev) {
 			*iface = tmp->next;
-			kfree_s(tmp, sizeof(struct atalk_iface));
+			kfree(tmp);
 			dev->atalk_ptr = NULL;
 			MOD_DEC_USE_COUNT;
 		} else
@@ -769,7 +769,7 @@ static int atrtr_delete(struct at_addr * addr)
 		    (!(tmp->flags&RTF_GATEWAY) ||
 		     tmp->target.s_node == addr->s_node)) {
 			*r = tmp->next;
-			kfree_s(tmp, sizeof(struct atalk_route));
+			kfree(tmp);
 			goto out;
 		}
 		r = &tmp->next;
@@ -793,7 +793,7 @@ void atrtr_device_down(struct net_device *dev)
 	while ((tmp = *r) != NULL) {
 		if (tmp->dev == dev) {
 			*r = tmp->next;
-			kfree_s(tmp, sizeof(struct atalk_route));
+			kfree(tmp);
 		} else {
 			r = &tmp->next;
 		}
@@ -1607,8 +1607,15 @@ static int atalk_rcv(struct sk_buff *skb, struct net_device *dev, struct packet_
 		 * Note. ddp-> becomes invalid at the realloc.
 		 */
 		if (skb_headroom(skb) < 22)
+		{
+			struct sk_buff *newskb;
 			/* 22 bytes - 12 ether, 2 len, 3 802.2 5 snap */
-			skb = skb_realloc_headroom(skb, 32);
+			newskb = skb_realloc_headroom(skb, 32);
+			kfree_skb(skb);
+			if (!newskb) 
+				return 0;
+			skb = newskb;
+		}
 		else
 			skb = skb_unshare(skb, GFP_ATOMIC);
 		
@@ -2113,7 +2120,7 @@ EXPORT_SYMBOL(atalk_find_dev_addr);
 
 /* Called by proto.c on kernel start up */
 
-void __init atalk_proto_init(struct net_proto *pro)
+static int __init atalk_init(void)
 {
 	(void) sock_register(&atalk_family_ops);
 	if((ddp_dl = register_snap_client(ddp_snap_id, atalk_rcv)) == NULL)
@@ -2141,16 +2148,11 @@ void __init atalk_proto_init(struct net_proto *pro)
 #endif /* CONFIG_SYSCTL */
 
 	printk(KERN_INFO "NET4: AppleTalk 0.18 for Linux NET4.0\n");
+	return 0;
 }
+module_init(atalk_init);
 
 #ifdef MODULE
-
-int init_module(void)
-{
-	atalk_proto_init(NULL);
-	return (0);
-}
-
 /*
  * Note on MOD_{INC,DEC}_USE_COUNT:
  *
@@ -2164,7 +2166,7 @@ int init_module(void)
  * sockets be closed from user space.
  */
 
-void cleanup_module(void)
+static void __exit atalk_exit(void)
 {
 #ifdef CONFIG_SYSCTL
 	atalk_unregister_sysctl();
@@ -2188,6 +2190,7 @@ void cleanup_module(void)
 
 	return;
 }
-
+module_exit(atalk_exit);
 #endif  /* MODULE */
+
 #endif  /* CONFIG_ATALK || CONFIG_ATALK_MODULE */

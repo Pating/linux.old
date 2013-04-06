@@ -2,6 +2,7 @@
  * Created: Fri Jan  8 09:01:26 1999 by faith@precisioninsight.com
  *
  * Copyright 1999 Precision Insight, Inc., Cedar Park, Texas.
+ * Copyright 2000 VA Linux Systems, Inc., Sunnyvale, California.
  * All Rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
@@ -24,7 +25,7 @@
  * DEALINGS IN THE SOFTWARE.
  * 
  * Authors:
- *    Rickard E. (Rik) Faith <faith@precisioninsight.com>
+ *    Rickard E. (Rik) Faith <faith@valinux.com>
  *
  */
 
@@ -37,13 +38,15 @@ int drm_irq_busid(struct inode *inode, struct file *filp, unsigned int cmd,
 	drm_irq_busid_t p;
 	struct pci_dev	*dev;
 
-	copy_from_user_ret(&p, (drm_irq_busid_t *)arg, sizeof(p), -EFAULT);
+	if (copy_from_user(&p, (drm_irq_busid_t *)arg, sizeof(p)))
+		return -EFAULT;
 	dev = pci_find_slot(p.busnum, PCI_DEVFN(p.devnum, p.funcnum));
 	if (dev) p.irq = dev->irq;
 	else	 p.irq = 0;
 	DRM_DEBUG("%d:%d:%d => IRQ %d\n",
 		  p.busnum, p.devnum, p.funcnum, p.irq);
-	copy_to_user_ret((drm_irq_busid_t *)arg, &p, sizeof(p), -EFAULT);
+	if (copy_to_user((drm_irq_busid_t *)arg, &p, sizeof(p)))
+		return -EFAULT;
 	return 0;
 }
 
@@ -54,13 +57,15 @@ int drm_getunique(struct inode *inode, struct file *filp, unsigned int cmd,
 	drm_device_t	 *dev	 = priv->dev;
 	drm_unique_t	 u;
 
-	copy_from_user_ret(&u, (drm_unique_t *)arg, sizeof(u), -EFAULT);
+	if (copy_from_user(&u, (drm_unique_t *)arg, sizeof(u)))
+		return -EFAULT;
 	if (u.unique_len >= dev->unique_len) {
-		copy_to_user_ret(u.unique, dev->unique, dev->unique_len,
-				 -EFAULT);
+		if (copy_to_user(u.unique, dev->unique, dev->unique_len))
+			return -EFAULT;
 	}
 	u.unique_len = dev->unique_len;
-	copy_to_user_ret((drm_unique_t *)arg, &u, sizeof(u), -EFAULT);
+	if (copy_to_user((drm_unique_t *)arg, &u, sizeof(u)))
+		return -EFAULT;
 	return 0;
 }
 
@@ -71,15 +76,19 @@ int drm_setunique(struct inode *inode, struct file *filp, unsigned int cmd,
 	drm_device_t	 *dev	 = priv->dev;
 	drm_unique_t	 u;
 
-	if (dev->unique_len || dev->unique) return -EBUSY;
+	if (dev->unique_len || dev->unique)
+		return -EBUSY;
 
-	copy_from_user_ret(&u, (drm_unique_t *)arg, sizeof(u), -EFAULT);
-	if (!u.unique_len) return -EINVAL;
+	if (copy_from_user(&u, (drm_unique_t *)arg, sizeof(u)))
+		return -EFAULT;
+
+	if (!u.unique_len)
+		return -EINVAL;
 	
 	dev->unique_len = u.unique_len;
 	dev->unique	= drm_alloc(u.unique_len + 1, DRM_MEM_DRIVER);
-	copy_from_user_ret(dev->unique, u.unique, dev->unique_len,
-			   -EFAULT);
+	if (copy_from_user(dev->unique, u.unique, dev->unique_len))
+		return -EFAULT;
 	dev->unique[dev->unique_len] = '\0';
 
 	dev->devname = drm_alloc(strlen(dev->name) + strlen(dev->unique) + 2,

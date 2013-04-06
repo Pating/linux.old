@@ -16,20 +16,19 @@
 #include <linux/locks.h>
 #include <asm/segment.h>
 #include <linux/string.h>
+#define __NO_VERSION__
+#include <linux/module.h>
 #include <asm/uaccess.h>
 
 #include <linux/coda.h>
 #include <linux/coda_linux.h>
 #include <linux/coda_fs_i.h>
-#include <linux/coda_cache.h>
 #include <linux/coda_psdev.h>
 
 /* pioctl ops */
 static int coda_ioctl_permission(struct inode *inode, int mask);
-static int coda_ioctl_open(struct inode *i, struct file *f);
-static int coda_ioctl_release(struct inode *i, struct file *f);
 static int coda_pioctl(struct inode * inode, struct file * filp, 
-                       unsigned int cmd, unsigned long arg);
+                       unsigned int cmd, unsigned long user_data);
 
 /* exported from this file */
 struct inode_operations coda_ioctl_inode_operations =
@@ -39,9 +38,8 @@ struct inode_operations coda_ioctl_inode_operations =
 };
 
 struct file_operations coda_ioctl_operations = {
+	owner:		THIS_MODULE,
 	ioctl:		coda_pioctl,
-	open:		coda_ioctl_open,
-	release:	coda_ioctl_release,
 };
 
 /* the coda pioctl inode ops */
@@ -52,26 +50,8 @@ static int coda_ioctl_permission(struct inode *inode, int mask)
         return 0;
 }
 
-/* The pioctl file ops*/
-int coda_ioctl_open(struct inode *i, struct file *f)
-{
-        ENTRY;
-
-        CDEBUG(D_PIOCTL, "File inode number: %ld\n", 
-	       f->f_dentry->d_inode->i_ino);
-
-	EXIT;
-        return 0;
-}
-
-int coda_ioctl_release(struct inode *i, struct file *f) 
-{
-        return 0;
-}
-
-
 static int coda_pioctl(struct inode * inode, struct file * filp, 
-		       unsigned int cmd, unsigned long user_data)
+                       unsigned int cmd, unsigned long user_data)
 {
 	struct nameidata nd;
         int error;
@@ -104,7 +84,7 @@ static int coda_pioctl(struct inode * inode, struct file * filp,
 	        target_inode = nd.dentry->d_inode;
 	}
 	
-	CDEBUG(D_PIOCTL, "target ino: 0x%ld, dev: 0x%d\n",
+	CDEBUG(D_PIOCTL, "target ino: 0x%ld, dev: 0x%x\n",
 	       target_inode->i_ino, target_inode->i_dev);
 
 	/* return if it is not a Coda inode */
@@ -120,7 +100,7 @@ static int coda_pioctl(struct inode * inode, struct file * filp,
 
         CDEBUG(D_PIOCTL, "ioctl on inode %ld\n", target_inode->i_ino);
 	CDEBUG(D_DOWNCALL, "dput on ino: %ld, icount %d, dcount %d\n", target_inode->i_ino, 
-	       target_inode->i_count, nd.dentry->d_count);
+	       atomic_read(&target_inode->i_count), atomic_read(&nd.dentry->d_count));
 	path_release(&nd);
         return error;
 }

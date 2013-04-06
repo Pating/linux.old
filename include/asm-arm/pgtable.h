@@ -1,12 +1,18 @@
 /*
- * linux/include/asm-arm/pgtable.h
+ *  linux/include/asm-arm/pgtable.h
+ *
+ *  Copyright (C) 2000 Russell King
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
  */
 #ifndef _ASMARM_PGTABLE_H
 #define _ASMARM_PGTABLE_H
 
+#include <linux/config.h>
 #include <asm/arch/memory.h>
 #include <asm/proc-fns.h>
-#include <asm/system.h>
 
 /*
  * PMD_SHIFT determines the size of the area a second-level page table can map
@@ -77,7 +83,19 @@ extern void __handle_bad_pmd_kernel(pmd_t *pmd);
 
 #define pte_none(pte)		(!pte_val(pte))
 #define pte_clear(ptep)		set_pte((ptep), __pte(0))
-#define pte_pagenr(pte)		((unsigned long)(((pte_val(pte) - PHYS_OFFSET) >> PAGE_SHIFT)))
+
+#ifndef CONFIG_DISCONTIGMEM
+#define pte_page(x)		(mem_map + (pte_val((x)) >> PAGE_SHIFT) - \
+				 (PHYS_OFFSET >> PAGE_SHIFT))
+#else
+/*
+ * I'm not happy with this - we needlessly convert a physical address
+ * to a virtual one, and then immediately back to a physical address,
+ * which, if __va and __pa are expensive causes twice the expense for
+ * zero gain. --rmk
+ */
+#define pte_page(x)		(virt_to_page(__va(pte_val((x)))))
+#endif
 
 #define pmd_none(pmd)		(!pmd_val(pmd))
 #define pmd_clear(pmdp)		set_pmd(pmdp, __pmd(0))
@@ -87,7 +105,6 @@ extern void __handle_bad_pmd_kernel(pmd_t *pmd);
  */
 #define page_address(page)	((page)->virtual)
 #define pages_to_mb(x)		((x) >> (20 - PAGE_SHIFT))
-#define pte_page(x)		(mem_map + pte_pagenr(x))
 
 /*
  * Conversion functions: convert a page and protection to a page entry,
@@ -159,13 +176,13 @@ extern pgd_t swapper_pg_dir[PTRS_PER_PGD];
 #define pte_to_swp_entry(pte)	((swp_entry_t) { pte_val(pte) })
 #define swp_entry_to_pte(swp)	((pte_t) { (swp).val })
 
-#define module_map		vmalloc
-#define module_unmap		vfree
-
 /* Needs to be defined here and not in linux/mm.h, as it is arch dependent */
-#define PageSkip(page)		(machine_is_riscpc() && test_bit(PG_skip, &(page)->flags))
+/* FIXME: this is not correct */
+#define kern_addr_valid(addr)	(1)
 
 #define io_remap_page_range	remap_page_range
+
+#include <asm-generic/pgtable.h>
 
 #endif /* !__ASSEMBLY__ */
 

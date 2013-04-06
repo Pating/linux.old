@@ -1,5 +1,13 @@
 /*
- * Dynamic DMA mapping support.
+ *  linux/arch/arm/mm/consistent.c
+ *
+ *  Copyright (C) 2000 Russell King
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ *  Dynamic DMA mapping support.
  */
 #include <linux/config.h>
 #include <linux/types.h>
@@ -9,8 +17,10 @@
 #include <linux/interrupt.h>
 #include <linux/errno.h>
 #include <linux/pci.h>
+#include <linux/init.h>
 
 #include <asm/io.h>
+#include <asm/pgtable.h>
 #include <asm/pgalloc.h>
 
 /*
@@ -19,6 +29,8 @@
  * whether this could be called from an interrupt context or not.  For
  * now, we expressly forbid it, especially as some of the stuff we do
  * here is not interrupt context safe.
+ *
+ * Note that this does *not* zero the allocated area!
  */
 void *consistent_alloc(int gfp, size_t size, dma_addr_t *dma_handle)
 {
@@ -36,15 +48,22 @@ void *consistent_alloc(int gfp, size_t size, dma_addr_t *dma_handle)
 	if (!page)
 		goto no_page;
 
-	memset((void *)page, 0, size);
-	clean_cache_area(page, size);
-
-	*dma_handle = virt_to_bus((void *)page);
-
 	ret = __ioremap(virt_to_phys((void *)page), size, 0);
 	if (ret) {
 		/* free wasted pages */
-		unsigned long end = page + (PAGE_SIZE << order);
+		unsigned long end;
+
+		/*
+		 * we need to ensure that there are no
+		 * cachelines in use, or worse dirty in
+		 * this area.
+		 */
+		invalidate_dcache_range(page, page + size);
+		invalidate_dcache_range((unsigned long)ret, (unsigned long)ret + size);
+
+		*dma_handle = __virt_to_bus(page);
+
+		end = page + (PAGE_SIZE << order);
 		page += size;
 		while (page < end) {
 			free_page(page);
@@ -92,17 +111,20 @@ void consistent_free(void *vaddr)
  */
 void consistent_sync(void *vaddr, size_t size, int direction)
 {
+	unsigned long start = (unsigned long)vaddr;
+	unsigned long end   = start + size;
+
 	switch (direction) {
 	case PCI_DMA_NONE:
 		BUG();
 	case PCI_DMA_FROMDEVICE:	/* invalidate only */
-		dma_cache_inv(vaddr, size);
+		invalidate_dcache_range(start, end);
 		break;
 	case PCI_DMA_TODEVICE:		/* writeback only */
-		dma_cache_wback(vaddr, size);
+		clean_dcache_range(start, end);
 		break;
 	case PCI_DMA_BIDIRECTIONAL:	/* writeback and invalidate */
-		dma_cache_wback_inv(vaddr, size);
+		flush_dcache_range(start, end);
 		break;
 	}
 }

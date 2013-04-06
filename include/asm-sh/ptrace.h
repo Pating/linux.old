@@ -42,6 +42,11 @@
 #define REG_XDREG14	47
 #define REG_FPSCR	48
 
+#define PTRACE_SETOPTIONS         21
+
+/* options set using PTRACE_SETOPTIONS */
+#define PTRACE_O_TRACESYSGOOD     0x00000001
+
 /*
  * This struct defines the way the registers are stored on the
  * kernel stack during a system call or other kernel entry.
@@ -92,11 +97,11 @@ extern void show_regs(struct pt_regs *);
 
 #define BAMR_ASID		(1 << 2)
 #define BAMR_NONE		0
-#define BAMR_10		0x1
-#define BAMR_12		0x2
+#define BAMR_10			0x1
+#define BAMR_12			0x2
 #define BAMR_ALL		0x3
-#define BAMR_16		0x8
-#define BAMR_20		0x9
+#define BAMR_16			0x8
+#define BAMR_20			0x9
 
 #define BBR_INST		(1 << 4)
 #define BBR_DATA		(2 << 4)

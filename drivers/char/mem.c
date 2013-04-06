@@ -18,7 +18,6 @@
 #include <linux/mman.h>
 #include <linux/random.h>
 #include <linux/init.h>
-#include <linux/joystick.h>
 #include <linux/raw.h>
 #include <linux/capability.h>
 
@@ -28,15 +27,6 @@
 
 #ifdef CONFIG_I2C
 extern int i2c_init_all(void);
-#endif
-#ifdef CONFIG_SOUND
-void soundcore_init(void);
-#ifdef CONFIG_SOUND_OSS
-void soundcard_init(void);
-#endif
-#endif
-#ifdef CONFIG_SPARCAUDIO
-extern int sparcaudio_init(void);
 #endif
 #ifdef CONFIG_ISDN
 int isdn_init(void);
@@ -55,9 +45,6 @@ extern void mda_console_init(void);
 #endif
 #if defined(CONFIG_ADB)
 extern void adbdev_init(void);
-#endif
-#ifdef CONFIG_PHONE
-extern void telephony_init(void);
 #endif
      
 static ssize_t do_write_mem(struct file * file, void *p, unsigned long realp,
@@ -158,9 +145,12 @@ static inline pgprot_t pgprot_noncached(pgprot_t _prot)
 #elif defined(__powerpc__)
 	prot |= _PAGE_NO_CACHE | _PAGE_GUARDED;
 #elif defined(__mc68000__)
+#ifdef SUN3_PAGE_NOCACHE
 	if (MMU_IS_SUN3)
 		prot |= SUN3_PAGE_NOCACHE;
-	else if (MMU_IS_851 || MMU_IS_030)
+	else
+#endif
+	if (MMU_IS_851 || MMU_IS_030)
 		prot |= _PAGE_NOCACHE030;
 	/* Use no-cache mode, serialized */
 	else if (MMU_IS_040 || MMU_IS_060)
@@ -192,8 +182,11 @@ static inline int noncached_address(unsigned long addr)
 	 * caching for the high addresses through the KEN pin, but
 	 * we maintain the tradition of paranoia in this code.
 	 */
- 	return !(boot_cpu_data.x86_capability & X86_FEATURE_MTRR)
-		&& addr >= __pa(high_memory);
+ 	return !( test_bit(X86_FEATURE_MTRR, &boot_cpu_data.x86_capability) ||
+		  test_bit(X86_FEATURE_K6_MTRR, &boot_cpu_data.x86_capability) ||
+		  test_bit(X86_FEATURE_CYRIX_ARR, &boot_cpu_data.x86_capability) ||
+		  test_bit(X86_FEATURE_CENTAUR_MCR, &boot_cpu_data.x86_capability) )
+	  && addr >= __pa(high_memory);
 #else
 	return addr >= __pa(high_memory);
 #endif
@@ -210,6 +203,9 @@ static int mmap_mem(struct file * file, struct vm_area_struct * vma)
 	 */
 	if (noncached_address(offset) || (file->f_flags & O_SYNC))
 		vma->vm_page_prot = pgprot_noncached(vma->vm_page_prot);
+
+	/* Don't try to swap out physical pages.. */
+	vma->vm_flags |= VM_RESERVED;
 
 	/*
 	 * Don't dump addresses that are not real memory to a core file.
@@ -259,25 +255,27 @@ static ssize_t read_kmem(struct file *file, char *buf,
 		count -= read;
 	}
 
-	kbuf = (char *)__get_free_page(GFP_KERNEL);
-	if (!kbuf)
-		return -ENOMEM;
-	while (count > 0) {
-		int len = count;
+	if (count > 0) {
+		kbuf = (char *)__get_free_page(GFP_KERNEL);
+		if (!kbuf)
+			return -ENOMEM;
+		while (count > 0) {
+			int len = count;
 
-		if (len > PAGE_SIZE)
-			len = PAGE_SIZE;
-		len = vread(kbuf, (char *)p, len);
-		if (len && copy_to_user(buf, kbuf, len)) {
-			free_page((unsigned long)kbuf);
-			return -EFAULT;
+			if (len > PAGE_SIZE)
+				len = PAGE_SIZE;
+			len = vread(kbuf, (char *)p, len);
+			if (len && copy_to_user(buf, kbuf, len)) {
+				free_page((unsigned long)kbuf);
+				return -EFAULT;
+			}
+			count -= len;
+			buf += len;
+			virtr += len;
+			p += len;
 		}
-		count -= len;
-		buf += len;
-		virtr += len;
-		p += len;
+		free_page((unsigned long)kbuf);
 	}
-	free_page((unsigned long)kbuf);
  	*ppos = p;
  	return virtr + read;
 }
@@ -446,7 +444,7 @@ out:
 static int mmap_zero(struct file * file, struct vm_area_struct * vma)
 {
 	if (vma->vm_flags & VM_SHARED)
-		return map_zero_setup(vma);
+		return shmem_zero_setup(vma);
 	if (zeromap_page_range(vma->vm_start, vma->vm_end - vma->vm_start, vma->vm_page_prot))
 		return -EAGAIN;
 	return 0;
@@ -606,9 +604,9 @@ void __init memory_devfs_register (void)
     int i;
 
     for (i=0; i<(sizeof(list)/sizeof(*list)); i++)
-	devfs_register (NULL, list[i].name, 0, DEVFS_FL_NONE,
+	devfs_register (NULL, list[i].name, DEVFS_FL_NONE,
 			MEM_MAJOR, list[i].minor,
-			list[i].mode | S_IFCHR, 0, 0,
+			list[i].mode | S_IFCHR,
 			list[i].fops, NULL);
 }
 
@@ -643,22 +641,6 @@ int __init chr_dev_init(void)
 	lp_m68k_init();
 #endif
 	misc_init();
-#ifdef CONFIG_SOUND
-	soundcore_init();
-#ifdef CONFIG_SOUND_OSS
-	soundcard_init();
-#endif
-#endif
-#ifdef CONFIG_SPARCAUDIO
-	sparcaudio_init();
-#endif
-#ifdef CONFIG_JOYSTICK
-	/*
-	 *	Some joysticks only appear when the sound card they are
-	 *	connected to is configured. Keep the sound/joystick ordering.
-	 */
-	js_init();
-#endif	
 #if CONFIG_QIC02_TAPE
 	qic02_tape_init();
 #endif
@@ -674,8 +656,5 @@ int __init chr_dev_init(void)
 #ifdef CONFIG_VIDEO_DEV
 	videodev_init();
 #endif
-#ifdef CONFIG_PHONE
-	telephony_init();
-#endif	
 	return 0;
 }

@@ -234,7 +234,7 @@ unsigned long get_wchan(struct task_struct *p);
 #define alloc_task_struct() \
 	((struct task_struct *) __get_free_pages(GFP_KERNEL,1))
 #define free_task_struct(p)	free_pages((unsigned long)(p),1)
-#define get_task_struct(tsk)      atomic_inc(&mem_map[MAP_NR(tsk)].count)
+#define get_task_struct(tsk)      atomic_inc(&virt_to_page(tsk)->count)
 
 #define init_task	(init_task_union.task)
 #define init_stack	(init_task_union.stack)
@@ -249,21 +249,11 @@ unsigned long get_wchan(struct task_struct *p);
  * Note that __builtin_return_address(x>=1) is forbidden because GCC
  * aborts compilation on some CPUs.  It's simply not possible to unwind
  * some CPU's stackframes.
- */
-#if (__GNUC__ > 2 || (__GNUC__ == 2 && __GNUC_MINOR__ >= 8))
-/*
+ *
  * __builtin_return_address works only for non-leaf functions.  We avoid the
  * overhead of a function call by forcing the compiler to save the return
  * address register on the stack.
  */
 #define return_address() ({__asm__ __volatile__("":::"$31");__builtin_return_address(0);})
-#else
-/*
- * __builtin_return_address is not implemented at all.  Calling it
- * will return senseless values.  Return NULL which at least is an obviously
- * senseless value.
- */
-#define return_address() NULL
-#endif
 
 #endif /* _ASM_PROCESSOR_H */

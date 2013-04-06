@@ -68,7 +68,7 @@ vmlinux.nh: $(VMLINUX) $(OBJSTRIP)
 	$(OBJSTRIP) -v $(VMLINUX) vmlinux.nh
 
 vmlinux: $(TOPDIR)/vmlinux
-	strip -o vmlinux $(VMLINUX)
+	$(STRIP) -o vmlinux $(VMLINUX)
 
 tools/lxboot: $(OBJSTRIP) bootloader
 	$(OBJSTRIP) -p bootloader tools/lxboot
@@ -80,7 +80,7 @@ tools/bootph: bootpheader $(OBJSTRIP)
 	$(OBJSTRIP) -vb bootpheader tools/bootph
 
 $(OBJSTRIP): $(OBJSTRIP).c
-	$(HOSTCC) $(OBJSTRIP).c -o $(OBJSTRIP)
+	$(HOSTCC) $(HOSTCFLAGS) -I$(HPATH) $(OBJSTRIP).c -o $(OBJSTRIP)
 
 tools/mkbb: tools/mkbb.c
 	$(HOSTCC) tools/mkbb.c -o tools/mkbb

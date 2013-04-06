@@ -11,32 +11,46 @@
 #include <linux/brlock.h>
 #include <linux/spinlock.h>
 
+/* entry.S is sensitive to the offsets of these fields */
+typedef struct {
+	unsigned int __softirq_active;
+	unsigned int __softirq_mask;
 #ifndef CONFIG_SMP
-extern unsigned int local_irq_count;
-#define irq_enter(cpu, irq)	(local_irq_count++)
-#define irq_exit(cpu, irq)	(local_irq_count--)
+	unsigned int __local_irq_count;
 #else
-#define local_irq_count		(__brlock_array[smp_processor_id()][BR_GLOBALIRQ_LOCK])
+	unsigned int __unused_on_SMP;	/* DaveM says use brlock for SMP irq. KAO */
+#endif
+	unsigned int __local_bh_count;
+	unsigned int __syscall_count;
+} ____cacheline_aligned irq_cpustat_t;
+
+#include <linux/irq_cpustat.h>	/* Standard mappings for irq_cpustat_t above */
+/* Note that local_irq_count() is replaced by sparc64 specific version for SMP */
+
+#ifndef CONFIG_SMP
+#define irq_enter(cpu, irq)	((void)(irq), local_irq_count(cpu)++)
+#define irq_exit(cpu, irq)	((void)(irq), local_irq_count(cpu)--)
+#else
+#undef local_irq_count
+#define local_irq_count(cpu)	(__brlock_array[cpu][BR_GLOBALIRQ_LOCK])
 #define irq_enter(cpu, irq)	br_read_lock(BR_GLOBALIRQ_LOCK)
 #define irq_exit(cpu, irq)	br_read_unlock(BR_GLOBALIRQ_LOCK)
 #endif
 
 /*
  * Are we in an interrupt context? Either doing bottom half
- * or hardware interrupt processing?  On any cpu?
+ * or hardware interrupt processing?
  */
-#define in_interrupt() ((local_irq_count + local_bh_count) != 0)
+#define in_interrupt() ((local_irq_count(smp_processor_id()) + \
+		         local_bh_count(smp_processor_id())) != 0)
 
 /* This tests only the local processors hw IRQ context disposition.  */
-#define in_irq() (local_irq_count != 0)
+#define in_irq() (local_irq_count(smp_processor_id()) != 0)
 
 #ifndef CONFIG_SMP
 
-#define hardirq_trylock(cpu)	((void)(cpu), local_irq_count == 0)
+#define hardirq_trylock(cpu)	((void)(cpu), local_irq_count(smp_processor_id()) == 0)
 #define hardirq_endlock(cpu)	do { (void)(cpu); } while(0)
-
-#define hardirq_enter(cpu)	((void)(cpu), local_irq_count++)
-#define hardirq_exit(cpu)	((void)(cpu), local_irq_count--)
 
 #define synchronize_irq()	barrier()
 
@@ -44,13 +58,12 @@ extern unsigned int local_irq_count;
 
 static __inline__ int irqs_running(void)
 {
-	enum brlock_indices idx = BR_GLOBALIRQ_LOCK;
-	int i, count = 0;
+	int i;
 
 	for (i = 0; i < smp_num_cpus; i++)
-		count += (__brlock_array[cpu_logical_map(i)][idx] != 0);
-
-	return count;
+		if (local_irq_count(cpu_logical_map(i)))
+			return 1;
+	return 0;
 }
 
 extern unsigned char global_irq_holder;
@@ -68,7 +81,7 @@ static inline int hardirq_trylock(int cpu)
 {
 	spinlock_t *lock = &__br_write_locks[BR_GLOBALIRQ_LOCK].lock;
 
-	return (!irqs_running() && !spin_is_locked(lock));
+	return (!local_irq_count(cpu) && !spin_is_locked(lock));
 }
 
 #define hardirq_endlock(cpu)	do { (void)(cpu); } while (0)

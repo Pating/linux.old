@@ -27,14 +27,18 @@
 #include <linux/string.h>
 #include <linux/blk.h>
 
-#if defined(CONFIG_BLK_DEV_IDE) || defined(CONFIG_BLK_DEV_HD)
+#ifdef CONFIG_BLK_DEV_IDE
 #include <linux/ide.h>	/* IDE xlate */
-#endif /* (CONFIG_BLK_DEV_IDE) || (CONFIG_BLK_DEV_HD) */
+#endif /* CONFIG_BLK_DEV_IDE */
 
 #include <asm/system.h>
 
 #include "check.h"
 #include "msdos.h"
+
+#if CONFIG_BLK_DEV_MD && CONFIG_AUTODETECT_RAID
+extern void md_autodetect_dev(kdev_t dev);
+#endif
 
 static int current_minor;
 
@@ -132,6 +136,12 @@ static void extended_partition(struct gendisk *hd, kdev_t dev)
 			add_gd_partition(hd, current_minor,
 					 this_sector+START_SECT(p)*sector_size,
 					 NR_SECTS(p)*sector_size);
+#if CONFIG_BLK_DEV_MD && CONFIG_AUTODETECT_RAID
+			if (SYS_IND(p) == LINUX_RAID_PARTITION) {
+			    md_autodetect_dev(MKDEV(hd->major,current_minor));
+			}
+#endif
+
 			current_minor++;
 			loopct = 0;
 			if ((current_minor & mask) == 0)
@@ -350,19 +360,19 @@ int msdos_partition(struct gendisk *hd, kdev_t dev,
 	unsigned char *data;
 	int mask = (1 << hd->minor_shift) - 1;
 	int sector_size = get_hardsect_size(dev) / 512;
-#if defined(CONFIG_BLK_DEV_IDE) || defined(CONFIG_BLK_DEV_HD)
+#ifdef CONFIG_BLK_DEV_IDE
 	int tested_for_xlate = 0;
 
 read_mbr:
-#endif /* (CONFIG_BLK_DEV_IDE) || (CONFIG_BLK_DEV_HD) */
+#endif /* CONFIG_BLK_DEV_IDE */
 	if (!(bh = bread(dev,0,get_ptable_blocksize(dev)))) {
 		if (warn_no_part) printk(" unable to read partition table\n");
 		return -1;
 	}
 	data = bh->b_data;
-#if defined(CONFIG_BLK_DEV_IDE) || defined(CONFIG_BLK_DEV_HD)
+#ifdef CONFIG_BLK_DEV_IDE
 check_table:
-#endif /* (CONFIG_BLK_DEV_IDE) || (CONFIG_BLK_DEV_HD) */
+#endif /* CONFIG_BLK_DEV_IDE */
 	/* Use bforget(), because we may have changed the disk geometry */
 	if (*(unsigned short *)  (0x1fe + data) != cpu_to_le16(MSDOS_LABEL_MAGIC)) {
 		bforget(bh);
@@ -370,7 +380,7 @@ check_table:
 	}
 	p = (struct partition *) (0x1be + data);
 
-#if defined(CONFIG_BLK_DEV_IDE) || defined(CONFIG_BLK_DEV_HD)
+#ifdef CONFIG_BLK_DEV_IDE
 	if (!tested_for_xlate++) {	/* Do this only once per disk */
 		/*
 		 * Look for various forms of IDE disk geometry translation
@@ -426,7 +436,7 @@ check_table:
 			(void) ide_xlate_1024(dev, 2, heads, " [PTBL]");
 		}
 	}
-#endif /* (CONFIG_BLK_DEV_IDE) || (CONFIG_BLK_DEV_HD) */
+#endif /* CONFIG_BLK_DEV_IDE */
 
 	/* Look for partitions in two passes:
 	   First find the primary partitions, and the DOS-type extended partitions.
@@ -438,6 +448,11 @@ check_table:
 			continue;
 		add_gd_partition(hd, minor, first_sector+START_SECT(p)*sector_size,
 				 NR_SECTS(p)*sector_size);
+#if CONFIG_BLK_DEV_MD && CONFIG_AUTODETECT_RAID
+		if (SYS_IND(p) == LINUX_RAID_PARTITION) {
+			md_autodetect_dev(MKDEV(hd->major,minor));
+		}
+#endif
 		if (is_extended_partition(p)) {
 			printk(" <");
 			/*

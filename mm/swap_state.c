@@ -17,15 +17,21 @@
 
 #include <asm/pgtable.h>
 
+static int swap_writepage(struct page *page)
+{
+	rw_swap_page(WRITE, page, 0);
+	return 0;
+}
+
 static struct address_space_operations swap_aops = {
-	sync_page: block_sync_page
+	writepage: swap_writepage,
+	sync_page: block_sync_page,
 };
 
 struct address_space swapper_space = {
-	{				/* pages	*/
-		&swapper_space.pages,	/*        .next */
-		&swapper_space.pages	/*	  .prev */
-	},
+	LIST_HEAD_INIT(swapper_space.clean_pages),
+	LIST_HEAD_INIT(swapper_space.dirty_pages),
+	LIST_HEAD_INIT(swapper_space.locked_pages),
 	0,				/* nrpages	*/
 	&swap_aops,
 };
@@ -58,8 +64,8 @@ void add_to_swap_cache(struct page *page, swp_entry_t entry)
 		BUG();
 	if (page->mapping)
 		BUG();
-	flags = page->flags & ~((1 << PG_error) | (1 << PG_dirty));
-	page->flags = flags | (1 << PG_referenced) | (1 << PG_uptodate);
+	flags = page->flags & ~((1 << PG_error) | (1 << PG_arch_1));
+	page->flags = flags | (1 << PG_uptodate);
 	add_to_page_cache_locked(page, &swapper_space, entry.val);
 }
 
@@ -73,7 +79,8 @@ static inline void remove_from_swap_cache(struct page *page)
 		PAGE_BUG(page);
 
 	PageClearSwapCache(page);
-	remove_inode_page(page);
+	ClearPageDirty(page);
+	__remove_inode_page(page);
 }
 
 /*
@@ -105,7 +112,10 @@ void delete_from_swap_cache_nolock(struct page *page)
 	if (block_flushpage(page, 0))
 		lru_cache_del(page);
 
+	spin_lock(&pagecache_lock);
+	ClearPageDirty(page);
 	__delete_from_swap_cache(page);
+	spin_unlock(&pagecache_lock);
 	page_cache_release(page);
 }
 
@@ -164,7 +174,7 @@ repeat:
 			return 0;
 		/*
 		 * Though the "found" page was in the swap cache an instant
-		 * earlier, it might have been removed by shrink_mmap etc.
+		 * earlier, it might have been removed by refill_inactive etc.
 		 * Re search ... Since find_lock_page grabs a reference on
 		 * the page, it can not be reused for anything else, namely
 		 * it can not be associated with another swaphandle, so it
@@ -220,7 +230,7 @@ struct page * read_swap_cache_async(swp_entry_t entry, int wait)
 	new_page_addr = __get_free_page(GFP_USER);
 	if (!new_page_addr)
 		goto out_free_swap;	/* Out of memory */
-	new_page = mem_map + MAP_NR(new_page_addr);
+	new_page = virt_to_page(new_page_addr);
 
 	/*
 	 * Check the swap cache again, in case we stalled above.

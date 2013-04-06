@@ -1,11 +1,44 @@
 /*
- * $Id: capifs.c,v 1.6 2000/04/03 13:29:25 calle Exp $
+ * $Id: capifs.c,v 1.14.6.1 2000/11/28 12:02:45 kai Exp $
  * 
  * (c) Copyright 2000 by Carsten Paeth (calle@calle.de)
  *
  * Heavily based on devpts filesystem from H. Peter Anvin
  * 
  * $Log: capifs.c,v $
+ * Revision 1.14.6.1  2000/11/28 12:02:45  kai
+ * MODULE_DEVICE_TABLE for 2.4
+ *
+ * Revision 1.14.2.1  2000/11/26 17:47:53  kai
+ * added PCI_DEV_TABLE for 2.4
+ *
+ * Revision 1.14  2000/11/23 20:45:14  kai
+ * fixed module_init/exit stuff
+ * Note: compiled-in kernel doesn't work pre 2.2.18 anymore.
+ *
+ * Revision 1.13  2000/11/18 16:17:25  kai
+ * change from 2.4 tree
+ *
+ * Revision 1.12  2000/11/01 14:05:02  calle
+ * - use module_init/module_exit from linux/init.h.
+ * - all static struct variables are initialized with "membername:" now.
+ * - avm_cs.c, let it work with newer pcmcia-cs.
+ *
+ * Revision 1.11  2000/10/24 15:08:47  calle
+ * Too much includes.
+ *
+ * Revision 1.10  2000/10/12 10:12:35  calle
+ * Bugfix: second iput(inode) on umount, destroies a foreign inode.
+ *
+ * Revision 1.9  2000/08/20 07:30:13  keil
+ * changes for 2.4
+ *
+ * Revision 1.8  2000/07/20 10:23:13  calle
+ * Include isdn_compat.h for people that don't use -p option of std2kern.
+ *
+ * Revision 1.7  2000/06/18 16:09:54  keil
+ * more changes for 2.4
+ *
  * Revision 1.6  2000/04/03 13:29:25  calle
  * make Tim Waugh happy (module unload races in 2.3.99-pre3).
  * no real problem there, but now it is much cleaner ...
@@ -60,7 +93,7 @@
 
 MODULE_AUTHOR("Carsten Paeth <calle@calle.de>");
 
-static char *revision = "$Revision: 1.6 $";
+static char *revision = "$Revision: 1.14.6.1 $";
 
 struct capifs_ncci {
 	struct inode *inode;
@@ -107,8 +140,6 @@ struct inode_operations capifs_root_inode_operations = {
 	lookup: capifs_root_lookup,
 };
 
-struct inode_operations capifs_inode_operations;
-
 static struct dentry_operations capifs_dentry_operations = {
 	d_revalidate: capifs_revalidate,
 };
@@ -130,12 +161,12 @@ static int capifs_root_readdir(struct file *filp, void *dirent, filldir_t filldi
 	switch(nr)
 	{
 	case 0:
-		if (filldir(dirent, ".", 1, nr, inode->i_ino) < 0)
+		if (filldir(dirent, ".", 1, nr, inode->i_ino, DT_DIR) < 0)
 			return 0;
 		filp->f_pos = ++nr;
 		/* fall through */
 	case 1:
-		if (filldir(dirent, "..", 2, nr, inode->i_ino) < 0)
+		if (filldir(dirent, "..", 2, nr, inode->i_ino, DT_DIR) < 0)
 			return 0;
 		filp->f_pos = ++nr;
 		/* fall through */
@@ -147,7 +178,7 @@ static int capifs_root_readdir(struct file *filp, void *dirent, filldir_t filldi
 				char *p = numbuf;
 				if (np->type) *p++ = np->type;
 				sprintf(p, "%u", np->num);
-				if ( filldir(dirent, numbuf, strlen(numbuf), nr, nr) < 0 )
+				if ( filldir(dirent, numbuf, strlen(numbuf), nr, nr, DT_UNKNOWN) < 0 )
 					return 0;
 			}
 			filp->f_pos = ++nr;
@@ -209,7 +240,7 @@ static struct dentry *capifs_root_lookup(struct inode * dir, struct dentry * den
 
 	dentry->d_inode = np->inode;
 	if ( dentry->d_inode )
-		dentry->d_inode->i_count++;
+		atomic_inc(&dentry->d_inode->i_count);
 	
 	d_add(dentry, dentry->d_inode);
 
@@ -228,9 +259,9 @@ static void capifs_put_super(struct super_block *sb)
 
 	for ( i = 0 ; i < sbi->max_ncci ; i++ ) {
 		if ( (inode = sbi->nccis[i].inode) ) {
-			if ( inode->i_count != 1 )
+			if (atomic_read(&inode->i_count) != 1 )
 				printk("capifs_put_super: badness: entry %d count %d\n",
-				       i, inode->i_count);
+				       i, (unsigned)atomic_read(&inode->i_count));
 			inode->i_nlink--;
 			iput(inode);
 		}
@@ -456,10 +487,8 @@ static void capifs_read_inode(struct inode *inode)
 	ino_t ino = inode->i_ino;
 	struct capifs_sb_info *sbi = SBI(inode->i_sb);
 
-	inode->i_op = NULL;
 	inode->i_mode = 0;
 	inode->i_nlink = 0;
-	inode->i_size = 0;
 	inode->i_mtime = inode->i_atime = inode->i_ctime = CURRENT_TIME;
 	inode->i_blocks = 0;
 	inode->i_blksize = 1024;
@@ -472,9 +501,6 @@ static void capifs_read_inode(struct inode *inode)
 		inode->i_nlink = 2;
 		return;
 	} 
-
-	/* need dummy inode operations .... */
-	inode->i_op = &capifs_inode_operations;
 
 	ino -= 2;
 	if ( ino >= sbi->max_ncci )
@@ -543,6 +569,7 @@ void capifs_free_ncci(char type, unsigned int num)
 				continue;
 			if (np->inode) {
 				inode = np->inode;
+				np->inode = 0;
 				np->used = 0;
 				inode->i_nlink--;
 				iput(inode);
@@ -552,7 +579,7 @@ void capifs_free_ncci(char type, unsigned int num)
 	}
 }
 
-int __init capifs_init(void)
+static int __init capifs_init(void)
 {
 	char rev[10];
 	char *p;
@@ -581,7 +608,7 @@ int __init capifs_init(void)
 	return 0;
 }
 
-void capifs_exit(void)
+static void __exit capifs_exit(void)
 {
 	unregister_filesystem(&capifs_fs_type);
 }
@@ -589,16 +616,5 @@ void capifs_exit(void)
 EXPORT_SYMBOL(capifs_new_ncci);
 EXPORT_SYMBOL(capifs_free_ncci);
 
-#ifdef MODULE
-
-int init_module(void)
-{
-	return capifs_init();
-}
-
-void cleanup_module(void)
-{
-	capifs_exit();
-}
-
-#endif
+module_init(capifs_init);
+module_exit(capifs_exit);

@@ -1,11 +1,37 @@
 /*
- * $Id: kcapi.c,v 1.15 2000/04/06 15:01:25 calle Exp $
+ * $Id: kcapi.c,v 1.21.6.1 2000/12/10 23:39:19 kai Exp $
  * 
  * Kernel CAPI 2.0 Module
  * 
  * (c) Copyright 1999 by Carsten Paeth (calle@calle.in-berlin.de)
  * 
  * $Log: kcapi.c,v $
+ * Revision 1.21.6.1  2000/12/10 23:39:19  kai
+ * in 2.4 we don't have tq_scheduler anymore.
+ * also add one supported card to hfc_pci.c
+ * (from main branch)
+ *
+ * Revision 1.21  2000/11/23 20:45:14  kai
+ * fixed module_init/exit stuff
+ * Note: compiled-in kernel doesn't work pre 2.2.18 anymore.
+ *
+ * Revision 1.20  2000/11/19 17:01:53  kai
+ * compatibility cleanup - part 2
+ *
+ * Revision 1.19  2000/11/01 14:05:02  calle
+ * - use module_init/module_exit from linux/init.h.
+ * - all static struct variables are initialized with "membername:" now.
+ * - avm_cs.c, let it work with newer pcmcia-cs.
+ *
+ * Revision 1.18  2000/07/20 10:22:27  calle
+ * - Made procfs function cleaner and removed variable "begin".
+ *
+ * Revision 1.17  2000/04/21 13:00:56  calle
+ * Bugfix: driver_proc_info was also wrong.
+ *
+ * Revision 1.16  2000/04/21 12:38:42  calle
+ * Bugfix: error in proc_ functions, begin-off => off-begin
+ *
  * Revision 1.15  2000/04/06 15:01:25  calle
  * Bugfix: crash in capidrv.c when reseting a capi controller.
  * - changed code order on remove of controller.
@@ -101,6 +127,7 @@
 #include <linux/capi.h>
 #include <linux/kernelcapi.h>
 #include <linux/locks.h>
+#include <linux/init.h>
 #include <asm/uaccess.h>
 #include "capicmd.h"
 #include "capiutil.h"
@@ -109,7 +136,7 @@
 #include <linux/b1lli.h>
 #endif
 
-static char *revision = "$Revision: 1.15 $";
+static char *revision = "$Revision: 1.21.6.1 $";
 
 /* ------------------------------------------------------------- */
 
@@ -257,7 +284,6 @@ static int proc_applications_read_proc(char *page, char **start, off_t off,
 	struct capi_appl *ap;
 	int i;
 	int len = 0;
-	off_t begin = 0;
 
 	for (i=0; i < CAPI_MAXAPPL; i++) {
 		ap = &applications[i];
@@ -269,20 +295,21 @@ static int proc_applications_read_proc(char *page, char **start, off_t off,
 			ap->rparam.datablklen,
 			ap->nncci,
                         skb_queue_len(&ap->recv_queue));
-		if (len+begin > off+count)
-			goto endloop;
-		if (len+begin < off) {
-			begin += len;
+		if (len <= off) {
+			off -= len;
 			len = 0;
+		} else {
+			if (len-off > count)
+				goto endloop;
 		}
 	}
 endloop:
-	if (i >= CAPI_MAXAPPL)
+	*start = page+off;
+	if (len < count)
 		*eof = 1;
-	if (off >= len+begin)
-		return 0;
-	*start = page + (off-begin);
-	return ((count < begin+len-off) ? count : begin+len-off);
+	if (len>count) len = count;
+	if (len<0) len = 0;
+	return len;
 }
 
 /*
@@ -296,7 +323,6 @@ static int proc_ncci_read_proc(char *page, char **start, off_t off,
 	struct capi_ncci *np;
 	int i;
 	int len = 0;
-	off_t begin = 0;
 
 	for (i=0; i < CAPI_MAXAPPL; i++) {
 		ap = &applications[i];
@@ -307,21 +333,22 @@ static int proc_ncci_read_proc(char *page, char **start, off_t off,
 				np->ncci,
 				np->winsize,
 				np->nmsg);
-			if (len+begin > off+count)
-				goto endloop;
-			if (len+begin < off) {
-				begin += len;
+			if (len <= off) {
+				off -= len;
 				len = 0;
+			} else {
+				if (len-off > count)
+					goto endloop;
 			}
 		}
 	}
 endloop:
-	if (i >= CAPI_MAXAPPL)
+	*start = page+off;
+	if (len < count)
 		*eof = 1;
-	if (off >= len+begin)
-		return 0;
-	*start = page + (off-begin);
-	return ((count < begin+len-off) ? count : begin+len-off);
+	if (len>count) len = count;
+	if (len<0) len = 0;
+	return len;
 }
 
 /*
@@ -333,7 +360,6 @@ static int proc_driver_read_proc(char *page, char **start, off_t off,
 {
 	struct capi_driver *driver;
 	int len = 0;
-	off_t begin = 0;
 
 	spin_lock(&drivers_lock);
 	for (driver = drivers; driver; driver = driver->next) {
@@ -341,21 +367,22 @@ static int proc_driver_read_proc(char *page, char **start, off_t off,
 					driver->name,
 					driver->ncontroller,
 					driver->revision);
-		if (len+begin > off+count)
-			goto endloop;
-		if (len+begin < off) {
-			begin += len;
+		if (len <= off) {
+			off -= len;
 			len = 0;
+		} else {
+			if (len-off > count)
+				goto endloop;
 		}
 	}
 endloop:
 	spin_unlock(&drivers_lock);
-	if (!driver)
+	*start = page+off;
+	if (len < count)
 		*eof = 1;
-	if (off >= len+begin)
-		return 0;
-	*start = page + (begin-off);
-	return ((count < begin+len-off) ? count : begin+len-off);
+	if (len>count) len = count;
+	if (len<0) len = 0;
+	return len;
 }
 
 /*
@@ -367,26 +394,26 @@ static int proc_users_read_proc(char *page, char **start, off_t off,
 {
         struct capi_interface_user *cp;
 	int len = 0;
-	off_t begin = 0;
 
 	spin_lock(&capi_users_lock);
         for (cp = capi_users; cp ; cp = cp->next) {
 		len += sprintf(page+len, "%s\n", cp->name);
-		if (len+begin > off+count)
-			goto endloop;
-		if (len+begin < off) {
-			begin += len;
+		if (len <= off) {
+			off -= len;
 			len = 0;
+		} else {
+			if (len-off > count)
+				goto endloop;
 		}
 	}
 endloop:
 	spin_unlock(&capi_users_lock);
-	if (cp == 0)
+	*start = page+off;
+	if (len < count)
 		*eof = 1;
-	if (off >= len+begin)
-		return 0;
-	*start = page + (begin-off);
-	return ((count < begin+len-off) ? count : begin+len-off);
+	if (len>count) len = count;
+	if (len<0) len = 0;
+	return len;
 }
 
 /*
@@ -399,7 +426,6 @@ static int proc_controller_read_proc(char *page, char **start, off_t off,
 	struct capi_ctr *cp;
 	int i;
 	int len = 0;
-	off_t begin = 0;
 
 	for (i=0; i < CAPI_MAXCONTR; i++) {
 		cp = &cards[i];
@@ -410,20 +436,21 @@ static int proc_controller_read_proc(char *page, char **start, off_t off,
 			cp->name,
 			cp->driver->procinfo ?  cp->driver->procinfo(cp) : ""
 			);
-		if (len+begin > off+count)
-			goto endloop;
-		if (len+begin < off) {
-			begin += len;
+		if (len <= off) {
+			off -= len;
 			len = 0;
+		} else {
+			if (len-off > count)
+				goto endloop;
 		}
 	}
 endloop:
-	if (i >= CAPI_MAXCONTR)
+	*start = page+off;
+	if (len < count)
 		*eof = 1;
-	if (off >= len+begin)
-		return 0;
-	*start = page + (begin-off);
-	return ((count < begin+len-off) ? count : begin+len-off);
+	if (len>count) len = count;
+	if (len<0) len = 0;
+	return len;
 }
 
 /*
@@ -436,7 +463,6 @@ static int proc_applstats_read_proc(char *page, char **start, off_t off,
 	struct capi_appl *ap;
 	int i;
 	int len = 0;
-	off_t begin = 0;
 
 	for (i=0; i < CAPI_MAXAPPL; i++) {
 		ap = &applications[i];
@@ -447,20 +473,21 @@ static int proc_applstats_read_proc(char *page, char **start, off_t off,
 			ap->nrecvdatapkt,
 			ap->nsentctlpkt,
 			ap->nsentdatapkt);
-		if (len+begin > off+count)
-			goto endloop;
-		if (len+begin < off) {
-			begin += len;
+		if (len <= off) {
+			off -= len;
 			len = 0;
+		} else {
+			if (len-off > count)
+				goto endloop;
 		}
 	}
 endloop:
-	if (i >= CAPI_MAXAPPL)
+	*start = page+off;
+	if (len < count)
 		*eof = 1;
-	if (off >= len+begin)
-		return 0;
-	*start = page + (begin-off);
-	return ((count < begin+len-off) ? count : begin+len-off);
+	if (len>count) len = count;
+	if (len<0) len = 0;
+	return len;
 }
 
 /*
@@ -473,7 +500,6 @@ static int proc_contrstats_read_proc(char *page, char **start, off_t off,
 	struct capi_ctr *cp;
 	int i;
 	int len = 0;
-	off_t begin = 0;
 
 	for (i=0; i < CAPI_MAXCONTR; i++) {
 		cp = &cards[i];
@@ -484,20 +510,21 @@ static int proc_contrstats_read_proc(char *page, char **start, off_t off,
 			cp->nrecvdatapkt,
 			cp->nsentctlpkt,
 			cp->nsentdatapkt);
-		if (len+begin > off+count)
-			goto endloop;
-		if (len+begin < off) {
-			begin += len;
+		if (len <= off) {
+			off -= len;
 			len = 0;
+		} else {
+			if (len-off > count)
+				goto endloop;
 		}
 	}
 endloop:
-	if (i >= CAPI_MAXCONTR)
+	*start = page+off;
+	if (len < count)
 		*eof = 1;
-	if (off >= len+begin)
-		return 0;
-	*start = page + (begin-off);
-	return ((count < begin+len-off) ? count : begin+len-off);
+	if (len>count) len = count;
+	if (len<0) len = 0;
+	return len;
 }
 
 static struct procfsentries {
@@ -608,7 +635,9 @@ static int notify_push(unsigned int cmd, __u32 controller,
 	 * of devices. Devices can only removed in
 	 * user process, not in bh.
 	 */
-	queue_task(&tq_state_notify, &tq_scheduler);
+	MOD_INC_USE_COUNT;
+	if (schedule_task(&tq_state_notify) == 0)
+		MOD_DEC_USE_COUNT;
 	return 0;
 }
 
@@ -704,6 +733,7 @@ static void notify_handler(void *dummy)
 		kfree(np);
 		MOD_DEC_USE_COUNT;
 	}
+	MOD_DEC_USE_COUNT;
 }
 	
 /* -------- NCCI Handling ------------------------------------- */
@@ -1100,7 +1130,7 @@ static int driver_read_proc(char *page, char **start, off_t off,
 	if (len < off) 
            return 0;
 	*eof = 1;
-	*start = page - off;
+	*start = page + off;
 	return ((count < len-off) ? count : len-off);
 }
 
@@ -1715,36 +1745,11 @@ EXPORT_SYMBOL(detach_capi_interface);
 EXPORT_SYMBOL(attach_capi_driver);
 EXPORT_SYMBOL(detach_capi_driver);
 
-#ifndef MODULE
-#ifdef CONFIG_ISDN_DRV_AVMB1_B1ISA
-extern int b1isa_init(void);
-#endif
-#ifdef CONFIG_ISDN_DRV_AVMB1_B1PCI
-extern int b1pci_init(void);
-#endif
-#ifdef CONFIG_ISDN_DRV_AVMB1_T1ISA
-extern int t1isa_init(void);
-#endif
-#ifdef CONFIG_ISDN_DRV_AVMB1_B1PCMCIA
-extern int b1pcmcia_init(void);
-#endif
-#ifdef CONFIG_ISDN_DRV_AVMB1_T1PCI
-extern int t1pci_init(void);
-#endif
-#ifdef CONFIG_ISDN_DRV_AVMB1_C4
-extern int c4_init(void);
-#endif
-#endif
-
 /*
  * init / exit functions
  */
 
-#ifdef MODULE
-#define kcapi_init init_module
-#endif
-
-int kcapi_init(void)
+static int __init kcapi_init(void)
 {
 	char *p;
 	char rev[10];
@@ -1752,7 +1757,6 @@ int kcapi_init(void)
 	MOD_INC_USE_COUNT;
 
 	skb_queue_head_init(&recv_queue);
-	/* init_bh(CAPI_BH, do_capi_bh); */
 
 	tq_state_notify.routine = notify_handler;
 	tq_state_notify.data = 0;
@@ -1773,31 +1777,12 @@ int kcapi_init(void)
         printk(KERN_NOTICE "CAPI-driver Rev%s: loaded\n", rev);
 #else
 	printk(KERN_NOTICE "CAPI-driver Rev%s: started\n", rev);
-#ifdef CONFIG_ISDN_DRV_AVMB1_B1ISA
-	(void)b1isa_init();
-#endif
-#ifdef CONFIG_ISDN_DRV_AVMB1_B1PCI
-	(void)b1pci_init();
-#endif
-#ifdef CONFIG_ISDN_DRV_AVMB1_T1ISA
-	(void)t1isa_init();
-#endif
-#ifdef CONFIG_ISDN_DRV_AVMB1_B1PCMCIA
-	(void)b1pcmcia_init();
-#endif
-#ifdef CONFIG_ISDN_DRV_AVMB1_T1PCI
-	(void)t1pci_init();
-#endif
-#ifdef CONFIG_ISDN_DRV_AVMB1_C4
-	(void)c4_init();
-#endif
 #endif
 	MOD_DEC_USE_COUNT;
 	return 0;
 }
 
-#ifdef MODULE
-void cleanup_module(void)
+static void __exit kcapi_exit(void)
 {
 	char rev[10];
 	char *p;
@@ -1813,4 +1798,6 @@ void cleanup_module(void)
         proc_capi_exit();
 	printk(KERN_NOTICE "CAPI-driver Rev%s: unloaded\n", rev);
 }
-#endif
+
+module_init(kcapi_init);
+module_exit(kcapi_exit);

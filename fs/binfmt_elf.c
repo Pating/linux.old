@@ -33,6 +33,7 @@
 #include <linux/smp_lock.h>
 
 #include <asm/uaccess.h>
+#include <asm/param.h>
 #include <asm/pgalloc.h>
 
 #define DLINFO_ITEMS 13
@@ -41,6 +42,7 @@
 
 static int load_elf_binary(struct linux_binprm * bprm, struct pt_regs * regs);
 static int load_elf_library(struct file*);
+static unsigned long elf_map (struct file *, unsigned long, struct elf_phdr *, int, int);
 extern int dump_fpu (struct pt_regs *, elf_fpregset_t *);
 extern void dump_thread(struct pt_regs *, struct user *);
 
@@ -59,9 +61,15 @@ static int elf_core_dump(long signr, struct pt_regs * regs, struct file * file);
 #define elf_core_dump	NULL
 #endif
 
-#define ELF_PAGESTART(_v) ((_v) & ~(unsigned long)(ELF_EXEC_PAGESIZE-1))
-#define ELF_PAGEOFFSET(_v) ((_v) & (ELF_EXEC_PAGESIZE-1))
-#define ELF_PAGEALIGN(_v) (((_v) + ELF_EXEC_PAGESIZE - 1) & ~(ELF_EXEC_PAGESIZE - 1))
+#if ELF_EXEC_PAGESIZE > PAGE_SIZE
+# define ELF_MIN_ALIGN	ELF_EXEC_PAGESIZE
+#else
+# define ELF_MIN_ALIGN	PAGE_SIZE
+#endif
+
+#define ELF_PAGESTART(_v) ((_v) & ~(unsigned long)(ELF_MIN_ALIGN-1))
+#define ELF_PAGEOFFSET(_v) ((_v) & (ELF_MIN_ALIGN-1))
+#define ELF_PAGEALIGN(_v) (((_v) + ELF_MIN_ALIGN - 1) & ~(ELF_MIN_ALIGN - 1))
 
 static struct linux_binfmt elf_format = {
 	NULL, THIS_MODULE, load_elf_binary, load_elf_library, elf_core_dump, ELF_EXEC_PAGESIZE
@@ -89,7 +97,7 @@ static void padzero(unsigned long elf_bss)
 
 	nbyte = ELF_PAGEOFFSET(elf_bss);
 	if (nbyte) {
-		nbyte = ELF_EXEC_PAGESIZE - nbyte;
+		nbyte = ELF_MIN_ALIGN - nbyte;
 		clear_user((void *) elf_bss, nbyte);
 	}
 }
@@ -152,23 +160,24 @@ create_elf_tables(char *p, int argc, int envc,
 		sp -= 2;
 		NEW_AUX_ENT(0, AT_PLATFORM, (elf_addr_t)(unsigned long) u_platform);
 	}
-	sp -= 2;
+	sp -= 3*2;
 	NEW_AUX_ENT(0, AT_HWCAP, hwcap);
+	NEW_AUX_ENT(1, AT_PAGESZ, ELF_EXEC_PAGESIZE);
+	NEW_AUX_ENT(2, AT_CLKTCK, CLOCKS_PER_SEC);
 
 	if (exec) {
-		sp -= 11*2;
+		sp -= 10*2;
 
 		NEW_AUX_ENT(0, AT_PHDR, load_addr + exec->e_phoff);
 		NEW_AUX_ENT(1, AT_PHENT, sizeof (struct elf_phdr));
 		NEW_AUX_ENT(2, AT_PHNUM, exec->e_phnum);
-		NEW_AUX_ENT(3, AT_PAGESZ, ELF_EXEC_PAGESIZE);
-		NEW_AUX_ENT(4, AT_BASE, interp_load_addr);
-		NEW_AUX_ENT(5, AT_FLAGS, 0);
-		NEW_AUX_ENT(6, AT_ENTRY, load_bias + exec->e_entry);
-		NEW_AUX_ENT(7, AT_UID, (elf_addr_t) current->uid);
-		NEW_AUX_ENT(8, AT_EUID, (elf_addr_t) current->euid);
-		NEW_AUX_ENT(9, AT_GID, (elf_addr_t) current->gid);
-		NEW_AUX_ENT(10, AT_EGID, (elf_addr_t) current->egid);
+		NEW_AUX_ENT(3, AT_BASE, interp_load_addr);
+		NEW_AUX_ENT(4, AT_FLAGS, 0);
+		NEW_AUX_ENT(5, AT_ENTRY, load_bias + exec->e_entry);
+		NEW_AUX_ENT(6, AT_UID, (elf_addr_t) current->uid);
+		NEW_AUX_ENT(7, AT_EUID, (elf_addr_t) current->euid);
+		NEW_AUX_ENT(8, AT_GID, (elf_addr_t) current->gid);
+		NEW_AUX_ENT(9, AT_EGID, (elf_addr_t) current->egid);
 	}
 #undef NEW_AUX_ENT
 
@@ -198,6 +207,22 @@ create_elf_tables(char *p, int argc, int envc,
 	return sp;
 }
 
+#ifndef elf_map
+
+static inline unsigned long
+elf_map (struct file *filep, unsigned long addr, struct elf_phdr *eppnt, int prot, int type)
+{
+	unsigned long map_addr;
+
+	down(&current->mm->mmap_sem);
+	map_addr = do_mmap(filep, ELF_PAGESTART(addr),
+			   eppnt->p_filesz + ELF_PAGEOFFSET(eppnt->p_vaddr), prot, type,
+			   eppnt->p_offset - ELF_PAGEOFFSET(eppnt->p_vaddr));
+	up(&current->mm->mmap_sem);
+	return(map_addr);
+}
+
+#endif /* !elf_map */
 
 /* This is much more generalized than the library routine read function,
    so we keep this separate.  Technically the library read function
@@ -220,9 +245,9 @@ static unsigned long load_elf_interp(struct elfhdr * interp_elf_ex,
 	if (interp_elf_ex->e_type != ET_EXEC &&
 	    interp_elf_ex->e_type != ET_DYN)
 		goto out;
-	if (!elf_check_arch(interp_elf_ex->e_machine))
+	if (!elf_check_arch(interp_elf_ex))
 		goto out;
-	if (!interpreter->f_op->mmap)
+	if (!interpreter->f_op || !interpreter->f_op->mmap)
 		goto out;
 
 	/*
@@ -235,7 +260,7 @@ static unsigned long load_elf_interp(struct elfhdr * interp_elf_ex,
 	/* Now read in all of the header information */
 
 	size = sizeof(struct elf_phdr) * interp_elf_ex->e_phnum;
-	if (size > ELF_EXEC_PAGESIZE)
+	if (size > ELF_MIN_ALIGN)
 		goto out;
 	elf_phdata = (struct elf_phdr *) kmalloc(size, GFP_KERNEL);
 	if (!elf_phdata)
@@ -261,16 +286,7 @@ static unsigned long load_elf_interp(struct elfhdr * interp_elf_ex,
 	    if (interp_elf_ex->e_type == ET_EXEC || load_addr_set)
 	    	elf_type |= MAP_FIXED;
 
-	    down(&current->mm->mmap_sem);
-	    map_addr = do_mmap(interpreter,
-			    load_addr + ELF_PAGESTART(vaddr),
-			    eppnt->p_filesz + ELF_PAGEOFFSET(eppnt->p_vaddr),
-			    elf_prot,
-			    elf_type,
-			    eppnt->p_offset - ELF_PAGEOFFSET(eppnt->p_vaddr));
-	    up(&current->mm->mmap_sem);
-	    if (map_addr > -1024UL) /* Real error */
-		goto out_close;
+	    map_addr = elf_map(interpreter, load_addr + vaddr, eppnt, elf_prot, elf_type);
 
 	    if (!load_addr_set && interp_elf_ex->e_type == ET_DYN) {
 		load_addr = map_addr - ELF_PAGESTART(vaddr);
@@ -304,7 +320,7 @@ static unsigned long load_elf_interp(struct elfhdr * interp_elf_ex,
 	 * last bss page.
 	 */
 	padzero(elf_bss);
-	elf_bss = ELF_PAGESTART(elf_bss + ELF_EXEC_PAGESIZE - 1); /* What we have mapped so far */
+	elf_bss = ELF_PAGESTART(elf_bss + ELF_MIN_ALIGN - 1);	/* What we have mapped so far */
 
 	/* Map the last of the bss segment */
 	if (last_bss > elf_bss)
@@ -348,7 +364,7 @@ static unsigned long load_aout_interp(struct exec * interp_ex,
 
 	do_brk(0, text_data);
 	retval = -ENOEXEC;
-	if (!interpreter->f_op->read)
+	if (!interpreter->f_op || !interpreter->f_op->read)
 		goto out;
 	retval = interpreter->f_op->read(interpreter, addr, text_data, &offset);
 	if (retval < 0)
@@ -356,7 +372,7 @@ static unsigned long load_aout_interp(struct exec * interp_ex,
 	flush_icache_range((unsigned long)addr,
 	                   (unsigned long)addr + text_data);
 
-	do_brk(ELF_PAGESTART(text_data + ELF_EXEC_PAGESIZE - 1),
+	do_brk(ELF_PAGESTART(text_data + ELF_MIN_ALIGN - 1),
 		interp_ex->a_bss);
 	elf_entry = interp_ex->a_entry;
 
@@ -405,15 +421,8 @@ static int load_elf_binary(struct linux_binprm * bprm, struct pt_regs * regs)
 
 	if (elf_ex.e_type != ET_EXEC && elf_ex.e_type != ET_DYN)
 		goto out;
-	if (!elf_check_arch(elf_ex.e_machine))
+	if (!elf_check_arch(&elf_ex))
 		goto out;
-#ifdef __mips__
-	/* IRIX binaries handled elsewhere. */
-	if (elf_ex.e_flags & EF_MIPS_ARCH) {
-		retval = -ENOEXEC;
-		goto out;
-	}
-#endif
 	if (!bprm->file->f_op||!bprm->file->f_op->mmap)
 		goto out;
 
@@ -450,7 +459,7 @@ static int load_elf_binary(struct linux_binprm * bprm, struct pt_regs * regs)
 		if (elf_ppnt->p_type == PT_INTERP) {
 			retval = -EINVAL;
 		  	if (elf_interpreter)
-				goto out_free_interp;
+				goto out_free_dentry;
 
 			/* This is the program interpreter used for
 			 * shared libraries - for now assume that this
@@ -505,7 +514,7 @@ static int load_elf_binary(struct linux_binprm * bprm, struct pt_regs * regs)
 			retval = PTR_ERR(interpreter);
 			if (IS_ERR(interpreter))
 				goto out_free_interp;
-			retval = kernel_read(interpreter, 0, bprm->buf, 128);
+			retval = kernel_read(interpreter, 0, bprm->buf, BINPRM_BUF_SIZE);
 			if (retval < 0)
 				goto out_free_dentry;
 
@@ -614,13 +623,7 @@ static int load_elf_binary(struct linux_binprm * bprm, struct pt_regs * regs)
 			elf_flags |= MAP_FIXED;
 		}
 
-		down(&current->mm->mmap_sem);
-		error = do_mmap(bprm->file, ELF_PAGESTART(load_bias + vaddr),
-		                (elf_ppnt->p_filesz +
-		                ELF_PAGEOFFSET(elf_ppnt->p_vaddr)),
-		                elf_prot, elf_flags, (elf_ppnt->p_offset -
-		                ELF_PAGEOFFSET(elf_ppnt->p_vaddr)));
-		up(&current->mm->mmap_sem);
+		error = elf_map(bprm->file, load_bias + vaddr, elf_ppnt, elf_prot, elf_flags);
 
 		if (!load_addr_set) {
 			load_addr_set = 1;
@@ -666,9 +669,8 @@ static int load_elf_binary(struct linux_binprm * bprm, struct pt_regs * regs)
 						    interpreter,
 						    &interp_load_addr);
 
-		lock_kernel();
+		allow_write_access(interpreter);
 		fput(interpreter);
-		unlock_kernel();
 		kfree(elf_interpreter);
 
 		if (elf_entry == ~0UL) {
@@ -747,7 +749,7 @@ static int load_elf_binary(struct linux_binprm * bprm, struct pt_regs * regs)
 #endif
 
 	start_thread(regs, elf_entry, bprm->p);
-	if (current->flags & PF_PTRACED)
+	if (current->ptrace & PT_PTRACED)
 		send_sig(SIGTRAP, current, 0);
 	retval = 0;
 out:
@@ -755,9 +757,8 @@ out:
 
 	/* error cleanup */
 out_free_dentry:
-	lock_kernel();
+	allow_write_access(interpreter);
 	fput(interpreter);
-	unlock_kernel();
 out_free_interp:
 	if (elf_interpreter)
 		kfree(elf_interpreter);
@@ -788,13 +789,13 @@ static int load_elf_library(struct file *file)
 
 	/* First of all, some simple consistency checks */
 	if (elf_ex.e_type != ET_EXEC || elf_ex.e_phnum > 2 ||
-	   !elf_check_arch(elf_ex.e_machine) || !file->f_op->mmap)
+	   !elf_check_arch(&elf_ex) || !file->f_op || !file->f_op->mmap)
 		goto out;
 
 	/* Now read in all of the header information */
 
 	j = sizeof(struct elf_phdr) * elf_ex.e_phnum;
-	if (j > ELF_EXEC_PAGESIZE)
+	if (j > ELF_MIN_ALIGN)
 		goto out;
 
 	error = -ENOMEM;
@@ -833,8 +834,7 @@ static int load_elf_library(struct file *file)
 		elf_bss = k;
 	padzero(elf_bss);
 
-	len = ELF_PAGESTART(elf_phdata->p_filesz + elf_phdata->p_vaddr + 
-				ELF_EXEC_PAGESIZE - 1);
+	len = ELF_PAGESTART(elf_phdata->p_filesz + elf_phdata->p_vaddr + ELF_MIN_ALIGN - 1);
 	bss = elf_phdata->p_memsz + elf_phdata->p_vaddr;
 	if (bss > len)
 		do_brk(len, bss - len);
@@ -1047,7 +1047,7 @@ static int elf_core_dump(long signr, struct pt_regs * regs, struct file * file)
 	notes[0].datasz = sizeof(prstatus);
 	notes[0].data = &prstatus;
 	prstatus.pr_info.si_signo = prstatus.pr_cursig = signr;
-	prstatus.pr_sigpend = current->signal.sig[0];
+	prstatus.pr_sigpend = current->pending.signal.sig[0];
 	prstatus.pr_sighold = current->blocked.sig[0];
 	psinfo.pr_pid = prstatus.pr_pid = current->pid;
 	psinfo.pr_ppid = prstatus.pr_ppid = current->p_pptr->pid;
@@ -1091,7 +1091,7 @@ static int elf_core_dump(long signr, struct pt_regs * regs, struct file * file)
 	psinfo.pr_state = i;
 	psinfo.pr_sname = (i < 0 || i > 5) ? '.' : "RSDZTD"[i];
 	psinfo.pr_zomb = psinfo.pr_sname == 'Z';
-	psinfo.pr_nice = current->priority-15;
+	psinfo.pr_nice = current->nice;
 	psinfo.pr_flag = current->flags;
 	psinfo.pr_uid = NEW_TO_OLD_UID(current->uid);
 	psinfo.pr_gid = NEW_TO_OLD_GID(current->gid);

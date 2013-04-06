@@ -5,6 +5,7 @@
 
 #include <linux/config.h>
 #include <linux/module.h>
+#include <linux/kmod.h>
 #include <linux/net.h>		/* struct socket, struct net_proto, struct
 				   proto_ops */
 #include <linux/atm.h>		/* ATM stuff */
@@ -72,6 +73,7 @@ EXPORT_SYMBOL(atm_tcp_ops);
 #define DPRINTK(format,args...)
 #endif
 
+spinlock_t atm_dev_lock = SPIN_LOCK_UNLOCKED;
 
 static struct sk_buff *alloc_tx(struct atm_vcc *vcc,unsigned int size)
 {
@@ -105,6 +107,7 @@ int atm_create(struct socket *sock,int protocol,int family)
 	vcc->callback = NULL;
 	memset(&vcc->local,0,sizeof(struct sockaddr_atmsvc));
 	memset(&vcc->remote,0,sizeof(struct sockaddr_atmsvc));
+	vcc->qos.txtp.max_sdu = 1 << 16; /* for meta VCs */
 	atomic_set(&vcc->tx_inuse,0);
 	atomic_set(&vcc->rx_inuse,0);
 	vcc->push = NULL;
@@ -116,6 +119,7 @@ int atm_create(struct socket *sock,int protocol,int family)
 	init_waitqueue_head(&vcc->sleep);
 	skb_queue_head_init(&vcc->recvq);
 	skb_queue_head_init(&vcc->listenq);
+	sk->sleep = &vcc->sleep;
 	sock->sk = sk;
 	return 0;
 }
@@ -137,13 +141,19 @@ void atm_release_vcc_sk(struct sock *sk,int free_sk)
 				vcc->dev->ops->free_rx_skb(vcc,skb);
 			else kfree_skb(skb);
 		}
+		spin_lock (&atm_dev_lock);	
+		fops_put (vcc->dev->ops);
 		if (atomic_read(&vcc->rx_inuse))
 			printk(KERN_WARNING "atm_release_vcc: strange ... "
 			    "rx_inuse == %d after closing\n",
 			    atomic_read(&vcc->rx_inuse));
 		bind_vcc(vcc,NULL);
-	}
+	} else
+		spin_lock (&atm_dev_lock);	
+
 	if (free_sk) free_atm_vcc_sk(sk);
+
+	spin_unlock (&atm_dev_lock);
 }
 
 
@@ -236,9 +246,11 @@ static int atm_do_connect_dev(struct atm_vcc *vcc,struct atm_dev *dev,int vpi,
 	    vcc->qos.txtp.min_pcr,vcc->qos.txtp.max_pcr,vcc->qos.txtp.max_sdu);
 	DPRINTK("  RX: %d, PCR %d..%d, SDU %d\n",vcc->qos.rxtp.traffic_class,
 	    vcc->qos.rxtp.min_pcr,vcc->qos.rxtp.max_pcr,vcc->qos.rxtp.max_sdu);
+	fops_get (dev->ops);
 	if (dev->ops->open) {
 		error = dev->ops->open(vcc,vpi,vci);
 		if (error) {
+			fops_put (dev->ops);
 			bind_vcc(vcc,NULL);
 			return error;
 		}
@@ -250,10 +262,18 @@ static int atm_do_connect_dev(struct atm_vcc *vcc,struct atm_dev *dev,int vpi,
 static int atm_do_connect(struct atm_vcc *vcc,int itf,int vpi,int vci)
 {
 	struct atm_dev *dev;
+	int return_val;
 
+	spin_lock (&atm_dev_lock);
 	dev = atm_find_dev(itf);
-	if (!dev) return -ENODEV;
-	return atm_do_connect_dev(vcc,dev,vpi,vci);
+	if (!dev)
+		return_val =  -ENODEV;
+	else
+		return_val = atm_do_connect_dev(vcc,dev,vpi,vci);
+
+	spin_unlock (&atm_dev_lock);
+
+	return return_val;
 }
 
 
@@ -283,8 +303,10 @@ int atm_connect_vcc(struct atm_vcc *vcc,int itf,short vpi,int vci)
 	else {
 		struct atm_dev *dev;
 
+		spin_lock (&atm_dev_lock);
 		for (dev = atm_devs; dev; dev = dev->next)
 			if (!atm_do_connect_dev(vcc,dev,vpi,vci)) break;
+		spin_unlock (&atm_dev_lock);
 		if (!dev) return -ENODEV;
 	}
 	if (vpi == ATM_VPI_UNSPEC || vci == ATM_VCI_UNSPEC)
@@ -409,6 +431,7 @@ int atm_sendmsg(struct socket *sock,struct msghdr *m,int total_len,
 		return vcc->reply;
 	if (!test_bit(ATM_VF_READY,&vcc->flags)) return -EPIPE;
 	if (!size) return 0;
+	if (size < 0 || size > vcc->qos.txtp.max_sdu) return -EMSGSIZE;
 	/* verify_area is done by net/socket.c */
 	eff = (size+3) & ~3; /* align to word boundary */
 	add_wait_queue(&vcc->sleep,&wait);
@@ -520,57 +543,86 @@ int atm_ioctl(struct socket *sock,unsigned int cmd,unsigned long arg)
 	struct atm_vcc *vcc;
 	int *tmp_buf;
 	void *buf;
-	int error,len,size,number;
+	int error,len,size,number, ret_val;
 
+	ret_val = 0;
+	spin_lock (&atm_dev_lock);
 	vcc = ATM_SD(sock);
 	switch (cmd) {
 		case SIOCOUTQ:
 			if (sock->state != SS_CONNECTED ||
-			    !test_bit(ATM_VF_READY,&vcc->flags))
-				return -EINVAL;
-			return put_user(vcc->sk->sndbuf-
+			    !test_bit(ATM_VF_READY,&vcc->flags)) {
+				ret_val =  -EINVAL;
+				goto done;
+			}
+			ret_val =  put_user(vcc->sk->sndbuf-
 			    atomic_read(&vcc->tx_inuse)-ATM_PDU_OVHD,
 			    (int *) arg) ? -EFAULT : 0;
+			goto done;
 		case SIOCINQ:
 			{
 				struct sk_buff *skb;
 
-				if (sock->state != SS_CONNECTED)
-					return -EINVAL;
+				if (sock->state != SS_CONNECTED) {
+					ret_val = -EINVAL;
+					goto done;
+				}
 				skb = skb_peek(&vcc->recvq);
-				return put_user(skb ? skb->len : 0,(int *) arg)
+				ret_val = put_user(skb ? skb->len : 0,(int *) arg)
 				    ? -EFAULT : 0;
+				goto done;
 			}
 		case ATM_GETNAMES:
 			if (get_user(buf,
-			    &((struct atm_iobuf *) arg)->buffer))
-				return -EFAULT;
+				     &((struct atm_iobuf *) arg)->buffer)) {
+				ret_val = -EFAULT;
+				goto done;
+			}
 			if (get_user(len,
-			    &((struct atm_iobuf *) arg)->length))
-				return -EFAULT;
+				     &((struct atm_iobuf *) arg)->length)) {
+				ret_val = -EFAULT;
+				goto done;
+			}
 			size = 0;
 			for (dev = atm_devs; dev; dev = dev->next)
 				size += sizeof(int);
-			if (size > len) return -E2BIG;
+			if (size > len) {
+				ret_val = -E2BIG;
+				goto done;
+			}
 			tmp_buf = kmalloc(size,GFP_KERNEL);
-			if (!tmp_buf) return -ENOMEM;
+			if (!tmp_buf) {
+				ret_val = -ENOMEM;
+				goto done;
+			}
 			for (dev = atm_devs; dev; dev = dev->next)
 				*tmp_buf++ = dev->number;
-			if (copy_to_user(buf,(char *) tmp_buf-size,size))
-				return -EFAULT;
-			return put_user(size,
+			if (copy_to_user(buf,(char *) tmp_buf-size,size)) {
+				ret_val = -EFAULT;
+				goto done;
+			}
+		        ret_val = put_user(size,
 			    &((struct atm_iobuf *) arg)->length) ? -EFAULT : 0;
+			goto done;
 		case SIOCGSTAMP: /* borrowed from IP */
-			if (!vcc->timestamp.tv_sec) return -ENOENT;
+			if (!vcc->timestamp.tv_sec) {
+				ret_val = -ENOENT;
+				goto done;
+			}
 			vcc->timestamp.tv_sec += vcc->timestamp.tv_usec/1000000;
 			vcc->timestamp.tv_usec %= 1000000;
-			return copy_to_user((void *) arg,&vcc->timestamp,
+			ret_val = copy_to_user((void *) arg,&vcc->timestamp,
 			    sizeof(struct timeval)) ? -EFAULT : 0;
+			goto done;
 		case ATM_SETSC:
 			printk(KERN_WARNING "ATM_SETSC is obsolete\n");
-			return 0;
+			ret_val = 0;
+			goto done;
 		case ATMSIGD_CTRL:
-			if (!capable(CAP_NET_ADMIN)) return -EPERM;
+			if (!capable(CAP_NET_ADMIN)) {
+				ret_val = -EPERM;
+				goto done;
+			}
 			/*
 			 * The user/kernel protocol for exchanging signalling
 			 * info uses kernel pointers as opaque references,
@@ -578,180 +630,315 @@ int atm_ioctl(struct socket *sock,unsigned int cmd,unsigned long arg)
 			 * on the kernel... so we should make sure that we
 			 * have the same privledges that /proc/kcore needs
 			 */
-			if (!capable(CAP_SYS_RAWIO)) return -EPERM;
+			if (!capable(CAP_SYS_RAWIO)) {
+				ret_val = -EPERM;
+				goto done;
+			}
 			error = sigd_attach(vcc);
 			if (!error) sock->state = SS_CONNECTED;
-			return error;
+			ret_val = error;
+			goto done;
 #ifdef CONFIG_ATM_CLIP
 		case SIOCMKCLIP:
-			if (!capable(CAP_NET_ADMIN)) return -EPERM;
-			return clip_create(arg);
+			if (!capable(CAP_NET_ADMIN))
+				ret_val = -EPERM;
+			else 
+				ret_val = clip_create(arg);
+			goto done;
 		case ATMARPD_CTRL:
-			if (!capable(CAP_NET_ADMIN)) return -EPERM;
+			if (!capable(CAP_NET_ADMIN)) {
+				ret_val = -EPERM;
+				goto done;
+			}
 			error = atm_init_atmarp(vcc);
 			if (!error) sock->state = SS_CONNECTED;
-			return error;
+			ret_val = error;
+			goto done;
 		case ATMARP_MKIP:
-			if (!capable(CAP_NET_ADMIN)) return -EPERM;
-			return clip_mkip(vcc,arg);
+			if (!capable(CAP_NET_ADMIN)) 
+				ret_val = -EPERM;
+			else 
+				ret_val = clip_mkip(vcc,arg);
+			goto done;
 		case ATMARP_SETENTRY:
-			if (!capable(CAP_NET_ADMIN)) return -EPERM;
-			return clip_setentry(vcc,arg);
+			if (!capable(CAP_NET_ADMIN)) 
+				ret_val = -EPERM;
+			else
+				ret_val = clip_setentry(vcc,arg);
+			goto done;
 		case ATMARP_ENCAP:
-			if (!capable(CAP_NET_ADMIN)) return -EPERM;
-			return clip_encap(vcc,arg);
+			if (!capable(CAP_NET_ADMIN)) 
+				ret_val = -EPERM;
+			else
+				ret_val = clip_encap(vcc,arg);
+			goto done;
 #endif
 #if defined(CONFIG_ATM_LANE) || defined(CONFIG_ATM_LANE_MODULE)
                 case ATMLEC_CTRL:
-                        if (!capable(CAP_NET_ADMIN)) return -EPERM;
+                        if (!capable(CAP_NET_ADMIN)) {
+				ret_val = -EPERM;
+				goto done;
+			}
                         if (atm_lane_ops.lecd_attach == NULL)
-                                atm_lane_init();
-                        if (atm_lane_ops.lecd_attach == NULL) /* try again */
-                                return -ENOSYS;
-                        error = atm_lane_ops.lecd_attach(vcc, (int)arg);
-                        if (error >= 0) sock->state = SS_CONNECTED;
-                        return error;
+				atm_lane_init();
+                        if (atm_lane_ops.lecd_attach == NULL) { /* try again */
+				ret_val = -ENOSYS;
+				goto done;
+			}
+			error = atm_lane_ops.lecd_attach(vcc, (int)arg);
+			if (error >= 0) sock->state = SS_CONNECTED;
+			ret_val =  error;
+			goto done;
                 case ATMLEC_MCAST:
-                        if (!capable(CAP_NET_ADMIN)) return -EPERM;
-                        return atm_lane_ops.mcast_attach(vcc, (int)arg);
+			if (!capable(CAP_NET_ADMIN))
+				ret_val = -EPERM;
+			else
+				ret_val = atm_lane_ops.mcast_attach(vcc, (int)arg);
+			goto done;
                 case ATMLEC_DATA:
-                        if (!capable(CAP_NET_ADMIN)) return -EPERM;
-                        return atm_lane_ops.vcc_attach(vcc, (void*)arg);
+			if (!capable(CAP_NET_ADMIN))
+				ret_val = -EPERM;
+			else
+				ret_val = atm_lane_ops.vcc_attach(vcc, (void*)arg);
+			goto done;
 #endif
 #if defined(CONFIG_ATM_MPOA) || defined(CONFIG_ATM_MPOA_MODULE)
 		case ATMMPC_CTRL:
-			if (!capable(CAP_NET_ADMIN)) return -EPERM;
-                        if (atm_mpoa_ops.mpoad_attach == NULL)
+			if (!capable(CAP_NET_ADMIN)) {
+				ret_val = -EPERM;
+				goto done;
+			}
+			if (atm_mpoa_ops.mpoad_attach == NULL)
                                 atm_mpoa_init();
-                        if (atm_mpoa_ops.mpoad_attach == NULL) /* try again */
-                                return -ENOSYS;
-                        error = atm_mpoa_ops.mpoad_attach(vcc, (int)arg);
-                        if (error >= 0) sock->state = SS_CONNECTED;
-                        return error;
+			if (atm_mpoa_ops.mpoad_attach == NULL) { /* try again */
+				ret_val = -ENOSYS;
+				goto done;
+			}
+			error = atm_mpoa_ops.mpoad_attach(vcc, (int)arg);
+			if (error >= 0) sock->state = SS_CONNECTED;
+			ret_val = error;
+			goto done;
 		case ATMMPC_DATA:
-			if (!capable(CAP_NET_ADMIN)) return -EPERM;
-			return atm_mpoa_ops.vcc_attach(vcc, arg);
+			if (!capable(CAP_NET_ADMIN)) 
+				ret_val = -EPERM;
+			else
+				ret_val = atm_mpoa_ops.vcc_attach(vcc, arg);
+			goto done;
 #endif
 #if defined(CONFIG_ATM_TCP) || defined(CONFIG_ATM_TCP_MODULE)
 		case SIOCSIFATMTCP:
-			if (!capable(CAP_NET_ADMIN)) return -EPERM;
-			if (!atm_tcp_ops.attach) return -ENOPKG;
+			if (!capable(CAP_NET_ADMIN)) {
+				ret_val = -EPERM;
+				goto done;
+			}
+			if (!atm_tcp_ops.attach) {
+				ret_val = -ENOPKG;
+				goto done;
+			}
+			fops_get (&atm_tcp_ops);
 			error = atm_tcp_ops.attach(vcc,(int) arg);
 			if (error >= 0) sock->state = SS_CONNECTED;
-			return error;
+			else            fops_put (&atm_tcp_ops);
+			ret_val = error;
+			goto done;
 		case ATMTCP_CREATE:
-			if (!capable(CAP_NET_ADMIN)) return -EPERM;
-			if (!atm_tcp_ops.create_persistent) return -ENOPKG;
-			return atm_tcp_ops.create_persistent((int) arg);
+			if (!capable(CAP_NET_ADMIN)) {
+				ret_val = -EPERM;
+				goto done;
+			}
+			if (!atm_tcp_ops.create_persistent) {
+				ret_val = -ENOPKG;
+				goto done;
+			}
+			error = atm_tcp_ops.create_persistent((int) arg);
+			if (error < 0) fops_put (&atm_tcp_ops);
+			ret_val = error;
+			goto done;
 		case ATMTCP_REMOVE:
-			if (!capable(CAP_NET_ADMIN)) return -EPERM;
-			if (!atm_tcp_ops.remove_persistent) return -ENOPKG;
-			return atm_tcp_ops.remove_persistent((int) arg);
+			if (!capable(CAP_NET_ADMIN)) {
+				ret_val = -EPERM;
+				goto done;
+			}
+			if (!atm_tcp_ops.remove_persistent) {
+				ret_val = -ENOPKG;
+				goto done;
+			}
+			error = atm_tcp_ops.remove_persistent((int) arg);
+			fops_put (&atm_tcp_ops);
+			ret_val = error;
+			goto done;
 #endif
 		default:
 			break;
 	}
-	if (get_user(buf,&((struct atmif_sioc *) arg)->arg)) return -EFAULT;
-	if (get_user(len,&((struct atmif_sioc *) arg)->length)) return -EFAULT;
-	if (get_user(number,&((struct atmif_sioc *) arg)->number))
-		return -EFAULT;
-	if (!(dev = atm_find_dev(number))) return -ENODEV;
+	if (get_user(buf,&((struct atmif_sioc *) arg)->arg)) {
+		ret_val = -EFAULT;
+		goto done;
+	}
+	if (get_user(len,&((struct atmif_sioc *) arg)->length)) {
+		ret_val = -EFAULT;
+		goto done;
+	}
+	if (get_user(number,&((struct atmif_sioc *) arg)->number)) {
+		ret_val = -EFAULT;
+		goto done;
+	}
+	if (!(dev = atm_find_dev(number))) {
+		ret_val = -ENODEV;
+		goto done;
+	}
+	
 	size = 0;
 	switch (cmd) {
 		case ATM_GETTYPE:
 			size = strlen(dev->type)+1;
-			if (copy_to_user(buf,dev->type,size)) return -EFAULT;
+			if (copy_to_user(buf,dev->type,size)) {
+				ret_val = -EFAULT;
+				goto done;
+			}
 			break;
 		case ATM_GETESI:
 			size = ESI_LEN;
-			if (copy_to_user(buf,dev->esi,size)) return -EFAULT;
+			if (copy_to_user(buf,dev->esi,size)) {
+				ret_val = -EFAULT;
+				goto done;
+			}
 			break;
 		case ATM_SETESI:
 			{
 				int i;
 
 				for (i = 0; i < ESI_LEN; i++)
-					if (dev->esi[i]) return -EEXIST;
+					if (dev->esi[i]) {
+						ret_val = -EEXIST;
+						goto done;
+					}
 			}
 			/* fall through */
 		case ATM_SETESIF:
 			{
 				unsigned char esi[ESI_LEN];
 
-				if (!capable(CAP_NET_ADMIN)) return -EPERM;
-				if (copy_from_user(esi,buf,ESI_LEN))
-					return -EFAULT;
+				if (!capable(CAP_NET_ADMIN)) {
+					ret_val = -EPERM;
+					goto done;
+				}
+				if (copy_from_user(esi,buf,ESI_LEN)) {
+					ret_val = -EFAULT;
+					goto done;
+				}
 				memcpy(dev->esi,esi,ESI_LEN);
-				return ESI_LEN;
+				ret_val =  ESI_LEN;
+				goto done;
 			}
 		case ATM_GETSTATZ:
-			if (!capable(CAP_NET_ADMIN)) return -EPERM;
+			if (!capable(CAP_NET_ADMIN)) {
+				ret_val = -EPERM;
+				goto done;
+			}
 			/* fall through */
 		case ATM_GETSTAT:
 			size = sizeof(struct atm_dev_stats);
 			error = fetch_stats(dev,buf,cmd == ATM_GETSTATZ);
-			if (error) return error;
+			if (error) {
+				ret_val = error;
+				goto done;
+			}
 			break;
 		case ATM_GETCIRANGE:
 			size = sizeof(struct atm_cirange);
-			if (copy_to_user(buf,&dev->ci_range,size))
-				return -EFAULT;
+			if (copy_to_user(buf,&dev->ci_range,size)) {
+				ret_val = -EFAULT;
+				goto done;
+			}
 			break;
 		case ATM_GETLINKRATE:
 			size = sizeof(int);
-			if (copy_to_user(buf,&dev->link_rate,size))
-				return -EFAULT;
+			if (copy_to_user(buf,&dev->link_rate,size)) {
+				ret_val = -EFAULT;
+				goto done;
+			}
 			break;
 		case ATM_RSTADDR:
-			if (!capable(CAP_NET_ADMIN)) return -EPERM;
+			if (!capable(CAP_NET_ADMIN)) {
+				ret_val = -EPERM;
+				goto done;
+			}
 			reset_addr(dev);
 			break;
 		case ATM_ADDADDR:
 		case ATM_DELADDR:
-			if (!capable(CAP_NET_ADMIN)) return -EPERM;
+			if (!capable(CAP_NET_ADMIN)) {
+				ret_val = -EPERM;
+				goto done;
+			}
 			{
 				struct sockaddr_atmsvc addr;
 
-				if (copy_from_user(&addr,buf,sizeof(addr)))
-					return -EFAULT;
+				if (copy_from_user(&addr,buf,sizeof(addr))) {
+					ret_val = -EFAULT;
+					goto done;
+				}
 				if (cmd == ATM_ADDADDR)
-					return add_addr(dev,&addr);
-				else return del_addr(dev,&addr);
+					ret_val = add_addr(dev,&addr);
+				else
+					ret_val = del_addr(dev,&addr);
+				goto done;
 			}
 		case ATM_GETADDR:
 			size = get_addr(dev,buf,len);
-			if (size < 0) return size;
+			if (size < 0)
+				ret_val = size;
+			else
 			/* may return 0, but later on size == 0 means "don't
 			   write the length" */
-			return put_user(size,
-			    &((struct atmif_sioc *) arg)->length) ? -EFAULT : 0;
+				ret_val = put_user(size,
+						   &((struct atmif_sioc *) arg)->length) ? -EFAULT : 0;
+			goto done;
 		case ATM_SETLOOP:
 			if (__ATM_LM_XTRMT((int) (long) buf) &&
 			    __ATM_LM_XTLOC((int) (long) buf) >
-			    __ATM_LM_XTRMT((int) (long) buf))
-				return -EINVAL;
+			    __ATM_LM_XTRMT((int) (long) buf)) {
+				ret_val = -EINVAL;
+				goto done;
+			}
 			/* fall through */
 		case ATM_SETCIRANGE:
 		case SONET_GETSTATZ:
 		case SONET_SETDIAG:
 		case SONET_CLRDIAG:
 		case SONET_SETFRAMING:
-			if (!capable(CAP_NET_ADMIN)) return -EPERM;
+			if (!capable(CAP_NET_ADMIN)) {
+				ret_val = -EPERM;
+				goto done;
+			}
 			/* fall through */
 		default:
-			if (!dev->ops->ioctl) return -EINVAL;
+			if (!dev->ops->ioctl) {
+				ret_val = -EINVAL;
+				goto done;
+			}
 			size = dev->ops->ioctl(dev,cmd,buf);
-			if (size < 0)
-				return size == -ENOIOCTLCMD ? -EINVAL : size;
+			if (size < 0) {
+				ret_val = (size == -ENOIOCTLCMD ? -EINVAL : size);
+				goto done;
+			}
 	}
-	if (!size) return 0;
-	return put_user(size,&((struct atmif_sioc *) arg)->length) ?
-	    -EFAULT : 0;
+	
+	if (size)
+		ret_val =  put_user(size,&((struct atmif_sioc *) arg)->length) ?
+			-EFAULT : 0;
+
+ done:
+	spin_unlock (&atm_dev_lock); 
+	return ret_val;
 }
 
 
-int atm_change_qos(struct atm_vcc *vcc,struct atm_qos *qos)
+static int atm_change_qos(struct atm_vcc *vcc,struct atm_qos *qos)
 {
+	int error;
+
 	/*
 	 * Don't let the QoS change the already connected AAL type nor the
 	 * traffic class.
@@ -760,6 +947,9 @@ int atm_change_qos(struct atm_vcc *vcc,struct atm_qos *qos)
 	    qos->rxtp.traffic_class != vcc->qos.rxtp.traffic_class ||
 	    qos->txtp.traffic_class != vcc->qos.txtp.traffic_class)
 		return -EINVAL;
+	error = adjust_tp(&qos->txtp,qos->aal);
+	if (!error) error = adjust_tp(&qos->rxtp,qos->aal);
+	if (error) return error;
 	if (!vcc->dev->ops->change_qos) return -EOPNOTSUPP;
 	if (vcc->family == AF_ATMPVC)
 		return vcc->dev->ops->change_qos(vcc,qos,ATM_MF_SET);
@@ -897,3 +1087,61 @@ int atm_getsockopt(struct socket *sock,int level,int optname,
 		return -EINVAL;
 	return atm_do_getsockopt(sock,level,optname,optval,len);
 }
+
+
+/*
+ * lane_mpoa_init.c: A couple of helper functions
+ * to make modular LANE and MPOA client easier to implement
+ */
+
+/*
+ * This is how it goes:
+ *
+ * if xxxx is not compiled as module, call atm_xxxx_init_ops()
+ *    from here
+ * else call atm_mpoa_init_ops() from init_module() within
+ *    the kernel when xxxx module is loaded
+ *
+ * In either case function pointers in struct atm_xxxx_ops
+ * are initialized to their correct values. Either they
+ * point to functions in the module or in the kernel
+ */
+ 
+extern struct atm_mpoa_ops atm_mpoa_ops; /* in common.c */
+extern struct atm_lane_ops atm_lane_ops; /* in common.c */
+
+#if defined(CONFIG_ATM_MPOA) || defined(CONFIG_ATM_MPOA_MODULE)
+void atm_mpoa_init(void)
+{
+#ifndef CONFIG_ATM_MPOA_MODULE /* not module */
+        atm_mpoa_init_ops(&atm_mpoa_ops);
+#else
+	request_module("mpoa");
+#endif
+
+        return;
+}
+#endif
+
+#if defined(CONFIG_ATM_LANE) || defined(CONFIG_ATM_LANE_MODULE)
+#if defined(CONFIG_BRIDGE) || defined(CONFIG_BRIDGE_MODULE)
+struct net_bridge_fdb_entry *(*br_fdb_get_hook)(struct net_bridge *br,
+						unsigned char *addr) = NULL;
+void (*br_fdb_put_hook)(struct net_bridge_fdb_entry *ent) = NULL;
+#if defined(CONFIG_ATM_LANE_MODULE) || defined(CONFIG_BRIDGE_MODULE)
+EXPORT_SYMBOL(br_fdb_get_hook);
+EXPORT_SYMBOL(br_fdb_put_hook);
+#endif /* defined(CONFIG_ATM_LANE_MODULE) || defined(CONFIG_BRIDGE_MODULE) */
+#endif /* defined(CONFIG_BRIDGE) || defined(CONFIG_BRIDGE_MODULE) */
+
+void atm_lane_init(void)
+{
+#ifndef CONFIG_ATM_LANE_MODULE /* not module */
+        atm_lane_init_ops(&atm_lane_ops);
+#else
+	request_module("lec");
+#endif
+
+        return;
+}        
+#endif

@@ -9,9 +9,9 @@
     Conrad ethernet card, and the Kingston KNE-PCM/x in shared-memory
     mode.  It will also handle the Socket EA card in either mode.
 
-    Copyright (C) 1999 David A. Hinds -- dhinds@pcmcia.sourceforge.org
+    Copyright (C) 1999 David A. Hinds -- dahinds@users.sourceforge.net
 
-    pcnet_cs.c 1.117 2000/05/04 01:29:47
+    pcnet_cs.c 1.126 2000/10/02 20:38:23
     
     The network driver code is based on Donald Becker's NE2000 code:
 
@@ -72,7 +72,7 @@ static int pc_debug = PCMCIA_DEBUG;
 MODULE_PARM(pc_debug, "i");
 #define DEBUG(n, args...) if (pc_debug>(n)) printk(KERN_DEBUG args)
 static char *version =
-"pcnet_cs.c 1.117 2000/05/04 01:29:47 (David Hinds)";
+"pcnet_cs.c 1.126 2000/10/02 20:38:23 (David Hinds)";
 #else
 #define DEBUG(n, args...)
 #endif
@@ -81,39 +81,22 @@ static char *version =
 
 /* Parameters that can be set with 'insmod' */
 
+#define INT_MODULE_PARM(n, v) static int n = v; MODULE_PARM(n, "i")
+
 /* Bit map of interrupts to choose from */
-static u_int irq_mask = 0xdeb8;
+INT_MODULE_PARM(irq_mask,	0xdeb8);
 static int irq_list[4] = { -1 };
+MODULE_PARM(irq_list, "1-4i");
 
-/* Transceiver type, for Socket EA and IBM CC cards. */
-static int if_port = 1;
-
-/* Use 64K packet buffer, for Socket EA cards. */
-static int use_big_buf = 1;
-
-/* Shared memory speed, in ns */
-static int mem_speed = 0;
-
-/* Insert a pause in block_output after sending a packet */
-static int delay_output = 0;
-
-/* Length of delay, in microseconds */
-static int delay_time = 4;
-
-/* Use shared memory, if available? */
-static int use_shmem = -1;
+INT_MODULE_PARM(if_port,	1);	/* Transceiver type */
+INT_MODULE_PARM(use_big_buf,	1);	/* use 64K packet buffer? */
+INT_MODULE_PARM(mem_speed,	0);	/* shared mem speed, in ns */
+INT_MODULE_PARM(delay_output,	0);	/* pause after xmit? */
+INT_MODULE_PARM(delay_time,	4);	/* in usec */
+INT_MODULE_PARM(use_shmem,	-1);	/* use shared memory? */
 
 /* Ugh!  Let the user hardwire the hardware address for queer cards */
 static int hw_addr[6] = { 0, /* ... */ };
-
-MODULE_PARM(irq_mask, "i");
-MODULE_PARM(irq_list, "1-4i");
-MODULE_PARM(if_port, "i");
-MODULE_PARM(use_big_buf, "i");
-MODULE_PARM(mem_speed, "i");
-MODULE_PARM(delay_output, "i");
-MODULE_PARM(delay_time, "i");
-MODULE_PARM(use_shmem, "i");
 MODULE_PARM(hw_addr, "6i");
 
 /*====================================================================*/
@@ -153,7 +136,8 @@ typedef struct hw_info_t {
 #define USE_BIG_BUF	0x04
 #define HAS_IBM_MISC	0x08
 #define IS_DL10019	0x10
-#define IS_AX88190	0x20
+#define IS_DL10022	0x20
+#define IS_AX88190	0x40
 #define USE_SHMEM	0x80	/* autodetected */
 
 static hw_info_t hw_info[] = {
@@ -219,10 +203,9 @@ static hw_info_t hw_info[] = {
 
 #define NR_INFO		(sizeof(hw_info)/sizeof(hw_info_t))
 
-static hw_info_t default_info =
-{ /* Unknown NE2000 Clone */ 0x00, 0x00, 0x00, 0x00, 0 };
-static hw_info_t dl10019_info =
-{ /* D-Link DL10019 chipset */ 0x00, 0x00, 0x00, 0x00, IS_DL10019 };
+static hw_info_t default_info = { 0, 0, 0, 0, 0 };
+static hw_info_t dl10019_info = { 0, 0, 0, 0, IS_DL10019 };
+static hw_info_t dl10022_info = { 0, 0, 0, 0, IS_DL10019|IS_DL10022 };
 
 typedef struct pcnet_dev_t {
     struct net_device	dev;	/* so &dev == &pcnet_dev_t */
@@ -232,7 +215,7 @@ typedef struct pcnet_dev_t {
     caddr_t		base;
     struct timer_list	watchdog;
     int			stale, fast_poll;
-    u_char		link_status;
+    u_short		link_status;
 } pcnet_dev_t;
 
 /*======================================================================
@@ -465,7 +448,7 @@ static hw_info_t *get_prom(dev_link_t *link)
     };
 
     pcnet_reset_8390(dev);
-    udelay(10000);
+    mdelay(10);
 
     for (i = 0; i < sizeof(program_seq)/sizeof(program_seq[0]); i++)
 	outb_p(program_seq[i].value, ioaddr + program_seq[i].offset);
@@ -504,7 +487,8 @@ static hw_info_t *get_dl10019(dev_link_t *link)
 	return NULL;
     for (i = 0; i < 6; i++)
 	dev->dev_addr[i] = inb_p(dev->base_addr + 0x14 + i);
-    return &dl10019_info;
+    i = inb(dev->base_addr + 0x1f);
+    return ((i == 0x91)||(i == 0x99)) ? &dl10022_info : &dl10019_info;
 }
 
 /*======================================================================
@@ -723,14 +707,18 @@ static void pcnet_config(dev_link_t *link)
 	hw_info = get_hwired(link);
     
     if (hw_info == NULL) {
-	printk(KERN_NOTICE "pcnet_cs: unable to read hardware net address\n");
-	goto config_undo;
+	printk(KERN_NOTICE "pcnet_cs: unable to read hardware net"
+	       " address for io base %#3lx\n", dev->base_addr);
+	unregister_netdev(dev);
+	goto failed;
     }
 
     info->flags = hw_info->flags;
     /* Check for user overrides */
     info->flags |= (delay_output) ? DELAY_OUTPUT : 0;
-    if ((manfid == MANFID_SOCKET) && (prodid == PRODID_SOCKET_LPE))
+    if ((manfid == MANFID_SOCKET) &&
+	((prodid == PRODID_SOCKET_LPE) ||
+	 (prodid == PRODID_SOCKET_EIO)))
 	info->flags &= ~USE_BIG_BUF;
     if (!use_big_buf)
 	info->flags &= ~USE_BIG_BUF;
@@ -760,8 +748,9 @@ static void pcnet_config(dev_link_t *link)
 
     if (info->flags & IS_DL10019) {
 	dev->do_ioctl = &do_ioctl;
-	printk(KERN_INFO "%s: NE2000 (DL10019 rev %02x): ",
-	       dev->name, inb(dev->base_addr + 0x1a));
+	printk(KERN_INFO "%s: NE2000 (DL100%d rev %02x): ",
+	       dev->name, ((info->flags & IS_DL10022) ? 22 : 19),
+	       inb(dev->base_addr + 0x1a));
     } else if (info->flags & IS_AX88190) {
 	printk(KERN_INFO "%s: NE2000 (AX88190): ", dev->name);
     } else
@@ -776,9 +765,6 @@ static void pcnet_config(dev_link_t *link)
 	printk("%02X%s", dev->dev_addr[i], ((i<5) ? ":" : "\n"));
     return;
 
-config_undo:
-    unregister_netdev(dev);
-    goto failed;
 cs_failed:
     cs_error(link->handle, last_fn, last_ret);
 failed:
@@ -876,183 +862,17 @@ static int pcnet_event(event_t event, int priority,
     return 0;
 } /* pcnet_event */
 
-/*====================================================================*/
-
-static void set_misc_reg(struct net_device *dev)
-{
-    ioaddr_t nic_base = dev->base_addr;
-    pcnet_dev_t *info = (pcnet_dev_t *)dev;
-    u_char tmp;
-    
-    if (info->flags & HAS_MISC_REG) {
-	tmp = inb_p(nic_base + PCNET_MISC) & ~3;
-	if (dev->if_port == 2)
-	    tmp |= 1;
-	if (info->flags & USE_BIG_BUF)
-	    tmp |= 2;
-	if (info->flags & HAS_IBM_MISC)
-	    tmp |= 8;
-	outb_p(tmp, nic_base + PCNET_MISC);
-    }
-}
-
-/*====================================================================*/
-
-static int pcnet_open(struct net_device *dev)
-{
-    pcnet_dev_t *info = (pcnet_dev_t *)dev;
-    dev_link_t *link = &info->link;
-    
-    DEBUG(2, "pcnet_open('%s')\n", dev->name);
-
-    if (!DEV_OK(link))
-	return -ENODEV;
-
-    link->open++;
-    MOD_INC_USE_COUNT;
-
-    set_misc_reg(dev);
-    request_irq(dev->irq, ei_irq_wrapper, SA_SHIRQ, dev_info, dev);
-
-    /* Start by assuming the link is bad */
-    info->link_status = 1;
-    info->watchdog.function = &ei_watchdog;
-    info->watchdog.data = (u_long)info;
-    info->watchdog.expires = jiffies + HZ;
-    add_timer(&info->watchdog);
-
-    return ei_open(dev);
-} /* pcnet_open */
-
-/*====================================================================*/
-
-static int pcnet_close(struct net_device *dev)
-{
-    pcnet_dev_t *info = (pcnet_dev_t *)dev;
-    dev_link_t *link = &info->link;
-
-    DEBUG(2, "pcnet_close('%s')\n", dev->name);
-
-    free_irq(dev->irq, dev);
-    
-    link->open--;
-    netif_stop_queue(dev);
-    del_timer(&info->watchdog);
-    if (link->state & DEV_STALE_CONFIG)
-	mod_timer(&link->release, jiffies + HZ/20);
-
-    MOD_DEC_USE_COUNT;
-
-    return 0;
-} /* pcnet_close */
-
 /*======================================================================
 
-    Hard reset the card.  This used to pause for the same period that
-    a 8390 reset command required, but that shouldn't be necessary.
+    MII interface support for DL10019 and DL10022 based cards
+
+    On the DL10019, the MII IO direction bit is 0x10; on  the DL10022
+    it is 0x20.  Setting both bits seems to work on both card types.
 
 ======================================================================*/
 
-static void pcnet_reset_8390(struct net_device *dev)
-{
-    ioaddr_t nic_base = dev->base_addr;
-    int i;
-
-    ei_status.txing = ei_status.dmaing = 0;
-
-    outb(inb(nic_base + PCNET_RESET), nic_base + PCNET_RESET);
-
-    for (i = 0; i < 100; i++) {
-	if ((inb_p(nic_base+EN0_ISR) & ENISR_RESET) != 0)
-	    break;
-	udelay(100L);
-    }
-    outb_p(ENISR_RESET, nic_base + EN0_ISR); /* Ack intr. */
-    
-    if (i == 100)
-	printk(KERN_ERR "%s: pcnet_reset_8390() did not complete.\n",
-	       dev->name);
-    set_misc_reg(dev);
-    
-} /* pcnet_reset_8390 */
-
-/*====================================================================*/
-
-static int set_config(struct net_device *dev, struct ifmap *map)
-{
-    pcnet_dev_t *info = (pcnet_dev_t *)dev;
-    if ((map->port != (u_char)(-1)) && (map->port != dev->if_port)) {
-	if (!(info->flags & HAS_MISC_REG))
-	    return -EOPNOTSUPP;
-	else if ((map->port < 1) || (map->port > 2))
-	    return -EINVAL;
-	dev->if_port = map->port;
-	printk(KERN_INFO "%s: switched to %s port\n",
-	       dev->name, if_names[dev->if_port]);
-	NS8390_init(dev, 1);
-    }
-    return 0;
-}
-
-/*====================================================================*/
-
-static void ei_irq_wrapper(int irq, void *dev_id, struct pt_regs *regs)
-{
-    pcnet_dev_t *info = dev_id;
-    info->stale = 0;
-    ei_interrupt(irq, dev_id, regs);
-}
-
-static void ei_watchdog(u_long arg)
-{
-    pcnet_dev_t *info = (pcnet_dev_t *)(arg);
-    struct net_device *dev = &info->dev;
-    ioaddr_t nic_base = dev->base_addr;
-
-    if (!netif_device_present(dev)) goto reschedule;
-
-    /* Check for pending interrupt with expired latency timer: with
-       this, we can limp along even if the interrupt is blocked */
-    outb_p(E8390_NODMA+E8390_PAGE0, nic_base + E8390_CMD);
-    if (info->stale++ && inb_p(nic_base + EN0_ISR)) {
-	if (!info->fast_poll)
-	    printk(KERN_INFO "%s: interrupt(s) dropped!\n", dev->name);
-	ei_irq_wrapper(dev->irq, dev, NULL);
-	info->fast_poll = HZ;
-    }
-    if (info->fast_poll) {
-	info->fast_poll--;
-	info->watchdog.expires = jiffies + 1;
-	add_timer(&info->watchdog);
-	return;
-    }
-
-    if (info->flags & IS_DL10019) {
-	u_char link = inb(dev->base_addr+0x1c) & 0x01;
-	if (link != info->link_status) {
-	    printk(KERN_INFO "%s: %s link beat\n", dev->name,
-		   (link) ? "lost" : "found");
-	    if (!link)
-		NS8390_init(dev, 1);
-	    info->link_status = link;
-	}
-    }
-
-reschedule:
-    info->watchdog.expires = jiffies + HZ;
-    add_timer(&info->watchdog);
-}
-
-/*======================================================================
-
-    MII interface support for DL10019 based cards
-
-    There are two types of DL10019 based cards.  Some have the MII IO
-    direction bit as 0x10, others as 0x20; setting both bits seems to
-    work on all cards.
-
-======================================================================*/
-
+#define DLINK_GPIO		0x1c
+#define DLINK_DIAG		0x1d
 #define MDIO_SHIFT_CLK		0x80
 #define MDIO_DATA_OUT		0x40
 #define MDIO_DIR_WRITE		0x30
@@ -1106,20 +926,219 @@ static void mdio_write(ioaddr_t addr, int phy_id, int loc, int value)
     }
 }
 
+static void mdio_reset(ioaddr_t addr, int phy_id)
+{
+    outb_p(0x08, addr);
+    outb_p(0x0c, addr);
+    outb_p(0x08, addr);
+    outb_p(0x0c, addr);
+    outb_p(0x00, addr);
+}
+
+/*====================================================================*/
+
+static void set_misc_reg(struct net_device *dev)
+{
+    ioaddr_t nic_base = dev->base_addr;
+    pcnet_dev_t *info = (pcnet_dev_t *)dev;
+    u_char tmp;
+    
+    if (info->flags & HAS_MISC_REG) {
+	tmp = inb_p(nic_base + PCNET_MISC) & ~3;
+	if (dev->if_port == 2)
+	    tmp |= 1;
+	if (info->flags & USE_BIG_BUF)
+	    tmp |= 2;
+	if (info->flags & HAS_IBM_MISC)
+	    tmp |= 8;
+	outb_p(tmp, nic_base + PCNET_MISC);
+    }
+    if (info->flags & IS_DL10022) {
+	mdio_reset(nic_base + DLINK_GPIO, 0);
+	/* Restart MII autonegotiation */
+	mdio_write(nic_base + DLINK_GPIO, 0, 0, 0x0000);
+	mdio_write(nic_base + DLINK_GPIO, 0, 0, 0x1200);
+    }
+}
+
+/*====================================================================*/
+
+static int pcnet_open(struct net_device *dev)
+{
+    pcnet_dev_t *info = (pcnet_dev_t *)dev;
+    dev_link_t *link = &info->link;
+    
+    DEBUG(2, "pcnet_open('%s')\n", dev->name);
+
+    if (!DEV_OK(link))
+	return -ENODEV;
+
+    link->open++;
+    MOD_INC_USE_COUNT;
+
+    set_misc_reg(dev);
+    request_irq(dev->irq, ei_irq_wrapper, SA_SHIRQ, dev_info, dev);
+
+    info->link_status = 0x00;
+    info->watchdog.function = &ei_watchdog;
+    info->watchdog.data = (u_long)info;
+    info->watchdog.expires = jiffies + HZ;
+    add_timer(&info->watchdog);
+
+    return ei_open(dev);
+} /* pcnet_open */
+
+/*====================================================================*/
+
+static int pcnet_close(struct net_device *dev)
+{
+    pcnet_dev_t *info = (pcnet_dev_t *)dev;
+    dev_link_t *link = &info->link;
+
+    DEBUG(2, "pcnet_close('%s')\n", dev->name);
+
+    free_irq(dev->irq, dev);
+    
+    link->open--;
+    netif_stop_queue(dev);
+    del_timer(&info->watchdog);
+    if (link->state & DEV_STALE_CONFIG)
+	mod_timer(&link->release, jiffies + HZ/20);
+
+    MOD_DEC_USE_COUNT;
+
+    return 0;
+} /* pcnet_close */
+
+/*======================================================================
+
+    Hard reset the card.  This used to pause for the same period that
+    a 8390 reset command required, but that shouldn't be necessary.
+
+======================================================================*/
+
+static void pcnet_reset_8390(struct net_device *dev)
+{
+    ioaddr_t nic_base = dev->base_addr;
+    int i;
+
+    ei_status.txing = ei_status.dmaing = 0;
+
+    outb(inb(nic_base + PCNET_RESET), nic_base + PCNET_RESET);
+
+    for (i = 0; i < 100; i++) {
+	if ((inb_p(nic_base+EN0_ISR) & ENISR_RESET) != 0)
+	    break;
+	udelay(100);
+    }
+    outb_p(ENISR_RESET, nic_base + EN0_ISR); /* Ack intr. */
+    
+    if (i == 100)
+	printk(KERN_ERR "%s: pcnet_reset_8390() did not complete.\n",
+	       dev->name);
+    set_misc_reg(dev);
+    
+} /* pcnet_reset_8390 */
+
+/*====================================================================*/
+
+static int set_config(struct net_device *dev, struct ifmap *map)
+{
+    pcnet_dev_t *info = (pcnet_dev_t *)dev;
+    if ((map->port != (u_char)(-1)) && (map->port != dev->if_port)) {
+	if (!(info->flags & HAS_MISC_REG))
+	    return -EOPNOTSUPP;
+	else if ((map->port < 1) || (map->port > 2))
+	    return -EINVAL;
+	dev->if_port = map->port;
+	printk(KERN_INFO "%s: switched to %s port\n",
+	       dev->name, if_names[dev->if_port]);
+	NS8390_init(dev, 1);
+    }
+    return 0;
+}
+
+/*====================================================================*/
+
+static void ei_irq_wrapper(int irq, void *dev_id, struct pt_regs *regs)
+{
+    pcnet_dev_t *info = dev_id;
+    info->stale = 0;
+    ei_interrupt(irq, dev_id, regs);
+}
+
+static void ei_watchdog(u_long arg)
+{
+    pcnet_dev_t *info = (pcnet_dev_t *)(arg);
+    struct net_device *dev = &info->dev;
+    ioaddr_t nic_base = dev->base_addr;
+    u_short link;
+
+    if (!netif_device_present(dev)) goto reschedule;
+
+    /* Check for pending interrupt with expired latency timer: with
+       this, we can limp along even if the interrupt is blocked */
+    outb_p(E8390_NODMA+E8390_PAGE0, nic_base + E8390_CMD);
+    if (info->stale++ && (inb_p(nic_base + EN0_ISR) & ENISR_ALL)) {
+	if (!info->fast_poll)
+	    printk(KERN_INFO "%s: interrupt(s) dropped!\n", dev->name);
+	ei_irq_wrapper(dev->irq, dev, NULL);
+	info->fast_poll = HZ;
+    }
+    if (info->fast_poll) {
+	info->fast_poll--;
+	info->watchdog.expires = jiffies + 1;
+	add_timer(&info->watchdog);
+	return;
+    }
+
+    if (!(info->flags & IS_DL10019))
+	goto reschedule;
+
+    link = mdio_read(dev->base_addr + DLINK_GPIO, 0, 1) & 0x0004;
+    if (link != info->link_status) {
+	u_short p = mdio_read(dev->base_addr + DLINK_GPIO, 0, 5);
+	printk(KERN_INFO "%s: %s link beat\n", dev->name,
+	       (link) ? "found" : "lost");
+	if (link && (info->flags & IS_DL10022)) {
+	    /* Disable collision detection on full duplex links */
+	    outb((p & 0x0140) ? 4 : 0, dev->base_addr + DLINK_DIAG);
+	}
+	if (link) {
+	    if (p)
+		printk(KERN_INFO "%s: autonegotiation complete: "
+		       "%sbaseT-%cD selected\n", dev->name,
+		       ((p & 0x0180) ? "100" : "10"),
+		       ((p & 0x0140) ? 'F' : 'H'));
+	    else
+		printk(KERN_INFO "%s: link partner did not autonegotiate\n",
+		       dev->name);
+	    NS8390_init(dev, 1);
+	}
+	info->link_status = link;
+    }
+
+reschedule:
+    info->watchdog.expires = jiffies + HZ;
+    add_timer(&info->watchdog);
+}
+
+/*====================================================================*/
+
 static int do_ioctl(struct net_device *dev, struct ifreq *rq, int cmd)
 {
     u16 *data = (u16 *)&rq->ifr_data;
-    ioaddr_t addr = dev->base_addr + 0x1c;
+    ioaddr_t addr = dev->base_addr + DLINK_GPIO;
     switch (cmd) {
     case SIOCDEVPRIVATE:
 	data[0] = 0;
     case SIOCDEVPRIVATE+1:
-	data[3] = mdio_read(addr, 0, data[1] & 0x1f);
+	data[3] = mdio_read(addr, data[0], data[1] & 0x1f);
 	return 0;
     case SIOCDEVPRIVATE+2:
 	if (!capable(CAP_NET_ADMIN))
 	    return -EPERM;
-	mdio_write(addr, 0, data[1] & 0x1f, data[2]);
+	mdio_write(addr, data[0], data[1] & 0x1f, data[2]);
 	return 0;
     }
     return -EOPNOTSUPP;

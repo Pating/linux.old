@@ -1,7 +1,7 @@
 VERSION = 2
-PATCHLEVEL = 3
-SUBLEVEL = 99
-EXTRAVERSION = -pre9
+PATCHLEVEL = 4
+SUBLEVEL = 0
+EXTRAVERSION =
 
 KERNELRELEASE=$(VERSION).$(PATCHLEVEL).$(SUBLEVEL)$(EXTRAVERSION)
 
@@ -35,7 +35,9 @@ OBJCOPY		= $(CROSS_COMPILE)objcopy
 OBJDUMP		= $(CROSS_COMPILE)objdump
 MAKEFILES	= $(TOPDIR)/.config
 GENKSYMS	= /sbin/genksyms
+DEPMOD		= /sbin/depmod
 MODFLAGS	= -DMODULE
+CFLAGS_KERNEL	=
 PERL		= perl
 
 export	VERSION PATCHLEVEL SUBLEVEL EXTRAVERSION KERNELRELEASE ARCH \
@@ -71,10 +73,13 @@ endif
 #export	INSTALL_PATH=/boot
 
 #
-# INSTALL_MOD_PATH specifies a prefix to MODLIB for module directory 
+# INSTALL_MOD_PATH specifies a prefix to MODLIB for module directory
 # relocations required by build roots.  This is not defined in the
 # makefile but the arguement can be passed to make if needed.
 #
+
+MODLIB	:= $(INSTALL_MOD_PATH)/lib/modules/$(KERNELRELEASE)
+export MODLIB
 
 #
 # standard CFLAGS
@@ -82,13 +87,8 @@ endif
 
 CPPFLAGS := -D__KERNEL__ -I$(HPATH)
 
-CFLAGS := $(CPPFLAGS) -Wall -Wstrict-prototypes -O2 -fomit-frame-pointer
+CFLAGS := $(CPPFLAGS) -Wall -Wstrict-prototypes -O2 -fomit-frame-pointer -fno-strict-aliasing
 AFLAGS := -D__ASSEMBLY__ $(CPPFLAGS)
-
-# use '-fno-strict-aliasing', but only if the compiler can take it
-CFLAGS += $(shell if $(CC) -fno-strict-aliasing -S -o /dev/null -xc /dev/null >/dev/null 2>&1; then echo "-fno-strict-aliasing"; fi)
-
-export	CPPFLAGS CFLAGS AFLAGS
 
 #
 # ROOT_DEV specifies the default root-device when making the image.
@@ -118,12 +118,12 @@ export SVGA_MODE = -DSVGA_MODE=NORMAL_VGA
 #export RAMDISK = -DRAMDISK=512
 
 CORE_FILES	=kernel/kernel.o mm/mm.o fs/fs.o ipc/ipc.o
-NETWORKS	=net/network.a
-DRIVERS		=drivers/block/block.a \
+NETWORKS	=net/network.o
+DRIVERS		=drivers/block/block.o \
 		 drivers/char/char.o \
 		 drivers/misc/misc.o \
 		 drivers/net/net.o \
-	         drivers/parport/parport.a
+		 drivers/media/media.o
 LIBS		=$(TOPDIR)/lib/lib.a
 SUBDIRS		=kernel drivers mm fs net ipc lib
 
@@ -132,35 +132,37 @@ DRIVERS-y :=
 DRIVERS-m :=
 DRIVERS-  :=
 
-DRIVERS-$(CONFIG_DRM) += drivers/char/drm/drm.o
+DRIVERS-$(CONFIG_PARPORT) += drivers/parport/driver.o
 DRIVERS-$(CONFIG_AGP) += drivers/char/agp/agp.o
+DRIVERS-$(CONFIG_DRM) += drivers/char/drm/drm.o
 DRIVERS-$(CONFIG_NUBUS) += drivers/nubus/nubus.a
 DRIVERS-$(CONFIG_ISDN) += drivers/isdn/isdn.a
-DRIVERS-$(CONFIG_NET_FC) += drivers/net/fc/fc.a
-DRIVERS-$(CONFIG_APPLETALK) += drivers/net/appletalk/appletalk.a
+DRIVERS-$(CONFIG_NET_FC) += drivers/net/fc/fc.o
+DRIVERS-$(CONFIG_APPLETALK) += drivers/net/appletalk/appletalk.o
 DRIVERS-$(CONFIG_TR) += drivers/net/tokenring/tr.a
-DRIVERS-$(CONFIG_WAN) += drivers/net/wan/wan.a
+DRIVERS-$(CONFIG_WAN) += drivers/net/wan/wan.o
 DRIVERS-$(CONFIG_ARCNET) += drivers/net/arcnet/arcnet.a
 DRIVERS-$(CONFIG_ATM) += drivers/atm/atm.o
-DRIVERS-$(CONFIG_IDE) += drivers/ide/ide.a
-DRIVERS-$(CONFIG_SCSI) += drivers/scsi/scsi.a
-DRIVERS-$(CONFIG_IEEE1394) += drivers/ieee1394/ieee1394.a
+DRIVERS-$(CONFIG_IDE) += drivers/ide/idedriver.o
+DRIVERS-$(CONFIG_SCSI) += drivers/scsi/scsidrv.o
+DRIVERS-$(CONFIG_IEEE1394) += drivers/ieee1394/ieee1394drv.o
 
 ifneq ($(CONFIG_CD_NO_IDESCSI)$(CONFIG_BLK_DEV_IDECD)$(CONFIG_BLK_DEV_SR)$(CONFIG_PARIDE_PCD),)
-DRIVERS-y += drivers/cdrom/cdrom.a
+DRIVERS-y += drivers/cdrom/driver.o
 endif
 
 DRIVERS-$(CONFIG_SOUND) += drivers/sound/sounddrivers.o
-DRIVERS-$(CONFIG_PCI) += drivers/pci/pci.a
+DRIVERS-$(CONFIG_PCI) += drivers/pci/driver.o
+DRIVERS-$(CONFIG_MTD) += drivers/mtd/mtdlink.o
 DRIVERS-$(CONFIG_PCMCIA) += drivers/pcmcia/pcmcia.o
 DRIVERS-$(CONFIG_PCMCIA_NETCARD) += drivers/net/pcmcia/pcmcia_net.o
 DRIVERS-$(CONFIG_PCMCIA_CHRDEV) += drivers/char/pcmcia/pcmcia_char.o
 DRIVERS-$(CONFIG_DIO) += drivers/dio/dio.a
-DRIVERS-$(CONFIG_SBUS) += drivers/sbus/sbus.a
-DRIVERS-$(CONFIG_ZORRO) += drivers/zorro/zorro.a
+DRIVERS-$(CONFIG_SBUS) += drivers/sbus/sbus_all.o
+DRIVERS-$(CONFIG_ZORRO) += drivers/zorro/driver.o
 DRIVERS-$(CONFIG_FC4) += drivers/fc4/fc4.a
-DRIVERS-$(CONFIG_PPC) += drivers/macintosh/macintosh.a
-DRIVERS-$(CONFIG_MAC) += drivers/macintosh/macintosh.a
+DRIVERS-$(CONFIG_ALL_PPC) += drivers/macintosh/macintosh.o
+DRIVERS-$(CONFIG_MAC) += drivers/macintosh/macintosh.o
 DRIVERS-$(CONFIG_ISAPNP) += drivers/pnp/pnp.o
 DRIVERS-$(CONFIG_SGI_IP22) += drivers/sgi/sgi.a
 DRIVERS-$(CONFIG_VT) += drivers/video/video.o
@@ -168,14 +170,65 @@ DRIVERS-$(CONFIG_PARIDE) += drivers/block/paride/paride.a
 DRIVERS-$(CONFIG_HAMRADIO) += drivers/net/hamradio/hamradio.o
 DRIVERS-$(CONFIG_TC) += drivers/tc/tc.a
 DRIVERS-$(CONFIG_USB) += drivers/usb/usbdrv.o
-DRIVERS-$(CONFIG_I2O) += drivers/i2o/i2o.a
-DRIVERS-$(CONFIG_IRDA) += drivers/net/irda/irda_drivers.a
-DRIVERS-$(CONFIG_I2C) += drivers/i2c/i2c.a
-DRIVERS-$(CONFIG_PHONE) += drivers/telephony/telephony.a
+DRIVERS-$(CONFIG_INPUT) += drivers/input/inputdrv.o
+DRIVERS-$(CONFIG_I2O) += drivers/i2o/i2o.o
+DRIVERS-$(CONFIG_IRDA) += drivers/net/irda/irda.o
+DRIVERS-$(CONFIG_I2C) += drivers/i2c/i2c.o
+DRIVERS-$(CONFIG_PHONE) += drivers/telephony/telephony.o
+DRIVERS-$(CONFIG_ACPI) += drivers/acpi/acpi.o
+DRIVERS-$(CONFIG_MD) += drivers/md/mddev.o
 
 DRIVERS += $(DRIVERS-y)
 
+
+# files removed with 'make clean'
+CLEAN_FILES = \
+	kernel/ksyms.lst include/linux/compile.h \
+	vmlinux System.map \
+	.tmp* \
+	drivers/char/consolemap_deftbl.c drivers/video/promcon_tbl.c \
+	drivers/char/conmakehash \
+	drivers/char/drm/*-mod.c \
+	drivers/pci/devlist.h drivers/pci/classlist.h drivers/pci/gen-devlist \
+	drivers/zorro/devlist.h drivers/zorro/gen-devlist \
+	drivers/sound/bin2hex drivers/sound/hex2hex \
+	drivers/atm/fore200e_mkfirm drivers/atm/{pca,sba}*{.bin,.bin1,.bin2} \
+	net/khttpd/make_times_h \
+	net/khttpd/times.h \
+	submenu*
+# directories removed with 'make clean'
+CLEAN_DIRS = \
+	modules
+
+# files removed with 'make mrproper'
+MRPROPER_FILES = \
+	include/linux/autoconf.h include/linux/version.h \
+	drivers/net/hamradio/soundmodem/sm_tbl_{afsk1200,afsk2666,fsk9600}.h \
+	drivers/net/hamradio/soundmodem/sm_tbl_{hapn4800,psk4800}.h \
+	drivers/net/hamradio/soundmodem/sm_tbl_{afsk2400_7,afsk2400_8}.h \
+	drivers/net/hamradio/soundmodem/gentbl \
+	drivers/sound/*_boot.h drivers/sound/.*.boot \
+	drivers/sound/msndinit.c \
+	drivers/sound/msndperm.c \
+	drivers/sound/pndsperm.c \
+	drivers/sound/pndspini.c \
+	drivers/atm/fore200e_*_fw.c drivers/atm/.fore200e_*.fw \
+	.version .config* config.in config.old \
+	scripts/tkparse scripts/kconfig.tk scripts/kconfig.tmp \
+	scripts/lxdialog/*.o scripts/lxdialog/lxdialog \
+	.menuconfig.log \
+	include/asm \
+	.hdepend scripts/mkdep scripts/split-include scripts/docproc \
+	$(TOPDIR)/include/linux/modversions.h
+# directories removed with 'make mrproper'
+MRPROPER_DIRS = \
+	include/config \
+	$(TOPDIR)/include/linux/modules
+
+
 include arch/$(ARCH)/Makefile
+
+export	CPPFLAGS CFLAGS AFLAGS
 
 export	NETWORKS DRIVERS LIBS HEAD LDFLAGS LINKFLAGS MAKEBOOT ASFLAGS
 
@@ -188,7 +241,7 @@ Version: dummy
 	@rm -f include/linux/compile.h
 
 boot: vmlinux
-	@$(MAKE) -C arch/$(ARCH)/boot
+	@$(MAKE) CFLAGS="$(CFLAGS) $(CFLAGS_KERNEL)" -C arch/$(ARCH)/boot
 
 vmlinux: $(CONFIGURATION) init/main.o init/version.o linuxsubdirs
 	$(LD) $(LINKFLAGS) $(HEAD) init/main.o init/version.o \
@@ -199,7 +252,7 @@ vmlinux: $(CONFIGURATION) init/main.o init/version.o linuxsubdirs
 		$(LIBS) \
 		--end-group \
 		-o vmlinux
-	$(NM) vmlinux | grep -v '\(compiled\)\|\(\.o$$\)\|\( [aU] \)\|\(\.\.ng$$\)\|\(LASH[RL]DI\)' | sort > System.map
+	$(NM) vmlinux | grep -v '\(compiled\)\|\(\.o$$\)\|\( [aUw] \)\|\(\.\.ng$$\)\|\(LASH[RL]DI\)' | sort > System.map
 
 symlinks:
 	rm -f include/asm
@@ -228,8 +281,8 @@ include/config/MARKER: scripts/split-include include/linux/autoconf.h
 
 linuxsubdirs: $(patsubst %, _dir_%, $(SUBDIRS))
 
-$(patsubst %, _dir_%, $(SUBDIRS)) : dummy include/config/MARKER
-	$(MAKE) -C $(patsubst _dir_%, %, $@)
+$(patsubst %, _dir_%, $(SUBDIRS)) : dummy include/linux/version.h include/config/MARKER
+	$(MAKE) CFLAGS="$(CFLAGS) $(CFLAGS_KERNEL)" -C $(patsubst _dir_%, %, $@)
 
 $(TOPDIR)/include/linux/version.h: include/linux/version.h
 $(TOPDIR)/include/linux/compile.h: include/linux/compile.h
@@ -266,22 +319,22 @@ include/linux/version.h: ./Makefile
 	@mv -f .ver $@
 
 init/version.o: init/version.c include/linux/compile.h include/config/MARKER
-	$(CC) $(CFLAGS) -DUTS_MACHINE='"$(ARCH)"' -c -o init/version.o init/version.c
+	$(CC) $(CFLAGS) $(CFLAGS_KERNEL) -DUTS_MACHINE='"$(ARCH)"' -c -o init/version.o init/version.c
 
 init/main.o: init/main.c include/config/MARKER
-	$(CC) $(CFLAGS) $(PROFILING) -c -o $*.o $<
+	$(CC) $(CFLAGS) $(CFLAGS_KERNEL) $(PROFILING) -c -o $*.o $<
 
 fs lib mm ipc kernel drivers net: dummy
-	$(MAKE) $(subst $@, _dir_$@, $@)
+	$(MAKE) CFLAGS="$(CFLAGS) $(CFLAGS_KERNEL)" $(subst $@, _dir_$@, $@)
 
 TAGS: dummy
 	etags `find include/asm-$(ARCH) -name '*.h'`
 	find include -type d \( -name "asm-*" -o -name config \) -prune -o -name '*.h' -print | xargs etags -a
 	find $(SUBDIRS) init -name '*.c' | xargs etags -a
 
-# Exuberant ctags works better with -I 
+# Exuberant ctags works better with -I
 tags: dummy
-	CTAGSF=`ctags --version | grep -i exuberant >/dev/null && echo "-I __initdata,__initlocaldata,__exitdata,EXPORT_SYMBOL,EXPORT_SYMBOL_NOVERS"`; \
+	CTAGSF=`ctags --version | grep -i exuberant >/dev/null && echo "-I __initdata,__exitdata,EXPORT_SYMBOL,EXPORT_SYMBOL_NOVERS"`; \
 	ctags $$CTAGSF `find include/asm-$(ARCH) -name '*.h'` && \
 	find include -type d \( -name "asm-*" -o -name config \) -prune -o -name '*.h' -print | xargs ctags $$CTAGSF -a && \
 	find $(SUBDIRS) init -name '*.c' | xargs ctags $$CTAGSF -a
@@ -291,60 +344,49 @@ ifdef CONFIG_MODVERSIONS
 MODFLAGS += -DMODVERSIONS -include $(HPATH)/linux/modversions.h
 endif
 
+.PHONY: modules
 modules: $(patsubst %, _mod_%, $(SUBDIRS))
 
-modules/MARKER:
-	mkdir -p modules
-	touch modules/MARKER
-
-$(patsubst %, _mod_%, $(SUBDIRS)) : include/linux/version.h include/config/MARKER modules/MARKER
+.PHONY: $(patsubst %, _mod_%, $(SUBDIRS))
+$(patsubst %, _mod_%, $(SUBDIRS)) : include/linux/version.h include/config/MARKER
 	$(MAKE) -C $(patsubst _mod_%, %, $@) CFLAGS="$(CFLAGS) $(MODFLAGS)" MAKING_MODULES=1 modules
 
-modules_install:
-	@( \
-	MODLIB=$(INSTALL_MOD_PATH)/lib/modules/$(KERNELRELEASE); \
-	cd modules; \
-	MODULES=""; \
-	inst_mod() { These="`cat $$1`"; MODULES="$$MODULES $$These"; \
-		mkdir -p $$MODLIB/$$2; cp $$These $$MODLIB/$$2; \
-		echo Installing modules under $$MODLIB/$$2; \
-	}; \
-	mkdir -p $$MODLIB; \
-	\
-	if [ -f BLOCK_MODULES ]; then inst_mod BLOCK_MODULES block; fi; \
-	if [ -f NET_MODULES   ]; then inst_mod NET_MODULES   net;   fi; \
-	if [ -f IPV4_MODULES  ]; then inst_mod IPV4_MODULES  ipv4;  fi; \
-	if [ -f IPV6_MODULES  ]; then inst_mod IPV6_MODULES  ipv6;  fi; \
-	if [ -f ATM_MODULES   ]; then inst_mod ATM_MODULES   atm;   fi; \
-	if [ -f IDE_MODULES   ]; then inst_mod IDE_MODULES   ide;   fi; \
-	if [ -f SCSI_MODULES  ]; then inst_mod SCSI_MODULES  scsi;  fi; \
-	if [ -f FS_MODULES    ]; then inst_mod FS_MODULES    fs;    fi; \
-	if [ -f NLS_MODULES   ]; then inst_mod NLS_MODULES   fs;    fi; \
-	if [ -f CDROM_MODULES ]; then inst_mod CDROM_MODULES cdrom; fi; \
-	if [ -f HAM_MODULES   ]; then inst_mod HAM_MODULES   net;   fi; \
-	if [ -f SOUND_MODULES ]; then inst_mod SOUND_MODULES sound; fi; \
-	if [ -f VIDEO_MODULES ]; then inst_mod VIDEO_MODULES video; fi; \
-	if [ -f FC4_MODULES   ]; then inst_mod FC4_MODULES   fc4;   fi; \
-	if [ -f IRDA_MODULES  ]; then inst_mod IRDA_MODULES  net;   fi; \
-	if [ -f SK98LIN_MODULES ]; then inst_mod SK98LIN_MODULES  net;   fi; \
-	if [ -f SKFP_MODULES ]; then inst_mod SKFP_MODULES   net;   fi; \
-	if [ -f USB_MODULES   ]; then inst_mod USB_MODULES   usb;   fi; \
-	if [ -f USB_SERIAL_MODULES   ]; then inst_mod USB_SERIAL_MODULES   usb;   fi; \
-	if [ -f IEEE1394_MODULES ]; then inst_mod IEEE1394_MODULES ieee1394; fi; \
-	if [ -f PCMCIA_MODULES ]; then inst_mod PCMCIA_MODULES pcmcia; fi; \
-	if [ -f PCMCIA_NET_MODULES ]; then inst_mod PCMCIA_NET_MODULES pcmcia; fi; \
-	if [ -f PCMCIA_CHAR_MODULES ]; then inst_mod PCMCIA_CHAR_MODULES pcmcia; fi; \
-	if [ -f PCMCIA_SCSI_MODULES ]; then inst_mod PCMCIA_SCSI_MODULES pcmcia; fi; \
-	\
-	ls -1 -U *.o | sort > $$MODLIB/.allmods; \
-	if [ -f $$MODLIB/net/3c59x.o ]; then \
-		mkdir -p $$MODLIB/pcmcia; \
-		ln -nfs ../net/3c59x.o $$MODLIB/pcmcia/3c575_cb.o; \
-		MODULES="$$MODULES 3c575_cb.o"; fi; \
-	echo $$MODULES | tr ' ' '\n' | sort | comm -23 $$MODLIB/.allmods - > $$MODLIB/.misc; \
-	if [ -s $$MODLIB/.misc ]; then inst_mod $$MODLIB/.misc misc; fi; \
-	rm -f $$MODLIB/.misc $$MODLIB/.allmods; \
-	)
+.PHONY: modules_install
+modules_install: _modinst_ $(patsubst %, _modinst_%, $(SUBDIRS)) _modinst_post
+
+.PHONY: _modinst_
+_modinst_:
+	@rm -rf $(MODLIB)/kernel
+	@rm -f $(MODLIB)/build
+	@mkdir -p $(MODLIB)/kernel
+	@ln -s $(TOPDIR) $(MODLIB)/build
+
+# If System.map exists, run depmod.  This deliberately does not have a
+# dependency on System.map since that would run the dependency tree on
+# vmlinux.  This depmod is only for convenience to give the initial
+# boot a modules.dep even before / is mounted read-write.  However the
+# boot script depmod is the master version.
+ifeq "$(strip $(INSTALL_MOD_PATH))" ""
+depmod_opts	:=
+else
+depmod_opts	:= -b $(INSTALL_MOD_PATH) -r
+endif
+.PHONY: _modinst_post
+_modinst_post: _modinst_post_pcmcia
+	if [ -r System.map ]; then $(DEPMOD) -ae -F System.map $(depmod_opts) $(KERNELRELEASE); fi
+
+# Backwards compatibilty symlinks for people still using old versions
+# of pcmcia-cs with hard coded pathnames on insmod.  Remove
+# _modinst_post_pcmcia for kernel 2.4.1.
+.PHONY: _modinst_post_pcmcia
+_modinst_post_pcmcia:
+	cd $(MODLIB); \
+	mkdir -p pcmcia; \
+	find kernel -path '*/pcmcia/*' -name '*.o' | xargs -i -r ln -sf ../{} pcmcia
+
+.PHONY: $(patsubst %, _modinst_%, $(SUBDIRS))
+$(patsubst %, _modinst_%, $(SUBDIRS)) :
+	$(MAKE) -C $(patsubst _modinst_%, %, $@) modules_install
 
 # modules disabled....
 
@@ -359,48 +401,18 @@ modules modules_install: dummy
 endif
 
 clean:	archclean
-	rm -f kernel/ksyms.lst include/linux/compile.h
-	find . -name '*.[oas]' -type f -print | grep -v lxdialog/ | xargs rm -f
-	rm -f core `find . -type f -name 'core' -print`
-	rm -f core `find . -type f -name '.*.flags' -print`
-	rm -f vmlinux System.map
-	rm -f .tmp*
-	rm -f drivers/char/consolemap_deftbl.c drivers/video/promcon_tbl.c
-	rm -f drivers/char/conmakehash
-	rm -f drivers/pci/devlist.h drivers/pci/classlist.h drivers/pci/gen-devlist
-	rm -f drivers/sound/bin2hex drivers/sound/hex2hex
-	rm -f drivers/atm/fore200e_mkfirm drivers/atm/{pca,sba}*{.bin,.bin1,.bin2}
-	rm -f net/khttpd/make_times_h
-	rm -f net/khttpd/times.h
-	rm -f submenu*
-	rm -rf modules
+	find . \( -name '*.[oas]' -o -name core -o -name '.*.flags' \) -type f -print \
+		| grep -v lxdialog/ | xargs rm -f
+	rm -f $(CLEAN_FILES)
+	rm -rf $(CLEAN_DIRS)
 	$(MAKE) -C Documentation/DocBook clean
 
 mrproper: clean archmrproper
-	rm -f include/linux/autoconf.h include/linux/version.h
-	rm -f drivers/net/hamradio/soundmodem/sm_tbl_{afsk1200,afsk2666,fsk9600}.h
-	rm -f drivers/net/hamradio/soundmodem/sm_tbl_{hapn4800,psk4800}.h
-	rm -f drivers/net/hamradio/soundmodem/sm_tbl_{afsk2400_7,afsk2400_8}.h
-	rm -f drivers/net/hamradio/soundmodem/gentbl
-	rm -f drivers/char/hfmodem/gentbl drivers/char/hfmodem/tables.h
-	rm -f drivers/sound/*_boot.h drivers/sound/.*.boot
-	rm -f drivers/sound/msndinit.c
-	rm -f drivers/sound/msndperm.c
-	rm -f drivers/sound/pndsperm.c
-	rm -f drivers/sound/pndspini.c
-	rm -f drivers/atm/fore200e_*_fw.c drivers/atm/.fore200e_*.fw
-	rm -f .version .config* config.in config.old
-	rm -f scripts/tkparse scripts/kconfig.tk scripts/kconfig.tmp
-	rm -f scripts/lxdialog/*.o scripts/lxdialog/lxdialog
-	rm -f .menuconfig.log
-	rm -f include/asm
-	rm -rf include/config
-	rm -f .depend `find . -type f -name .depend -print`
-	rm -f core `find . -type f -size 0 -print`
-	rm -f .hdepend scripts/mkdep scripts/split-include scripts/docproc
-	rm -f $(TOPDIR)/include/linux/modversions.h
-	rm -rf $(TOPDIR)/include/linux/modules
+	find . \( -size 0 -o -name .depend \) -type f -print | xargs rm -f
+	rm -f $(MRPROPER_FILES)
+	rm -rf $(MRPROPER_DIRS)
 	$(MAKE) -C Documentation/DocBook mrproper
+
 distclean: mrproper
 	rm -f core `find . \( -name '*.orig' -o -name '*.rej' -o -name '*~' \
 		-o -name '*.bak' -o -name '#*#' -o -name '.*.orig' \
@@ -421,14 +433,20 @@ psdocs: sgmldocs
 
 pdfdocs: sgmldocs
 	$(MAKE) -C Documentation/DocBook pdf
- 
+
+htmldocs: sgmldocs
+	$(MAKE) -C Documentation/DocBook html
+
 sums:
 	find . -type f -print | sort | xargs sum > .SUMS
 
 dep-files: scripts/mkdep archdep include/linux/version.h
 	scripts/mkdep init/*.c > .depend
-	scripts/mkdep `find $(FINDHPATH) -follow -name \*.h ! -name modversions.h -print` > .hdepend
+	scripts/mkdep `find $(FINDHPATH) -name SCCS -prune -o -follow -name \*.h ! -name modversions.h -print` > .hdepend
 	$(MAKE) $(patsubst %,_sfdep_%,$(SUBDIRS)) _FASTDEP_ALL_SUB_DIRS="$(SUBDIRS)"
+ifdef CONFIG_MODVERSIONS
+	$(MAKE) update-modverfile
+endif
 
 ifdef CONFIG_MODVERSIONS
 MODVERFILE := $(TOPDIR)/include/linux/modversions.h
@@ -437,7 +455,7 @@ MODVERFILE :=
 endif
 export	MODVERFILE
 
-depend dep: dep-files $(MODVERFILE)
+depend dep: dep-files
 
 # make checkconfig: Prune 'scripts' directory to avoid "false positives".
 checkconfig:

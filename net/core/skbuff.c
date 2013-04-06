@@ -4,7 +4,7 @@
  *	Authors:	Alan Cox <iiitac@pyr.swan.ac.uk>
  *			Florian La Roche <rzsfl@rz.uni-sb.de>
  *
- *	Version:	$Id: skbuff.c,v 1.73 2000/05/22 07:29:44 davem Exp $
+ *	Version:	$Id: skbuff.c,v 1.75 2000/12/08 17:15:53 davem Exp $
  *
  *	Fixes:	
  *		Alan Cox	:	Fixed the worst of the load balancer bugs.
@@ -202,7 +202,6 @@ struct sk_buff *alloc_skb(unsigned int size,int gfp_mask)
 
 	/* Set up other state */
 	skb->len = 0;
-	skb->is_clone = 0;
 	skb->cloned = 0;
 
 	atomic_set(&skb->users, 1); 
@@ -224,16 +223,20 @@ static inline void skb_headerinit(void *p, kmem_cache_t *cache,
 {
 	struct sk_buff *skb = p;
 
-	skb->destructor = NULL;
-	skb->pkt_type = PACKET_HOST;	/* Default type */
-	skb->prev = skb->next = NULL;
+	skb->next = NULL;
+	skb->prev = NULL;
 	skb->list = NULL;
 	skb->sk = NULL;
 	skb->stamp.tv_sec=0;	/* No idea about time */
-	skb->ip_summed = 0;
-	skb->security = 0;	/* By default packets are insecure */
+	skb->dev = NULL;
 	skb->dst = NULL;
-	skb->rx_dev = NULL;
+	memset(skb->cb, 0, sizeof(skb->cb));
+	skb->pkt_type = PACKET_HOST;	/* Default type */
+	skb->ip_summed = 0;
+	skb->priority = 0;
+	skb->security = 0;	/* By default packets are insecure */
+	skb->destructor = NULL;
+
 #ifdef CONFIG_NETFILTER
 	skb->nfmark = skb->nfcache = 0;
 	skb->nfct = NULL;
@@ -244,8 +247,6 @@ static inline void skb_headerinit(void *p, kmem_cache_t *cache,
 #ifdef CONFIG_NET_SCHED
 	skb->tc_index = 0;
 #endif
-	memset(skb->cb, 0, sizeof(skb->cb));
-	skb->priority = 0;
 }
 
 /*
@@ -287,10 +288,6 @@ void __kfree_skb(struct sk_buff *skb)
 #ifdef CONFIG_NETFILTER
 	nf_conntrack_put(skb->nfct);
 #endif
-#ifdef CONFIG_NET		
-	if(skb->rx_dev)
-		dev_put(skb->rx_dev);
-#endif		
 	skb_headerinit(skb, NULL, 0);  /* clean state */
 	kfree_skbmem(skb);
 }
@@ -325,12 +322,10 @@ struct sk_buff *skb_clone(struct sk_buff *skb, int gfp_mask)
 	skb->cloned = 1;
        
 	dst_clone(n->dst);
-	n->rx_dev = NULL;
 	n->cloned = 1;
 	n->next = n->prev = NULL;
 	n->list = NULL;
 	n->sk = NULL;
-	n->is_clone = 1;
 	atomic_set(&n->users, 1);
 	n->destructor = NULL;
 #ifdef CONFIG_NETFILTER
@@ -349,7 +344,6 @@ static void copy_skb_header(struct sk_buff *new, const struct sk_buff *old)
 	new->list=NULL;
 	new->sk=NULL;
 	new->dev=old->dev;
-	new->rx_dev=NULL;
 	new->priority=old->priority;
 	new->protocol=old->protocol;
 	new->dst=dst_clone(old->dst);
@@ -358,7 +352,6 @@ static void copy_skb_header(struct sk_buff *new, const struct sk_buff *old)
 	new->mac.raw=old->mac.raw+offset;
 	memcpy(new->cb, old->cb, sizeof(old->cb));
 	new->used=old->used;
-	new->is_clone=0;
 	atomic_set(&new->users, 1);
 	new->pkt_type=old->pkt_type;
 	new->stamp=old->stamp;
@@ -417,7 +410,7 @@ struct sk_buff *skb_copy(const struct sk_buff *skb, int gfp_mask)
 }
 
 /**
- *	skb_copy	-	copy and expand sk_buff
+ *	skb_copy_expand	-	copy and expand sk_buff
  *	@skb: buffer to copy
  *	@newheadroom: new free bytes at head
  *	@newtailroom: new free bytes at tail

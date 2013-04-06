@@ -16,16 +16,15 @@ LINKFLAGS = -static -T bootloader.lds
 	$(CC) $(AFLAGS) -traditional -c -o $*.o $<
 
 OBJECTS	= bootloader.o
-TARGETS =
 
-ifdef CONFIG_IA64_HP_SIM
- TARGETS += bootloader
-endif
+targets-$(CONFIG_IA64_HP_SIM) += bootloader
+targets-$(CONFIG_IA64_GENERIC) += bootloader
 
-all:	$(TARGETS)
+all:	$(targets-y)
 
 bootloader: $(OBJECTS)
-	$(LD) $(LINKFLAGS) $(OBJECTS) $(LIBS) -o bootloader
+	$(LD) $(LINKFLAGS) $(OBJECTS) $(TOPDIR)/lib/lib.a $(TOPDIR)/arch/$(ARCH)/lib/lib.a \
+	-o bootloader
 
 clean:
 	rm -f $(TARGETS)

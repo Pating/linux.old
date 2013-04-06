@@ -254,6 +254,10 @@ romfs_copyfrom(struct inode *i, void *dest, unsigned long offset, unsigned long 
 	return res;
 }
 
+static unsigned char romfs_dtype_table[] = {
+	DT_UNKNOWN, DT_DIR, DT_REG, DT_LNK, DT_BLK, DT_CHR, DT_SOCK, DT_FIFO
+};
+
 static int
 romfs_readdir(struct file *filp, void *dirent, filldir_t filldir)
 {
@@ -298,7 +302,8 @@ romfs_readdir(struct file *filp, void *dirent, filldir_t filldir)
 		nextfh = ntohl(ri.next);
 		if ((nextfh & ROMFH_TYPE) == ROMFH_HRD)
 			ino = ntohl(ri.spec);
-		if (filldir(dirent, fsname, j, offset, ino) < 0) {
+		if (filldir(dirent, fsname, j, offset, ino,
+			    romfs_dtype_table[nextfh & ROMFH_TYPE]) < 0) {
 			return stored;
 		}
 		stored++;
@@ -390,9 +395,9 @@ out:	return ERR_PTR(res);
 static int
 romfs_readpage(struct file *file, struct page * page)
 {
-	struct inode *inode = (struct inode*)page->mapping->host;
-	unsigned long buf;
+	struct inode *inode = page->mapping->host;
 	unsigned long offset, avail, readlen;
+	void *buf;
 	int result = -EIO;
 
 	lock_kernel();
@@ -404,22 +409,23 @@ romfs_readpage(struct file *file, struct page * page)
 	if (offset < inode->i_size) {
 		avail = inode->i_size-offset;
 		readlen = min(avail, PAGE_SIZE);
-		if (romfs_copyfrom(inode, (void *)buf, inode->u.romfs_i.i_dataoffset+offset, readlen) == readlen) {
+		if (romfs_copyfrom(inode, buf, inode->u.romfs_i.i_dataoffset+offset, readlen) == readlen) {
 			if (readlen < PAGE_SIZE) {
-				memset((void *)(buf+readlen),0,PAGE_SIZE-readlen);
+				memset(buf + readlen,0,PAGE_SIZE-readlen);
 			}
 			SetPageUptodate(page);
 			result = 0;
 		}
 	}
 	if (result) {
-		memset((void *)buf, 0, PAGE_SIZE);
+		memset(buf, 0, PAGE_SIZE);
 		SetPageError(page);
 	}
+	flush_dcache_page(page);
 
 	UnlockPage(page);
 
-	free_page(buf);
+	__free_page(page);
 	unlock_kernel();
 
 	return result;

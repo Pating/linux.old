@@ -1871,6 +1871,8 @@ static int opt_open(struct inode *ip, struct file *fp)
 {
 	DEBUG((DEBUG_VFS, "starting opt_open"));
 
+	MOD_INC_USE_COUNT;
+
 	if (!open_count && state == S_IDLE) {
 		int status;
 
@@ -1885,12 +1887,12 @@ static int opt_open(struct inode *ip, struct file *fp)
 		status = drive_status();
 		if (status < 0) {
 			DEBUG((DEBUG_VFS, "drive_status: %02x", -status));
-			return -EIO;
+			goto err_out;
 		}
 		DEBUG((DEBUG_VFS, "status: %02x", status));
 		if ((status & ST_DOOR_OPEN) || (status & ST_DRVERR)) {
 			printk(KERN_INFO "optcd: no disk or door open\n");
-			return -EIO;
+			goto err_out;
 		}
 		status = exec_cmd(COMLOCK);		/* Lock door */
 		if (status < 0) {
@@ -1904,15 +1906,18 @@ static int opt_open(struct inode *ip, struct file *fp)
 				DEBUG((DEBUG_VFS,
 				       "exec_cmd COMUNLOCK: %02x", -status));
 			}
-			return -EIO;
+			goto err_out;
 		}
 		open_count++;
 	}
-	MOD_INC_USE_COUNT;
 
 	DEBUG((DEBUG_VFS, "exiting opt_open"));
 
 	return 0;
+
+err_out:
+    MOD_DEC_USE_COUNT;
+	return -EIO;
 }
 
 
@@ -2059,8 +2064,8 @@ int __init optcd_init(void)
 		printk(KERN_ERR "optcd: unable to get major %d\n", MAJOR_NR);
 		return -EIO;
 	}
-	devfs_register (NULL, "optcd", 0, DEVFS_FL_DEFAULT, MAJOR_NR, 0,
-			S_IFBLK | S_IRUGO | S_IWUGO, 0, 0, &opt_fops, NULL);
+	devfs_register (NULL, "optcd", DEVFS_FL_DEFAULT, MAJOR_NR, 0,
+			S_IFBLK | S_IRUGO | S_IWUGO, &opt_fops, NULL);
 	hardsect_size[MAJOR_NR] = &hsecsize;
 	blksize_size[MAJOR_NR] = &blksize;
 	blk_init_queue(BLK_DEFAULT_QUEUE(MAJOR_NR), DEVICE_REQUEST);
@@ -2075,12 +2080,13 @@ int __init optcd_init(void)
 
 void __exit optcd_exit(void)
 {
-	devfs_unregister(devfs_find_handle(NULL, "optcd", 0, 0, 0,
+	devfs_unregister(devfs_find_handle(NULL, "optcd", 0, 0,
 					   DEVFS_SPECIAL_BLK, 0));
 	if (devfs_unregister_blkdev(MAJOR_NR, "optcd") == -EINVAL) {
 		printk(KERN_ERR "optcd: what's that: can't unregister\n");
 		return;
 	}
+	blk_cleanup_queue(BLK_DEFAULT_QUEUE(MAJOR_NR));
 	release_region(optcd_port, 4);
 	printk(KERN_INFO "optcd: module released.\n");
 }

@@ -177,7 +177,7 @@ scc_enet_start_xmit(struct sk_buff *skb, struct net_device *dev)
 #ifndef final_version
 	if (bdp->cbd_sc & BD_ENET_TX_READY) {
 		/* Ooops.  All transmit buffers are full.  Bail out.
-		 * This should not happen, since cep->tx_busy should be set.
+		 * This should not happen, since cep->tx_full should be set.
 		 */
 		printk("%s: tx queue full!.\n", dev->name);
 		return 1;
@@ -207,12 +207,6 @@ scc_enet_start_xmit(struct sk_buff *skb, struct net_device *dev)
 	cep->stats.tx_bytes += skb->len;
 	cep->skb_cur = (cep->skb_cur+1) & TX_RING_MOD_MASK;
 	
-	/* Push the data cache so the CPM does not get stale memory
-	 * data.
-	 */
-	flush_dcache_range((unsigned long)(skb->data),
-					(unsigned long)(skb->data + skb->len));
-
 	spin_lock_irq(&cep->lock);
 
 	/* Send it on its way.  Tell CPM its ready, interrupt when done,
@@ -229,8 +223,10 @@ scc_enet_start_xmit(struct sk_buff *skb, struct net_device *dev)
 	else
 		bdp++;
 
-	if (bdp->cbd_sc & BD_ENET_TX_READY)
+	if (bdp->cbd_sc & BD_ENET_TX_READY) {
 		netif_stop_queue(dev);
+		cep->tx_full = 1;
+	}
 
 	cep->cur_tx = (cbd_t *)bdp;
 
@@ -254,12 +250,14 @@ scc_enet_timeout(struct net_device *dev)
 		       cep->cur_tx, cep->tx_full ? " (full)" : "",
 		       cep->cur_rx);
 		bdp = cep->tx_bd_base;
+		printk(" Tx @base %p :\n", bdp);
 		for (i = 0 ; i < TX_RING_SIZE; i++, bdp++)
 			printk("%04x %04x %08x\n",
 			       bdp->cbd_sc,
 			       bdp->cbd_datlen,
 			       bdp->cbd_bufaddr);
 		bdp = cep->rx_bd_base;
+		printk(" Rx @base %p :\n", bdp);
 		for (i = 0 ; i < RX_RING_SIZE; i++, bdp++)
 			printk("%04x %04x %08x\n",
 			       bdp->cbd_sc,
@@ -368,6 +366,7 @@ scc_enet_interrupt(int irq, void * dev_id, struct pt_regs * regs)
 		 * full.
 		 */
 		if (cep->tx_full) {
+			cep->tx_full = 0;
 			if (netif_queue_stopped(dev)) {
 				netif_wake_queue(dev);
 			}
@@ -385,6 +384,7 @@ scc_enet_interrupt(int irq, void * dev_id, struct pt_regs * regs)
 		 * _should_ pick up without having to reset any of our
 		 * pointers either.
 		 */
+
 		cp = cpmp;
 		cp->cp_cpcr =
 		    mk_cr_cmd(CPM_ENET_PAGE, CPM_ENET_BLOCK, 0,
@@ -466,8 +466,11 @@ for (;;) {
 		cep->stats.rx_bytes += pkt_len;
 
 		/* This does 16 byte alignment, much more than we need.
-		*/
-		skb = dev_alloc_skb(pkt_len);
+		 * The packet length includes FCS, but we don't want to
+		 * include that when passing upstream as it messes up
+		 * bridging applications.
+		 */
+		skb = dev_alloc_skb(pkt_len-4);
 
 		if (skb == NULL) {
 			printk("%s: Memory squeeze, dropping packet.\n", dev->name);
@@ -475,10 +478,10 @@ for (;;) {
 		}
 		else {
 			skb->dev = dev;
-			skb_put(skb,pkt_len);	/* Make room */
+			skb_put(skb,pkt_len-4);	/* Make room */
 			eth_copy_and_sum(skb,
 				(unsigned char *)__va(bdp->cbd_bufaddr),
-				pkt_len, 0);
+				pkt_len-4, 0);
 			skb->protocol=eth_type_trans(skb,dev);
 			netif_rx(skb);
 		}
@@ -549,10 +552,10 @@ static void set_multicast_list(struct net_device *dev)
 	  
 		/* Log any net taps. */
 		printk("%s: Promiscuous mode enabled.\n", dev->name);
-		cep->sccp->scc_pmsr |= SCC_PMSR_PRO;
+		cep->sccp->scc_pmsr |= SCC_PSMR_PRO;
 	} else {
 
-		cep->sccp->scc_pmsr &= ~SCC_PMSR_PRO;
+		cep->sccp->scc_pmsr &= ~SCC_PSMR_PRO;
 
 		if (dev->flags & IFF_ALLMULTI) {
 			/* Catch all multicast addresses, so set the
@@ -678,11 +681,11 @@ int __init scc_enet_init(void)
 	 * These are relative offsets in the DP ram address space.
 	 * Initialize base addresses for the buffer descriptors.
 	 */
-	i = m8260_cpm_dpalloc(sizeof(cbd_t) * RX_RING_SIZE);
+	i = m8260_cpm_dpalloc(sizeof(cbd_t) * RX_RING_SIZE, 8);
 	ep->sen_genscc.scc_rbase = i;
 	cep->rx_bd_base = (cbd_t *)&immap->im_dprambase[i];
 
-	i = m8260_cpm_dpalloc(sizeof(cbd_t) * TX_RING_SIZE);
+	i = m8260_cpm_dpalloc(sizeof(cbd_t) * TX_RING_SIZE, 8);
 	ep->sen_genscc.scc_tbase = i;
 	cep->tx_bd_base = (cbd_t *)&immap->im_dprambase[i];
 
@@ -816,7 +819,7 @@ int __init scc_enet_init(void)
 	/* Set processing mode.  Use Ethernet CRC, catch broadcast, and
 	 * start frame search 22 bit times after RENA.
 	 */
-	sccp->scc_pmsr = (SCC_PMSR_ENCRC | SCC_PMSR_NIB22);
+	sccp->scc_pmsr = (SCC_PSMR_ENCRC | SCC_PSMR_NIB22);
 
 	/* It is now OK to enable the Ethernet transmitter.
 	 * Unfortunately, there are board implementation differences here.

@@ -118,6 +118,12 @@
  * being used to store jiffies, which are unsigned longs).
  */
 
+/*
+ * 2000/08/28 -- Arnaldo Carvalho de Melo <acme@conectiva.com.br>
+ * - get rid of check_region
+ * - s/suser/capable/
+ */
+
 #define FLOPPY_SANITY_CHECK
 #undef  FLOPPY_SILENT_DCL_CLEAR
 
@@ -162,7 +168,7 @@ static int print_unex=1;
  * It's been recommended that take about 1/4 of the default speed
  * in some more extreme cases.
  */
-static int slow_floppy = 0;
+static int slow_floppy;
 
 #include <asm/dma.h>
 #include <asm/irq.h>
@@ -197,7 +203,7 @@ static unsigned short virtual_dma_port=0x3f0;
 void floppy_interrupt(int irq, void *dev_id, struct pt_regs * regs);
 static int set_dor(int fdc, char mask, char data);
 static void register_devfs_entries (int drive) __init;
-static devfs_handle_t devfs_handle = NULL;
+static devfs_handle_t devfs_handle;
 
 #define K_64	0x10000		/* 64KB */
 
@@ -215,7 +221,7 @@ static int allowed_drive_mask = 0x33;
 
 #include <asm/floppy.h>
 
-static int irqdma_allocated = 0;
+static int irqdma_allocated;
 
 #define MAJOR_NR FLOPPY_MAJOR
 
@@ -253,7 +259,7 @@ static inline void fallback_on_nodma_alloc(char **addr, size_t l)
 
 /* End dma memory related stuff */
 
-static unsigned long fake_change = 0;
+static unsigned long fake_change;
 static int initialising=1;
 
 static inline int TYPE(kdev_t x) {
@@ -454,10 +460,7 @@ static struct floppy_struct floppy_type[32] = {
 #define SECTSIZE (_FD_SECTSIZE(*floppy))
 
 /* Auto-detection: Disk type used until the next media change occurs. */
-static struct floppy_struct *current_type[N_DRIVE] = {
-	NULL, NULL, NULL, NULL,
-	NULL, NULL, NULL, NULL
-};
+static struct floppy_struct *current_type[N_DRIVE];
 
 /*
  * User-provided type information. current_type points to
@@ -466,14 +469,14 @@ static struct floppy_struct *current_type[N_DRIVE] = {
 static struct floppy_struct user_params[N_DRIVE];
 
 static int floppy_sizes[256];
-static int floppy_blocksizes[256] = { 0, };
+static int floppy_blocksizes[256];
 
 /*
  * The driver is trying to determine the correct media format
  * while probing is set. rw_interrupt() clears it after a
  * successful access.
  */
-static int probing = 0;
+static int probing;
 
 /* Synchronization of FDC access. */
 #define FD_COMMAND_NONE -1
@@ -481,7 +484,7 @@ static int probing = 0;
 #define FD_COMMAND_OKAY 3
 
 static volatile int command_status = FD_COMMAND_NONE;
-static unsigned long fdc_busy = 0;
+static unsigned long fdc_busy;
 static DECLARE_WAIT_QUEUE_HEAD(fdc_wait);
 static DECLARE_WAIT_QUEUE_HEAD(command_done);
 
@@ -552,9 +555,7 @@ static void reset_fdc(void);
 #define NEED_1_RECAL -2
 #define NEED_2_RECAL -3
 
-/* */
-static int usage_count = 0;
-
+static int usage_count;
 
 /* buffer related variables */
 static int buffer_track = -1;
@@ -567,8 +568,8 @@ static struct floppy_fdc_state fdc_state[N_FDC];
 static int fdc; /* current fdc */
 
 static struct floppy_struct *_floppy = floppy_type;
-static unsigned char current_drive = 0;
-static long current_count_sectors = 0;
+static unsigned char current_drive;
+static long current_count_sectors;
 static unsigned char sector_t; /* sector in track */
 static unsigned char in_sector_offset;	/* offset within physical sector,
 					 * expressed in units of 512 bytes */
@@ -619,7 +620,7 @@ static void is_alive(const char *message)
 
 #define OLOGSIZE 20
 
-static void (*lasthandler)(void) = NULL;
+static void (*lasthandler)(void);
 static unsigned long interruptjiffies;
 static unsigned long resultjiffies;
 static int resultsize;
@@ -852,10 +853,10 @@ static void set_fdc(int drive)
 }
 
 /* locks the driver */
-static int lock_fdc(int drive, int interruptible)
+static int _lock_fdc(int drive, int interruptible, int line)
 {
 	if (!usage_count){
-		printk(KERN_ERR "Trying to lock fdc while usage count=0\n");
+		printk(KERN_ERR "Trying to lock fdc while usage count=0 at line %d\n", line);
 		return -1;
 	}
 	if(floppy_grab_irq_and_dma()==-1)
@@ -888,6 +889,8 @@ static int lock_fdc(int drive, int interruptible)
 	set_fdc(drive);
 	return 0;
 }
+
+#define lock_fdc(drive,interruptible) _lock_fdc(drive,interruptible, __LINE__)
 
 #define LOCK_FDC(drive,interruptible) \
 if (lock_fdc(drive,interruptible)) return -EINTR;
@@ -983,8 +986,7 @@ static void empty(void)
 {
 }
 
-static struct tq_struct floppy_tq =
-{ 0, 0, 0, 0 };
+static struct tq_struct floppy_tq;
 
 static void schedule_bh( void (*handler)(void*) )
 {
@@ -1261,7 +1263,7 @@ static inline void perpendicular_mode(void)
 } /* perpendicular_mode */
 
 static int fifo_depth = 0xa;
-static int no_fifo = 0;
+static int no_fifo;
 
 static int fdc_configure(void)
 {
@@ -1872,7 +1874,7 @@ static void show_floppy(void)
 	if (timer_pending(&fd_timer))
 		printk("fd_timer.function=%p\n", fd_timer.function);
 	if (timer_pending(&fd_timeout)){
-		printk("timer_table=%p\n",fd_timeout.function);
+		printk("timer_function=%p\n",fd_timeout.function);
 		printk("expires=%lu\n",fd_timeout.expires-jiffies);
 		printk("now=%lu\n",jiffies);
 	}
@@ -2280,6 +2282,7 @@ static int do_format(kdev_t device, struct format_descr *tmp_format_req)
 static void request_done(int uptodate)
 {
 	int block;
+	unsigned long flags;
 
 	probing = 0;
 	reschedule_timeout(MAXTIMEOUT, "request done %d", uptodate);
@@ -2298,6 +2301,7 @@ static void request_done(int uptodate)
 			DRS->maxtrack = 1;
 
 		/* unlock chained buffers */
+		spin_lock_irqsave(&io_request_lock, flags);
 		while (current_count_sectors && !QUEUE_EMPTY &&
 		       current_count_sectors >= CURRENT->current_nr_sectors){
 			current_count_sectors -= CURRENT->current_nr_sectors;
@@ -2305,6 +2309,8 @@ static void request_done(int uptodate)
 			CURRENT->sector += CURRENT->current_nr_sectors;
 			end_request(1);
 		}
+		spin_unlock_irqrestore(&io_request_lock, flags);
+
 		if (current_count_sectors && !QUEUE_EMPTY){
 			/* "unlock" last subsector */
 			CURRENT->buffer += current_count_sectors <<9;
@@ -2328,7 +2334,9 @@ static void request_done(int uptodate)
 			DRWE->last_error_sector = CURRENT->sector;
 			DRWE->last_error_generation = DRS->generation;
 		}
+		spin_lock_irqsave(&io_request_lock, flags);
 		end_request(0);
+		spin_unlock_irqrestore(&io_request_lock, flags);
 	}
 }
 
@@ -2336,6 +2344,13 @@ static void request_done(int uptodate)
 static void rw_interrupt(void)
 {
 	int nr_sectors, ssize, eoc, heads;
+
+	if (R_HEAD >= 2) {
+	    /* some Toshiba floppy controllers occasionnally seem to
+	     * return bogus interrupts after read/write operations, which
+	     * can be recognized by a bad head number (>= 2) */
+	     return;
+	}  
 
 	if (!DRS->first_read_date)
 		DRS->first_read_date = jiffies;
@@ -2600,6 +2615,11 @@ static int make_raw_rw_request(void)
 {
 	int aligned_sector_t;
 	int max_sector, max_size, tracksize, ssize;
+
+	if(max_buffer_sectors == 0) {
+		printk("VFS: Block I/O scheduled on unopened device\n");
+		return 0;
+	}
 
 	set_fdc(DRIVE(CURRENT->rq_dev));
 
@@ -2955,6 +2975,11 @@ static void process_fd_request(void)
 
 static void do_fd_request(request_queue_t * q)
 {
+	if(max_buffer_sectors == 0) {
+		printk("VFS: do_fd_request called on non-open device\n");
+		return;
+	}
+
 	if (usage_count == 0) {
 		printk("warning: usage count=0, CURRENT=%p exiting\n", CURRENT);
 		printk("sect=%ld cmd=%d\n", CURRENT->sector, CURRENT->cmd);
@@ -3410,6 +3435,7 @@ static int get_floppy_geometry(int drive, int type, struct floppy_struct **g)
 static int fd_ioctl(struct inode *inode, struct file *filp, unsigned int cmd,
 		    unsigned long param)
 {
+#define FD_IOCTL_ALLOWED ((filp) && (filp)->private_data)
 #define OUT(c,x) case c: outparam = (const char *) (x); break
 #define IN(c,x,tag) case c: *(x) = inparam. tag ; return 0
 
@@ -3477,7 +3503,8 @@ static int fd_ioctl(struct inode *inode, struct file *filp, unsigned int cmd,
 		return -EINVAL;
 
 	/* permission checks */
-	if ((cmd & 0x80) && !suser())
+	if (((cmd & 0x40) && !FD_IOCTL_ALLOWED) ||
+	    ((cmd & 0x80) && !capable(CAP_SYS_ADMIN)))
 		return -EPERM;
 
 	/* copyin */
@@ -3682,6 +3709,8 @@ static int floppy_open(struct inode * inode, struct file * filp)
 		return -EIO;
 	}
 
+	filp->private_data = (void*) 0;
+
 	drive = DRIVE(inode->i_rdev);
 	if (drive >= N_DRIVE ||
 	    !(allowed_drive_mask & (1 << drive)) ||
@@ -3749,6 +3778,13 @@ static int floppy_open(struct inode * inode, struct file * filp)
 		invalidate_buffers(MKDEV(FLOPPY_MAJOR,old_dev));
 	}
 
+	/* Allow ioctls if we have write-permissions even if read-only open.
+	 * Needed so that programs such as fdrawcmd still can work on write
+	 * protected disks */
+	if ((filp->f_mode & 2) || 
+	    (inode->i_sb && (permission(inode,2) == 0)))
+	    filp->private_data = (void*) 8;
+
 	if (UFDCS->rawcmd == 1)
 		UFDCS->rawcmd = 2;
 
@@ -3782,9 +3818,14 @@ static int check_floppy_change(kdev_t dev)
 		return 1;
 
 	if (UDP->checkfreq < (int)(jiffies - UDRS->last_checked)) {
+		if(floppy_grab_irq_and_dma()) {
+			return 1;
+		}
+
 		lock_fdc(drive,0);
 		poll_drive(0,0);
 		process_fd_request();
+		floppy_release_irq_and_dma();
 	}
 
 	if (UTESTF(FD_DISK_CHANGED) ||
@@ -3810,6 +3851,10 @@ static int floppy_revalidate(kdev_t dev)
 	    UTESTF(FD_VERIFY) ||
 	    test_bit(drive, &fake_change) ||
 	    NO_GEOM){
+		if(usage_count == 0) {
+			printk("VFS: revalidate called on non-open device.\n");
+			return -EFAULT;
+		}
 		lock_fdc(drive,0);
 		cf = UTESTF(FD_DISK_CHANGED) || UTESTF(FD_VERIFY);
 		if (!(cf || test_bit(drive, &fake_change) || NO_GEOM)){
@@ -3831,7 +3876,7 @@ static int floppy_revalidate(kdev_t dev)
 				size = 1024;
 			if (!(bh = getblk(dev,0,size))){
 				process_fd_request();
-				return 1;
+				return -ENXIO;
 			}
 			if (bh && !buffer_uptodate(bh))
 				ll_rw_block(READ, 1, &bh);
@@ -3878,10 +3923,10 @@ static void __init register_devfs_entries (int drive)
 	    char name[16];
 
 	    sprintf (name, "%d%s", drive, table[table_sup[UDP->cmos][i]]);
-	    devfs_register (devfs_handle, name, 0, DEVFS_FL_DEFAULT, MAJOR_NR,
+	    devfs_register (devfs_handle, name, DEVFS_FL_DEFAULT, MAJOR_NR,
 			    base_minor + (table_sup[UDP->cmos][i] << 2),
 			    S_IFBLK | S_IRUSR | S_IWUSR | S_IRGRP |S_IWGRP,
-			    0, 0, &floppy_fops, NULL);
+			    &floppy_fops, NULL);
 	} while (table_sup[UDP->cmos][i++]);
     }
 }
@@ -4109,7 +4154,7 @@ int __init floppy_init(void)
 
 	raw_cmd = NULL;
 
-	devfs_handle = devfs_mk_dir (NULL, "floppy", 0, NULL);
+	devfs_handle = devfs_mk_dir (NULL, "floppy", NULL);
 	if (devfs_register_blkdev(MAJOR_NR,"fd",&floppy_fops)) {
 		printk("Unable to get major %d for floppy\n",MAJOR_NR);
 		return -EBUSY;
@@ -4143,6 +4188,7 @@ int __init floppy_init(void)
 	if (fdc_state[0].address == -1) {
 		devfs_unregister_blkdev(MAJOR_NR,"fd");
 		del_timer(&fd_timeout);
+		blk_cleanup_queue(BLK_DEFAULT_QUEUE(MAJOR_NR));
 		return -ENODEV;
 	}
 #if N_FDC > 1
@@ -4269,23 +4315,14 @@ static int floppy_grab_irq_and_dma(void)
 
 	for (fdc=0; fdc< N_FDC; fdc++){
 		if (FDCS->address != -1){
-			if (check_region(FDCS->address, 6) < 0 ||
-			    check_region(FDCS->address+7, 1) < 0) {
+			if (!request_region(FDCS->address, 6, "floppy")) {
 				DPRINT("Floppy io-port 0x%04lx in use\n", FDCS->address);
-				fd_free_irq();
-				fd_free_dma();
-				while(--fdc >= 0) {
-					release_region(FDCS->address, 6);
-					release_region(FDCS->address+7, 1);
-				}
-				MOD_DEC_USE_COUNT;
-				spin_lock_irqsave(&floppy_usage_lock, flags);
-				usage_count--;
-				spin_unlock_irqrestore(&floppy_usage_lock, flags);
-				return -1;
+				goto cleanup1;
 			}
-			request_region(FDCS->address, 6, "floppy");
-			request_region(FDCS->address+7, 1, "floppy DIR");
+			if (!request_region(FDCS->address + 7, 1, "floppy DIR")) {
+				DPRINT("Floppy io-port 0x%04lx in use\n", FDCS->address + 7);
+				goto cleanup2;
+			}
 			/* address + 6 is reserved, and may be taken by IDE.
 			 * Unfortunately, Adaptec doesn't know this :-(, */
 		}
@@ -4309,6 +4346,20 @@ static int floppy_grab_irq_and_dma(void)
 	fdc = 0;
 	irqdma_allocated = 1;
 	return 0;
+cleanup2:
+	release_region(FDCS->address, 6);
+cleanup1:
+	fd_free_irq();
+	fd_free_dma();
+	while(--fdc >= 0) {
+		release_region(FDCS->address, 6);
+		release_region(FDCS->address + 7, 1);
+	}
+	MOD_DEC_USE_COUNT;
+	spin_lock_irqsave(&floppy_usage_lock, flags);
+	usage_count--;
+	spin_unlock_irqrestore(&floppy_usage_lock, flags);
+	return -1;
 }
 
 static void floppy_release_irq_and_dma(void)

@@ -201,8 +201,6 @@ static void rio_close (void  *ptr);
 static int rio_chars_in_buffer (void * ptr);
 static int rio_fw_ioctl (struct inode *inode, struct file *filp,
 		         unsigned int cmd, unsigned long arg);
-static int rio_fw_open(struct inode *inode, struct file *filp);
-static INT rio_fw_release(struct inode *inode, struct file *filp);
 static int rio_init_drivers(void);
 
 
@@ -213,7 +211,7 @@ void my_hd (void *addr, int len);
 static struct tty_driver rio_driver, rio_callout_driver;
 static struct tty_driver rio_driver2, rio_callout_driver2;
 
-static struct tty_struct * rio_table[RIO_NPORTS] = { NULL, };
+static struct tty_struct * rio_table[RIO_NPORTS];
 static struct termios ** rio_termios;
 static struct termios ** rio_termios_locked;
 
@@ -225,9 +223,9 @@ struct rio_info *p;
 struct rio_port *rio_ports;
 
 int rio_refcount;
-int rio_initialized = 0;
-int rio_nports = 0;
-int rio_debug = 0;
+int rio_initialized;
+int rio_nports;
+int rio_debug;
 
 
 /* You can have the driver poll your card. 
@@ -251,6 +249,8 @@ long rio_irqmask = -1;
 
 #ifndef TWO_ZERO
 #ifdef MODULE
+MODULE_AUTHOR("Rogier Wolff <R.E.Wolff@bitwizard.nl>, Patrick van de Lageweg <patrick@bitwizard.nl>");
+MODULE_DESCRIPTION("RIO driver");
 MODULE_PARM(rio_poll, "i");
 MODULE_PARM(rio_debug, "i");
 MODULE_PARM(rio_irqmask, "i");
@@ -277,9 +277,8 @@ static struct real_driver rio_real_driver = {
  */
 
 static struct file_operations rio_fw_fops = {
+	owner:		THIS_MODULE,
 	ioctl:		rio_fw_ioctl,
-	open:		rio_fw_open,
-	release:	rio_fw_release,
 };
 
 struct miscdevice rio_fw_device = {
@@ -397,26 +396,37 @@ void rio_udelay (int usecs)
 
 void rio_inc_mod_count (void)
 {
+#ifdef MODULE
   func_enter ();
+  rio_dprintk (RIO_DEBUG_MOD_COUNT, "rio_inc_mod_count\n");
   MOD_INC_USE_COUNT; 
   func_exit ();
+#endif
 }
 
 
 void rio_dec_mod_count (void)
 {
+#ifdef MODULE
   func_enter ();
+  rio_dprintk (RIO_DEBUG_MOD_COUNT, "rio_dec_mod_count\n");
   MOD_DEC_USE_COUNT; 
   func_exit ();
+#endif
 }
 
 
 static int rio_set_real_termios (void *ptr)
 {
-  int rv;
+  int rv, modem;
+  struct tty_struct *tty;
   func_enter();
 
-  rv = RIOParam( (struct Port *) ptr, CONFIG, 0, 1);
+  tty = ((struct Port *)ptr)->gs.tty;
+
+  modem = (MAJOR(tty->device) == RIO_NORMAL_MAJOR0) || (MAJOR(tty->device) == RIO_NORMAL_MAJOR1);
+
+  rv = RIOParam( (struct Port *) ptr, CONFIG, modem, 1);
 
   func_exit ();
 
@@ -635,31 +645,6 @@ static void rio_shutdown_port (void * ptr)
 }
 
 
-
-/* ********************************************************************** *
- *                Here are the routines that actually                     *
- *               interface with the rest of the system                    *
- * ********************************************************************** */
-
-
-static int rio_fw_open(struct inode *inode, struct file *filp)
-{
-  func_enter ();
-  rio_inc_mod_count ();
-  func_exit ();
-  return 0;
-}
-
-
-static INT rio_fw_release(struct inode *inode, struct file *filp)
-{
-  func_enter ();
-  rio_dec_mod_count ();
-  func_exit ();
-  return NO_ERROR;
-}
-
-
 /* I haven't the foggiest why the decrement use count has to happen
    here. The whole linux serial drivers stuff needs to be redesigned.
    My guess is that this is a hack to minimize the impact of a bug
@@ -670,7 +655,7 @@ static INT rio_fw_release(struct inode *inode, struct file *filp)
 static void rio_hungup (void *ptr)
 {
   func_enter ();
-  /* rio_dec_mod_count (); */
+  rio_dec_mod_count (); 
   func_exit ();
 }
 
@@ -681,9 +666,22 @@ static void rio_hungup (void *ptr)
  */
 static void rio_close (void *ptr)
 {
+  struct Port *PortP;
+
   func_enter ();
+
+  PortP = (struct Port *)ptr;
+
   riotclose (ptr);
+
+  if(PortP->gs.count) {
+    printk (KERN_ERR "WARNING port count:%d\n", PortP->gs.count);
+    PortP->gs.count = 0; 
+  }                
+
+
   rio_dec_mod_count ();
+
   func_exit ();
 }
 
@@ -1003,13 +1001,12 @@ static int rio_init_datastructures (void)
     port->gs.close_delay = HZ/2;
     port->gs.closing_wait = 30 * HZ;
     port->gs.rd = &rio_real_driver;
-
+    port->portSem = SPIN_LOCK_UNLOCKED;
     /*
      * Initializing wait queue
      */
     init_waitqueue_head(&port->gs.open_wait);
-    init_waitqueue_head(&port->gs.close_wait); 
-
+    init_waitqueue_head(&port->gs.close_wait);
   }
 #else
   /* We could postpone initializing them to when they are configured. */
@@ -1039,7 +1036,7 @@ static int rio_init_datastructures (void)
   return -ENOMEM;
 }
 
-
+#ifdef MODULE
 static void rio_release_drivers(void)
 {
   func_enter();
@@ -1049,6 +1046,7 @@ static void rio_release_drivers(void)
   tty_unregister_driver (&rio_driver);
   func_exit();
 }
+#endif 
 
 #ifdef TWO_ZERO
 #define PDEV unsigned char pci_bus, unsigned pci_fun
@@ -1105,8 +1103,6 @@ void fix_rio_pci (PDEV)
 #define rio_init init_module
 #endif
 
-extern int gs_debug;
-
 int rio_init(void) 
 {
   int found = 0;
@@ -1131,7 +1127,6 @@ int rio_init(void)
   func_enter();
   rio_dprintk (RIO_DEBUG_INIT, "Initing rio module... (rio_debug=%d)\n", 
 	       rio_debug);
-  gs_debug = rio_debug >> 24;
 
   if (abs ((long) (&rio_debug) - rio_debug) < 0x10000) {
     printk (KERN_WARNING "rio: rio_debug is an address, instead of a value. "
@@ -1149,6 +1144,7 @@ int rio_init(void)
     while ((pdev = pci_find_device (PCI_VENDOR_ID_SPECIALIX, 
                                     PCI_DEVICE_ID_SPECIALIX_SX_XIO_IO8, 
                                     pdev))) {
+       if (pci_enable_device(pdev)) continue;
 #else
     for (i=0;i< RIO_NBOARDS;i++) {
       if (pcibios_find_device (PCI_VENDOR_ID_SPECIALIX, 
@@ -1185,6 +1181,7 @@ int rio_init(void)
       hp->Type  = RIO_PCI;
       hp->Copy  = rio_pcicopy; 
       hp->Mode  = RIO_PCI_BOOT_FROM_RAM;
+      hp->HostLock = SPIN_LOCK_UNLOCKED;
       rio_reset_interrupt (hp);
       rio_start_card_running (hp);
 
@@ -1234,6 +1231,7 @@ int rio_init(void)
     while ((pdev = pci_find_device (PCI_VENDOR_ID_SPECIALIX, 
                                     PCI_DEVICE_ID_SPECIALIX_RIO, 
                                     pdev))) {
+       if (pci_enable_device(pdev)) continue;
 #else
     for (i=0;i< RIO_NBOARDS;i++) {
       if (pcibios_find_device (PCI_VENDOR_ID_SPECIALIX, 

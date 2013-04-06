@@ -10,6 +10,8 @@
 #ifndef __ASMPPC_IDE_H
 #define __ASMPPC_IDE_H
 
+#ifdef __KERNEL__
+
 #include <linux/sched.h>
 #include <asm/processor.h>
 
@@ -18,8 +20,6 @@
 #endif
 
 #include <asm/hdreg.h>
-
-#ifdef __KERNEL__
 
 #include <linux/config.h>
 #include <linux/hdreg.h>
@@ -63,7 +63,6 @@ void ide_insw(ide_ioreg_t port, void *buf, int ns);
 void ide_outsw(ide_ioreg_t port, void *buf, int ns);
 void ppc_generic_ide_fix_driveid(struct hd_driveid *id);
 
-#if 0
 #undef insw
 #define insw(port, buf, ns) 	do {				\
 	ppc_ide_md.insw((port), (buf), (ns));			\
@@ -73,7 +72,6 @@ void ppc_generic_ide_fix_driveid(struct hd_driveid *id);
 #define outsw(port, buf, ns) 	do {				\
 	ppc_ide_md.outsw((port), (buf), (ns));			\
 } while (0)
-#endif
 
 #undef	SUPPORT_SLOW_DATA_PORTS
 #define	SUPPORT_SLOW_DATA_PORTS	0

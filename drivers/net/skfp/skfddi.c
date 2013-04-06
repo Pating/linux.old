@@ -121,7 +121,7 @@ static int skfp_driver_init(struct net_device *dev);
 static int skfp_open(struct net_device *dev);
 static int skfp_close(struct net_device *dev);
 static void skfp_interrupt(int irq, void *dev_id, struct pt_regs *regs);
-static struct enet_statistics *skfp_ctl_get_stats(struct net_device *dev);
+static struct net_device_stats *skfp_ctl_get_stats(struct net_device *dev);
 static void skfp_ctl_set_multicast_list(struct net_device *dev);
 static void skfp_ctl_set_multicast_list_wo_lock(struct net_device *dev);
 static int skfp_ctl_set_mac_address(struct net_device *dev, void *addr);
@@ -305,6 +305,8 @@ int skfp_probe(struct net_device *dev)
 			pdev)) == 0) {
 			break;
 		}
+		if (pci_enable_device(pdev))
+			continue;
 
 #ifndef MEM_MAPPED_IO
 		/* Verify that I/O enable bit is set (PCI slot is enabled) */
@@ -352,7 +354,7 @@ int skfp_probe(struct net_device *dev)
 		command &= ~PCI_COMMAND_IO;
 		pci_write_config_word(pdev, PCI_COMMAND, command);
 
-		port = pdev->resource[0].start;
+		port = pci_resource_start(pdev, 0);
 
 		port = (unsigned long)ioremap(port, 0x4000);
 		if (!port){
@@ -965,7 +967,7 @@ void skfp_interrupt(int irq, void *dev_id, struct pt_regs *regs)
  *   independent.
  *
  */
-struct enet_statistics *skfp_ctl_get_stats(struct net_device *dev)
+struct net_device_stats *skfp_ctl_get_stats(struct net_device *dev)
 {
 	struct s_smc *bp = (struct s_smc *) dev->priv;
 
@@ -1088,7 +1090,7 @@ struct enet_statistics *skfp_ctl_get_stats(struct net_device *dev)
 	bp->stats.port_lem_cts[1] = bp->cmd_rsp_virt->cntrs_get.cntrs.link_errors[1].ls;
 
 #endif
-	return ((struct enet_statistics *) &bp->os.MacStat);
+	return ((struct net_device_stats *) &bp->os.MacStat);
 }				// ctl_get_stat
 
 
@@ -1108,7 +1110,7 @@ struct enet_statistics *skfp_ctl_get_stats(struct net_device *dev)
  *   dev - pointer to device information
  *
  * Functional Description:
- *   This function aquires the driver lock and only calls
+ *   This function acquires the driver lock and only calls
  *   skfp_ctl_set_multicast_list_wo_lock then.
  *   This routine follows a fairly simple algorithm for setting the
  *   adapter filters and CAM:
@@ -1652,7 +1654,8 @@ void *mac_drv_get_desc_mem(struct s_smc *smc, unsigned int size)
 
 	virt = mac_drv_get_space(smc, size);
 
-	size = (u_int) ((0 - (unsigned long) virt) & 15UL);
+	size = (u_int) (16 - (((unsigned long) virt) & 15UL));
+	size = size % 16;
 
 	PRINTK("Allocate %u bytes alignment gap ", size);
 	PRINTK("for descriptor memory.\n");

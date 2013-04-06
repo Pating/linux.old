@@ -1,4 +1,4 @@
-/*  $Id: process.c,v 1.107 2000/05/09 17:40:14 davem Exp $
+/*  $Id: process.c,v 1.113 2000/11/08 08:14:58 davem Exp $
  *  arch/sparc64/kernel/process.c
  *
  *  Copyright (C) 1995, 1996 David S. Miller (davem@caip.rutgers.edu)
@@ -53,7 +53,7 @@ int cpu_idle(void)
 		return -EPERM;
 
 	/* endless idle loop with no priority at all */
-	current->priority = 0;
+	current->nice = 20;
 	current->counter = -100;
 	init_idle();
 
@@ -65,6 +65,9 @@ int cpu_idle(void)
 		 * But this requires writing back the contents of the
 		 * L2 cache etc. so implement this later. -DaveM
 		 */
+		while (!current->need_resched)
+			barrier();
+
 		schedule();
 		check_pgt_cache();
 	}
@@ -80,7 +83,7 @@ int cpu_idle(void)
 #define unidle_me()		(cpu_data[current->processor].idle_volume = 0)
 int cpu_idle(void)
 {
-	current->priority = 0;
+	current->nice = 20;
 	current->counter = -100;
 	init_idle();
 
@@ -270,7 +273,9 @@ void __show_regs(struct pt_regs * regs)
 
 	spin_lock_irqsave(&regdump_lock, flags);
 	printk("CPU[%d]: local_irq_count[%u] irqs_running[%d]\n",
-	       smp_processor_id(), local_irq_count, irqs_running());
+	       smp_processor_id(),
+	       local_irq_count(smp_processor_id()),
+	       irqs_running());
 #endif
 	printk("TSTATE: %016lx TPC: %016lx TNPC: %016lx Y: %08x\n", regs->tstate,
 	       regs->tpc, regs->tnpc, regs->y);
@@ -522,7 +527,7 @@ void synchronize_user_stack(void)
 	}
 }
 
-void fault_in_user_windows(struct pt_regs *regs)
+void fault_in_user_windows(void)
 {
 	struct thread_struct *t = &current->thread;
 	unsigned long window;
@@ -568,6 +573,7 @@ barf:
  *       do_fork().
  */
 int copy_thread(int nr, unsigned long clone_flags, unsigned long sp,
+		unsigned long unused,
 		struct task_struct *p, struct pt_regs *regs)
 {
 	struct thread_struct *t = &p->thread;
@@ -641,14 +647,21 @@ pid_t kernel_thread(int (*fn)(void *), void * arg, unsigned long flags)
 {
 	long retval;
 
-	__asm__ __volatile("mov %1, %%g1\n\t"
+	/* If the parent runs before fn(arg) is called by the child,
+	 * the input registers of this function can be clobbered.
+	 * So we stash 'fn' and 'arg' into global registers which
+	 * will not be modified by the parent.
+	 */
+	__asm__ __volatile("mov %4, %%g2\n\t"	   /* Save FN into global */
+			   "mov %5, %%g3\n\t"	   /* Save ARG into global */
+			   "mov %1, %%g1\n\t"	   /* Clone syscall nr. */
 			   "mov %2, %%o0\n\t"	   /* Clone flags. */
 			   "mov 0, %%o1\n\t"	   /* usp arg == 0 */
 			   "t 0x6d\n\t"		   /* Linux/Sparc clone(). */
 			   "brz,a,pn %%o1, 1f\n\t" /* Parent, just return. */
 			   " mov %%o0, %0\n\t"
-			   "jmpl %4, %%o7\n\t"	   /* Call the function. */
-			   " mov %5, %%o0\n\t"	   /* Set arg in delay. */
+			   "jmpl %%g2, %%o7\n\t"   /* Call the function. */
+			   " mov %%g3, %%o0\n\t"   /* Set arg in delay. */
 			   "mov %3, %%g1\n\t"
 			   "t 0x6d\n\t"		   /* Linux/Sparc exit(). */
 			   /* Notreached by child. */
@@ -656,7 +669,7 @@ pid_t kernel_thread(int (*fn)(void *), void * arg, unsigned long flags)
 			   "=r" (retval) :
 			   "i" (__NR_clone), "r" (flags | CLONE_VM),
 			   "i" (__NR_exit),  "r" (fn), "r" (arg) :
-			   "g1", "o0", "o1", "memory", "cc");
+			   "g1", "g2", "g3", "o0", "o1", "memory", "cc");
 	return retval;
 }
 

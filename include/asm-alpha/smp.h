@@ -24,8 +24,10 @@ __hard_smp_processor_id(void)
 #include <asm/irq.h>
 
 struct cpuinfo_alpha {
-	unsigned long loops_per_sec;
+	unsigned long loops_per_jiffy;
 	unsigned long last_asn;
+	int need_new_asn;
+	int asn_lock;
 	unsigned long *pgd_cache;
 	unsigned long *pte_cache;
 	unsigned long pgtable_cache_sz;
@@ -33,7 +35,6 @@ struct cpuinfo_alpha {
 	unsigned long irq_attempt[NR_IRQS];
 	unsigned long prof_multiplier;
 	unsigned long prof_counter;
-	int irq_count, bh_count;
 	unsigned char mcheck_expected;
 	unsigned char mcheck_taken;
 	unsigned char mcheck_extra;

@@ -39,6 +39,7 @@ static unsigned char bridge_ula_lec[] = {0x01, 0x80, 0xc2, 0x00, 0x00};
 
 /* Modular too */
 #include <linux/module.h>
+#include <linux/init.h>
 
 #include "lec.h"
 #include "lec_arpc.h"
@@ -332,23 +333,33 @@ lec_send_packet(struct sk_buff *skb, struct net_device *dev)
                         lec_h->h_dest[0], lec_h->h_dest[1], lec_h->h_dest[2],
                         lec_h->h_dest[3], lec_h->h_dest[4], lec_h->h_dest[5]);
                 ATM_SKB(skb2)->vcc = send_vcc;
-                atomic_add(skb2->truesize, &send_vcc->tx_inuse);
                 ATM_SKB(skb2)->iovcnt = 0;
                 ATM_SKB(skb2)->atm_options = send_vcc->atm_options;
                 DPRINTK("%s:sending to vpi:%d vci:%d\n", dev->name,
                         send_vcc->vpi, send_vcc->vci);       
-                priv->stats.tx_packets++;
-                priv->stats.tx_bytes += skb2->len;
-                send_vcc->send(send_vcc, skb2);
+                if (atm_may_send(send_vcc, skb2->len)) {
+                        atomic_add(skb2->truesize, &send_vcc->tx_inuse);
+                        priv->stats.tx_packets++;
+                        priv->stats.tx_bytes += skb2->len;
+                        send_vcc->send(send_vcc, skb2);
+                } else {
+                        priv->stats.tx_dropped++;
+                        dev_kfree_skb(skb2);
+		}
         }
 
         ATM_SKB(skb)->vcc = send_vcc;
-        atomic_add(skb->truesize, &send_vcc->tx_inuse);
         ATM_SKB(skb)->iovcnt = 0;
         ATM_SKB(skb)->atm_options = send_vcc->atm_options;
-        priv->stats.tx_packets++;
-        priv->stats.tx_bytes += skb->len;
-        send_vcc->send(send_vcc, skb);
+        if (atm_may_send(send_vcc, skb->len)) {
+                atomic_add(skb->truesize, &send_vcc->tx_inuse);
+                priv->stats.tx_packets++;
+                priv->stats.tx_bytes += skb->len;
+                send_vcc->send(send_vcc, skb);
+        } else {
+                priv->stats.tx_dropped++;
+                dev_kfree_skb(skb);
+	}
 
 #if 0
         /* Should we wait for card's device driver to notify us? */
@@ -818,8 +829,7 @@ void atm_lane_init_ops(struct atm_lane_ops *ops)
 	return;
 }
 
-#ifdef MODULE
-int init_module(void)
+static int __init lane_module_init(void)
 {
         extern struct atm_lane_ops atm_lane_ops;
 
@@ -828,16 +838,11 @@ int init_module(void)
         return 0;
 }
 
-void cleanup_module(void)
+static void __exit lane_module_cleanup(void)
 {
         int i;
         extern struct atm_lane_ops atm_lane_ops;
         struct lec_priv *priv;
-
-        if (MOD_IN_USE) {
-                printk(KERN_NOTICE "lec.c: module in use\n");
-                return;
-        }
 
         atm_lane_ops.lecd_attach = NULL;
         atm_lane_ops.mcast_attach = NULL;
@@ -847,12 +852,9 @@ void cleanup_module(void)
         for (i = 0; i < MAX_LEC_ITF; i++) {
                 if (dev_lec[i] != NULL) {
                         priv = (struct lec_priv *)dev_lec[i]->priv;
-                        if (priv->is_trdev) {
-#ifdef CONFIG_TR
-                                unregister_trdev(dev_lec[i]);
+#if defined(CONFIG_TR)
+                        unregister_trdev(dev_lec[i]);
 #endif
-                        } else
-                                unregister_netdev(dev_lec[i]);
                         kfree(dev_lec[i]);
                         dev_lec[i] = NULL;
                 }
@@ -860,7 +862,9 @@ void cleanup_module(void)
 
         return;                                    
 }
-#endif /* MODULE */
+
+module_init(lane_module_init);
+module_exit(lane_module_cleanup);
 
 /*
  * LANE2: 3.1.3, LE_RESOLVE.request
@@ -2165,4 +2169,3 @@ lec_arp_check_empties(struct lec_priv *priv,
         lec_arp_put(priv->lec_arp_tables,entry);
         lec_arp_unlock(priv);  
 }
-

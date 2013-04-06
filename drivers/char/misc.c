@@ -70,16 +70,16 @@ extern int psaux_init(void);
 extern void gfx_register(void);
 #endif
 extern void streamable_init(void);
-extern void watchdog_init(void);
-extern void pcwatchdog_init(void);
 extern int rtc_sun_init(void);		/* Combines MK48T02 and MK48T08 */
 extern int rtc_DP8570A_init(void);
 extern int rtc_MK48T08_init(void);
+extern int ds1286_init(void);
 extern int dsp56k_init(void);
 extern int radio_init(void);
 extern int pc110pad_init(void);
 extern int pmu_device_init(void);
 extern int qpmouse_init(void);
+extern int tosh_init(void);
 
 static int misc_read_proc(char *buf, char **start, off_t offset,
 			  int len, int *eof, void *private)
@@ -111,8 +111,7 @@ static int misc_open(struct inode * inode, struct file * file)
 	int minor = MINOR(inode->i_rdev);
 	struct miscdevice *c;
 	int err = -ENODEV;
-	
-	file->f_op = NULL;
+	struct file_operations *old_fops, *new_fops = NULL;
 	
 	down(&misc_sem);
 	
@@ -120,7 +119,9 @@ static int misc_open(struct inode * inode, struct file * file)
 
 	while ((c != &misc_list) && (c->minor != minor))
 		c = c->next;
-	if (c == &misc_list) {
+	if (c != &misc_list)
+		new_fops = fops_get(c->fops);
+	if (!new_fops) {
 		char modname[20];
 		up(&misc_sem);
 		sprintf(modname, "char-major-%d-%d", MISC_MAJOR, minor);
@@ -129,18 +130,28 @@ static int misc_open(struct inode * inode, struct file * file)
 		c = misc_list.next;
 		while ((c != &misc_list) && (c->minor != minor))
 			c = c->next;
-		if (c == &misc_list)
+		if (c == &misc_list || (new_fops = fops_get(c->fops)) == NULL)
 			goto fail;
 	}
 
-	if ((file->f_op = c->fops) && file->f_op->open)
+	err = 0;
+	old_fops = file->f_op;
+	file->f_op = new_fops;
+	if (file->f_op->open) {
 		err=file->f_op->open(inode,file);
+		if (err) {
+			fops_put(file->f_op);
+			file->f_op = fops_get(old_fops);
+		}
+	}
+	fops_put(old_fops);
 fail:
 	up(&misc_sem);
 	return err;
 }
 
 static struct file_operations misc_fops = {
+	owner:		THIS_MODULE,
 	open:		misc_open,
 };
 
@@ -163,7 +174,7 @@ static struct file_operations misc_fops = {
  
 int misc_register(struct miscdevice * misc)
 {
-	static devfs_handle_t devfs_handle = NULL;
+	static devfs_handle_t devfs_handle;
 
 	if (misc->next || misc->prev)
 		return -EBUSY;
@@ -183,11 +194,11 @@ int misc_register(struct miscdevice * misc)
 	if (misc->minor < DYNAMIC_MINORS)
 		misc_minors[misc->minor >> 3] |= 1 << (misc->minor & 7);
 	if (!devfs_handle)
-		devfs_handle = devfs_mk_dir (NULL, "misc", 4, NULL);
+		devfs_handle = devfs_mk_dir (NULL, "misc", NULL);
 	misc->devfs_handle =
-	    devfs_register (devfs_handle, misc->name, 0, DEVFS_FL_NONE,
+	    devfs_register (devfs_handle, misc->name, DEVFS_FL_NONE,
 			    MISC_MAJOR, misc->minor,
-			    S_IFCHR | S_IRUSR | S_IWUSR | S_IRGRP, 0, 0,
+			    S_IFCHR | S_IRUSR | S_IWUSR | S_IRGRP,
 			    misc->fops, NULL);
 
 	/*
@@ -242,18 +253,6 @@ int __init misc_init(void)
 #ifdef CONFIG_PC110_PAD
 	pc110pad_init();
 #endif
-/*
- *	Only one watchdog can succeed. We probe the pcwatchdog first,
- *	then the wdt cards and finally the software watchdog which always
- *	works. This means if your hardware watchdog dies or is 'borrowed'
- *	for some reason the software watchdog still gives you some cover.
- */
-#ifdef CONFIG_PCWATCHDOG
-	pcwatchdog_init();
-#endif
-#ifdef CONFIG_SOFT_WATCHDOG
-	watchdog_init();
-#endif
 #ifdef CONFIG_MVME16x
 	rtc_MK48T08_init();
 #endif
@@ -286,6 +285,9 @@ int __init misc_init(void)
 #endif
 #ifdef CONFIG_SGI
 	streamable_init ();
+#endif
+#ifdef CONFIG_TOSHIBA
+	tosh_init();
 #endif
 	if (devfs_register_chrdev(MISC_MAJOR,"misc",&misc_fops)) {
 		printk("unable to get major %d for misc devices\n",

@@ -1,4 +1,4 @@
-/* $Id: audio.c,v 1.50 2000/03/13 03:54:07 davem Exp $
+/* $Id: audio.c,v 1.56 2000/10/19 00:50:02 davem Exp $
  * drivers/sbus/audio/audio.c
  *
  * Copyright 1996 Thomas K. Dyas (tdyas@noc.rutgers.edu)
@@ -24,6 +24,7 @@
 #include <linux/fs.h>
 #include <linux/kernel.h>
 #include <linux/sched.h>
+#include <linux/smp_lock.h>
 #include <linux/mm.h>
 #include <linux/tqueue.h>
 #include <linux/major.h>
@@ -69,8 +70,8 @@ static int lis_del_from_elist( strevent_t **list, pid_t pid, short events );
 static void lis_free_elist( strevent_t **list);
 static void kill_procs( struct strevent *elist, int sig, short e);
 
-static struct sparcaudio_driver *drivers[SPARCAUDIO_MAX_DEVICES] = {NULL};
-static devfs_handle_t devfs_handle = NULL;
+static struct sparcaudio_driver *drivers[SPARCAUDIO_MAX_DEVICES];
+static devfs_handle_t devfs_handle;
  
 /* This crap to be pulled off into a local include file */
 #if defined (LINUX_VERSION_CODE) && LINUX_VERSION_CODE < 0x20100
@@ -87,8 +88,6 @@ static devfs_handle_t devfs_handle = NULL;
 #include <linux/poll.h>
 #define COPY_IN(arg, get) get_user(get, (int *)arg)
 #define COPY_OUT(arg, ret) put_user(ret, (int *)arg)
-#define sparcaudio_release_ret sparcaudio_release
-#define sparcaudioctl_release_ret sparcaudioctl_release
 #define sparcaudio_select sparcaudio_poll
 
 #endif
@@ -1767,24 +1766,10 @@ static int sparcaudio_ioctl(struct inode * inode, struct file * file,
 	return retval;
 }
 
-static int sparcaudioctl_release_ret(struct inode * inode, struct file * file)
-{
-        MOD_DEC_USE_COUNT;
-        return 0;
-}
-
-/* For 2.0 kernels */
-#if defined (LINUX_VERSION_CODE) && LINUX_VERSION_CODE < 0x20100
-static void sparcaudioctl_release(struct inode * inode, struct file * file)
-{
-        sparcaudioctl_release_ret(inode, file);
-}
-#endif
-
 static struct file_operations sparcaudioctl_fops = {
+	owner:		THIS_MODULE,
 	poll:		sparcaudio_select,
 	ioctl:		sparcaudio_ioctl,
-	release:	sparcaudioctl_release,
 };
 
 static int sparcaudio_open(struct inode * inode, struct file * file)
@@ -1917,17 +1902,16 @@ static int sparcaudio_open(struct inode * inode, struct file * file)
                 }          
         }
 
-	MOD_INC_USE_COUNT;
-
 	/* Success! */
 	return 0;
 }
 
-static int sparcaudio_release_ret(struct inode * inode, struct file * file)
+static int sparcaudio_release(struct inode * inode, struct file * file)
 {
         struct sparcaudio_driver *drv = drivers[(MINOR(inode->i_rdev) >>
                                                  SPARCAUDIO_DEVICE_SHIFT)];
 
+	lock_kernel();
         if (file->f_mode & FMODE_READ) {
                 /* Stop input */
                 drv->ops->stop_input(drv);
@@ -1968,22 +1952,14 @@ static int sparcaudio_release_ret(struct inode * inode, struct file * file)
         /* Status changed. Signal control device */
         kill_procs(drv->sd_siglist,SIGPOLL,S_MSG);
 
-        MOD_DEC_USE_COUNT;
-
         wake_up_interruptible(&drv->open_wait);
+	unlock_kernel();
 
         return 0;
 }
 
-/* For 2.0 kernels */
-#if defined (LINUX_VERSION_CODE) && LINUX_VERSION_CODE < 0x20100
-static void sparcaudio_release(struct inode * inode, struct file * file)
-{
-        sparcaudio_release_ret(inode, file);
-}
-#endif
-
 static struct file_operations sparcaudio_fops = {
+	owner:		THIS_MODULE,
 	llseek:		sparcaudio_lseek,
 	read:		sparcaudio_read,
 	write:		sparcaudio_write,
@@ -2038,9 +2014,9 @@ int register_sparcaudio_driver(struct sparcaudio_driver *drv, int duplex)
 	for (i=0; i < sizeof (dev_list) / sizeof (*dev_list); i++) {
 		sparcaudio_mkname (name_buf, dev_list[i].name, dev);
 		minor = (dev << SPARCAUDIO_DEVICE_SHIFT) | dev_list[i].minor;
-		devfs_register (devfs_handle, name_buf, 0, DEVFS_FL_NONE,
+		devfs_register (devfs_handle, name_buf, DEVFS_FL_NONE,
 				SOUND_MAJOR, minor, S_IFCHR | dev_list[i].mode,
-				0, 0, &sparcaudio_fops, NULL);
+				&sparcaudio_fops, NULL);
 	}
 
         /* Setup the circular queues of output and input buffers
@@ -2203,7 +2179,7 @@ int unregister_sparcaudio_driver(struct sparcaudio_driver *drv, int duplex)
 	/* Unregister ourselves with devfs */
 	for (i=0; i < sizeof (dev_list) / sizeof (*dev_list); i++) {
 		sparcaudio_mkname (name_buf, dev_list[i].name, drv->index);
-		de = devfs_find_handle (devfs_handle, name_buf, 0, 0, 0,
+		de = devfs_find_handle (devfs_handle, name_buf, 0, 0,
 					DEVFS_SPECIAL_CHR, 0);
 		devfs_unregister (de);
 	}
@@ -2216,38 +2192,18 @@ int unregister_sparcaudio_driver(struct sparcaudio_driver *drv, int duplex)
 	return 0;
 }
 
-#if defined (LINUX_VERSION_CODE) && LINUX_VERSION_CODE < 0x20100
-static struct symbol_table sparcaudio_syms = {
-#include <linux/symtab_begin.h>
-	X(register_sparcaudio_driver),
-	X(unregister_sparcaudio_driver),
-	X(sparcaudio_output_done),
-	X(sparcaudio_input_done),
-#include <linux/symtab_end.h>
-};
-#else
 EXPORT_SYMBOL(register_sparcaudio_driver);
 EXPORT_SYMBOL(unregister_sparcaudio_driver);
 EXPORT_SYMBOL(sparcaudio_output_done);
 EXPORT_SYMBOL(sparcaudio_input_done);
-#endif
 
-#ifdef MODULE
-int init_module(void)
-#else
-int __init sparcaudio_init(void)
-#endif
+static int __init sparcaudio_init(void)
 {
-#if defined (LINUX_VERSION_CODE) && LINUX_VERSION_CODE < 0x20100
-	/* Export symbols for use by the low-level drivers. */
-	register_symtab(&sparcaudio_syms);
-#endif
-
 	/* Register our character device driver with the VFS. */
 	if (devfs_register_chrdev(SOUND_MAJOR, "sparcaudio", &sparcaudio_fops))
 		return -EIO;
 
-	devfs_handle = devfs_mk_dir (NULL, "sound", 0, NULL);
+	devfs_handle = devfs_mk_dir (NULL, "sound", NULL);
 	
 #ifdef CONFIG_SPARCAUDIO_AMD7930
 	amd7930_init();
@@ -2265,13 +2221,14 @@ int __init sparcaudio_init(void)
 	return 0;
 }
 
-#ifdef MODULE
-void cleanup_module(void)
+static void __exit sparcaudio_exit(void)
 {
 	devfs_unregister_chrdev(SOUND_MAJOR, "sparcaudio");
 	devfs_unregister (devfs_handle);
 }
-#endif
+
+module_init(sparcaudio_init)
+module_exit(sparcaudio_exit)
 
 /*
  * Code from Linux Streams, Copyright 1995 by

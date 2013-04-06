@@ -14,7 +14,6 @@
  *              phone_register_device now works with unit!=PHONE_UNIT_ANY
  */
 
-#include <linux/config.h>
 #include <linux/version.h>
 #include <linux/module.h>
 #include <linux/types.h>
@@ -24,6 +23,7 @@
 #include <linux/string.h>
 #include <linux/errno.h>
 #include <linux/phonedev.h>
+#include <linux/init.h>
 #include <asm/uaccess.h>
 #include <asm/system.h>
 
@@ -49,13 +49,16 @@ static int phone_open(struct inode *inode, struct file *file)
 	unsigned int minor = MINOR(inode->i_rdev);
 	int err = 0;
 	struct phone_device *p;
+	struct file_operations *old_fops, *new_fops = NULL;
 
 	if (minor >= PHONE_NUM_DEVICES)
 		return -ENODEV;
 
 	down(&phone_lock);
 	p = phone_device[minor];
-	if (p == NULL) {
+	if (p)
+		new_fops = fops_get(p->f_op);
+	if (!new_fops) {
 		char modname[32];
 
 		up(&phone_lock);
@@ -63,18 +66,21 @@ static int phone_open(struct inode *inode, struct file *file)
 		request_module(modname);
 		down(&phone_lock);
 		p = phone_device[minor];
-		if (p == NULL)
+		if (p == NULL || (new_fops = fops_get(p->f_op)) == NULL)
 		{
 			err=-ENODEV;
 			goto end;
 		}
 	}
-	if (p->open) {
+	old_fops = file->f_op;
+	file->f_op = new_fops;
+	if (p->open)
 		err = p->open(p, file);	/* Tell the device it is open */
-		if (err)
-			goto end;
+	if (err) {
+		fops_put(file->f_op);
+		file->f_op = fops_get(old_fops);
 	}
-	file->f_op = p->f_op;
+	fops_put(old_fops);
 end:
 	up(&phone_lock);
 	return err;
@@ -129,6 +135,7 @@ void phone_unregister_device(struct phone_device *pfd)
 
 static struct file_operations phone_fops =
 {
+	owner:		THIS_MODULE,
 	open:		phone_open,
 };
 
@@ -136,40 +143,29 @@ static struct file_operations phone_fops =
  *	Board init functions
  */
  
-extern int ixj_init(void);
 
 /*
  *    Initialise Telephony for linux
  */
 
-int telephony_init(void)
+static int __init telephony_init(void)
 {
 	printk(KERN_INFO "Linux telephony interface: v1.00\n");
 	if (register_chrdev(PHONE_MAJOR, "telephony", &phone_fops)) {
 		printk("phonedev: unable to get major %d\n", PHONE_MAJOR);
 		return -EIO;
 	}
-	/*
-	 *    Init kernel installed drivers
-	 */
-#ifdef CONFIG_PHONE_IXJ
-	ixj_init();	 
-#endif
+
 	return 0;
 }
 
-#ifdef MODULE
-int init_module(void)
-{
-	return telephony_init();
-}
-
-void cleanup_module(void)
+static void __exit telephony_exit(void)
 {
 	unregister_chrdev(PHONE_MAJOR, "telephony");
 }
 
-#endif
+module_init(telephony_init);
+module_exit(telephony_exit);
 
 EXPORT_SYMBOL(phone_register_device);
 EXPORT_SYMBOL(phone_unregister_device);

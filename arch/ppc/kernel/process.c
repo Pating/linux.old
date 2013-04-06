@@ -234,7 +234,6 @@ _switch_to(struct task_struct *prev, struct task_struct *new,
 	     prev->thread.vrsave )
 		giveup_altivec(prev);
 #endif /* CONFIG_ALTIVEC */	
-	prev->last_processor = prev->processor;
 	current_set[smp_processor_id()] = new;
 #endif /* CONFIG_SMP */
 	/* Avoid the trap.  On smp this this never happens since
@@ -266,7 +265,7 @@ void show_regs(struct pt_regs * regs)
 	       last_task_used_altivec);
 	
 #ifdef CONFIG_SMP
-	printk(" CPU: %d last CPU: %d", current->processor,current->last_processor);
+	printk(" CPU: %d", current->processor);
 #endif /* CONFIG_SMP */
 	
 	printk("\n");
@@ -315,15 +314,13 @@ release_thread(struct task_struct *t)
  */
 int
 copy_thread(int nr, unsigned long clone_flags, unsigned long usp,
+	    unsigned long unused,
 	    struct task_struct * p, struct pt_regs * regs)
 {
 	unsigned long msr;
 	struct pt_regs * childregs, *kregs;
-#ifdef CONFIG_SMP
-	extern void ret_from_smpfork(void);
-#else
-	extern void ret_from_except(void);
-#endif
+	extern void ret_from_fork(void);
+	
 	/* Copy registers */
 	childregs = ((struct pt_regs *)
 		     ((unsigned long)p + sizeof(union task_union)
@@ -336,11 +333,7 @@ copy_thread(int nr, unsigned long clone_flags, unsigned long usp,
 	p->thread.ksp = (unsigned long) childregs - STACK_FRAME_OVERHEAD;
 	p->thread.ksp -= sizeof(struct pt_regs ) + STACK_FRAME_OVERHEAD;
 	kregs = (struct pt_regs *)(p->thread.ksp + STACK_FRAME_OVERHEAD);
-#ifdef CONFIG_SMP
-	kregs->nip = (unsigned long)ret_from_smpfork;
-#else	
-	kregs->nip = (unsigned long)ret_from_except;
-#endif	
+	kregs->nip = (unsigned long)ret_from_fork;
 	asm volatile("mfmsr %0" : "=r" (msr):);
 	kregs->msr = msr;
 	kregs->gpr[1] = (unsigned long)childregs - STACK_FRAME_OVERHEAD;
@@ -378,9 +371,6 @@ copy_thread(int nr, unsigned long clone_flags, unsigned long usp,
 	childregs->msr &= ~MSR_VEC;
 #endif /* CONFIG_ALTIVEC */
 
-#ifdef CONFIG_SMP
-	p->last_processor = NO_PROC_ID;
-#endif /* CONFIG_SMP */
 	return 0;
 }
 
@@ -440,13 +430,13 @@ void start_thread(struct pt_regs *regs, unsigned long nip, unsigned long sp)
 	current->thread.fpscr = 0;
 }
 
-asmlinkage int sys_clone(int p1, int p2, int p3, int p4, int p5, int p6,
-			 struct pt_regs *regs)
+int sys_clone(int p1, int p2, int p3, int p4, int p5, int p6,
+	      struct pt_regs *regs)
 {
 	unsigned long clone_flags = p1;
 	int res;
 	lock_kernel();
-	res = do_fork(clone_flags, regs->gpr[1], regs);
+	res = do_fork(clone_flags, regs->gpr[1], regs, 0);
 #ifdef CONFIG_SMP
 	/* When we clone the idle task we keep the same pid but
 	 * the return value of 0 for both causes problems.
@@ -459,13 +449,13 @@ asmlinkage int sys_clone(int p1, int p2, int p3, int p4, int p5, int p6,
 	return res;
 }
 
-asmlinkage int sys_fork(int p1, int p2, int p3, int p4, int p5, int p6,
-			struct pt_regs *regs)
+int sys_fork(int p1, int p2, int p3, int p4, int p5, int p6,
+	     struct pt_regs *regs)
 {
 
 	int res;
 	
-	res = do_fork(SIGCHLD, regs->gpr[1], regs);
+	res = do_fork(SIGCHLD, regs->gpr[1], regs, 0);
 #ifdef CONFIG_SMP
 	/* When we clone the idle task we keep the same pid but
 	 * the return value of 0 for both causes problems.
@@ -477,15 +467,15 @@ asmlinkage int sys_fork(int p1, int p2, int p3, int p4, int p5, int p6,
 	return res;
 }
 
-asmlinkage int sys_vfork(int p1, int p2, int p3, int p4, int p5, int p6,
-			 struct pt_regs *regs)
+int sys_vfork(int p1, int p2, int p3, int p4, int p5, int p6,
+	      struct pt_regs *regs)
 {
-	return do_fork(CLONE_VFORK | CLONE_VM | SIGCHLD, regs->gpr[1], regs);
+	return do_fork(CLONE_VFORK | CLONE_VM | SIGCHLD, regs->gpr[1], regs, 0);
 }
 
-asmlinkage int sys_execve(unsigned long a0, unsigned long a1, unsigned long a2,
-			  unsigned long a3, unsigned long a4, unsigned long a5,
-			  struct pt_regs *regs)
+int sys_execve(unsigned long a0, unsigned long a1, unsigned long a2,
+	       unsigned long a3, unsigned long a4, unsigned long a5,
+	       struct pt_regs *regs)
 {
 	int error;
 	char * filename;
@@ -501,6 +491,8 @@ asmlinkage int sys_execve(unsigned long a0, unsigned long a1, unsigned long a2,
 		giveup_altivec(current);
 #endif /* CONFIG_ALTIVEC */ 
 	error = do_execve(filename, (char **) a1, (char **) a2, regs);
+	if (error == 0)
+		current->ptrace &= ~PT_DTRACE;
 	putname(filename);
 out:
 	return error;

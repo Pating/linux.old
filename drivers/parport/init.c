@@ -20,7 +20,9 @@
 
 #ifndef MODULE
 static int io[PARPORT_MAX+1] __initdata = { [0 ... PARPORT_MAX] = 0 };
+#ifdef CONFIG_PARPORT_PC
 static int io_hi[PARPORT_MAX+1] __initdata = { [0 ... PARPORT_MAX] = 0 };
+#endif
 static int irq[PARPORT_MAX] __initdata = { [0 ... PARPORT_MAX-1] = PARPORT_IRQ_PROBEONLY };
 static int dma[PARPORT_MAX] __initdata = { [0 ... PARPORT_MAX-1] = PARPORT_DMA_NONE };
 
@@ -178,6 +180,10 @@ EXPORT_SYMBOL(parport_unregister_driver);
 EXPORT_SYMBOL(parport_register_device);
 EXPORT_SYMBOL(parport_unregister_device);
 EXPORT_SYMBOL(parport_enumerate);
+EXPORT_SYMBOL(parport_get_port);
+EXPORT_SYMBOL(parport_put_port);
+EXPORT_SYMBOL(parport_find_number);
+EXPORT_SYMBOL(parport_find_base);
 EXPORT_SYMBOL(parport_negotiate);
 EXPORT_SYMBOL(parport_write);
 EXPORT_SYMBOL(parport_read);

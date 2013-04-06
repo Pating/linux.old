@@ -47,12 +47,6 @@ extern pgm_check_handler_t do_page_fault;
 
 asmlinkage int system_call(void);
 
-static inline void console_verbose(void)
-{
-        extern int console_loglevel;
-        console_loglevel = 15;
-}
-
 #define DO_ERROR(trapnr, signr, str, name, tsk) \
 asmlinkage void name(struct pt_regs * regs, long error_code) \
 { \
@@ -61,9 +55,6 @@ asmlinkage void name(struct pt_regs * regs, long error_code) \
 	die_if_no_fixup(str,regs,error_code); \
         force_sig(signr, tsk); \
 }
-
-
-void page_exception(void);
 
 /* TODO: define these as 'pgm_check_handler_t xxx;'
 asmlinkage void divide_error(void);

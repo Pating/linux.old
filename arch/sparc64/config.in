@@ -1,4 +1,4 @@
-# $Id: config.in,v 1.112 2000/05/22 08:12:19 davem Exp $
+# $Id: config.in,v 1.125 2000/10/10 01:05:53 davem Exp $
 # For a description of the syntax of this configuration file,
 # see the Configure script.
 #
@@ -10,6 +10,15 @@ bool 'Prompt for development and/or incomplete code/drivers' CONFIG_EXPERIMENTAL
 endmenu
 
 mainmenu_option next_comment
+comment 'Loadable module support'
+bool 'Enable loadable module support' CONFIG_MODULES
+if [ "$CONFIG_MODULES" = "y" ]; then
+   bool '  Set version information on all symbols for modules' CONFIG_MODVERSIONS
+   bool '  Kernel module loader' CONFIG_KMOD
+fi
+endmenu
+
+mainmenu_option next_comment
 comment 'General setup'
 
 define_bool CONFIG_VT y
@@ -18,7 +27,10 @@ define_bool CONFIG_VT_CONSOLE y
 bool 'Symmetric multi-processing support' CONFIG_SMP
 
 # Global things across all Sun machines.
+define_bool CONFIG_HAVE_DEC_LOCK y
 define_bool CONFIG_ISA n
+define_bool CONFIG_EISA n
+define_bool CONFIG_MCA n
 define_bool CONFIG_PCMCIA n
 define_bool CONFIG_SBUS y
 define_bool CONFIG_SBUSCHAR y
@@ -57,15 +69,7 @@ source drivers/parport/Config.in
 dep_tristate '  Parallel printer support' CONFIG_PRINTER $CONFIG_PARPORT
 if [ "$CONFIG_PCI" = "y" ]; then
    tristate 'SUNW, envctrl support' CONFIG_ENVCTRL
-fi
-endmenu
-
-mainmenu_option next_comment
-comment 'Loadable module support'
-bool 'Enable loadable module support' CONFIG_MODULES
-if [ "$CONFIG_MODULES" = "y" ]; then
-   bool '  Set version information on all symbols for modules' CONFIG_MODVERSIONS
-   bool '  Kernel module loader' CONFIG_KMOD
+   tristate '7-Segment Display support' CONFIG_DISPLAY7SEG
 fi
 endmenu
 
@@ -78,27 +82,22 @@ endmenu
 
 source drivers/sbus/char/Config.in
 source drivers/sbus/audio/Config.in
-
+source drivers/mtd/Config.in
 mainmenu_option next_comment
 comment 'Block devices'
 
 bool 'Normal floppy disk support' CONFIG_BLK_DEV_FD
 
-bool 'Multiple devices driver support' CONFIG_BLK_DEV_MD
-if [ "$CONFIG_BLK_DEV_MD" = "y" ]; then
-   tristate '  Linear (append) mode' CONFIG_MD_LINEAR
-   tristate '  RAID-0 (striping) mode' CONFIG_MD_STRIPED
-#   tristate '  RAID-1 (mirroring) mode' CONFIG_MD_MIRRORING
-#   tristate '  RAID-4/RAID-5 mode' CONFIG_MD_RAID5
-fi
+tristate 'Loopback device support' CONFIG_BLK_DEV_LOOP
+dep_tristate 'Network block device support' CONFIG_BLK_DEV_NBD $CONFIG_NET
+
+source drivers/md/Config.in
 
 tristate 'RAM disk support' CONFIG_BLK_DEV_RAM
-if [ "$CONFIG_BLK_DEV_RAM" = "y" ]; then
-   bool '  Initial RAM disk (initrd) support' CONFIG_BLK_DEV_INITRD
+if [ "$CONFIG_BLK_DEV_RAM" = "y" -o "$CONFIG_BLK_DEV_RAM" = "m" ]; then
+	int '   Default RAM disk size' CONFIG_BLK_DEV_RAM_SIZE 4096
 fi
-
-tristate 'Loopback device support' CONFIG_BLK_DEV_LOOP
-tristate 'Network block device support' CONFIG_BLK_DEV_NBD
+dep_bool '  Initial RAM disk (initrd) support' CONFIG_BLK_DEV_INITRD $CONFIG_BLK_DEV_RAM
 
 endmenu
 
@@ -164,7 +163,7 @@ if [ "$CONFIG_SCSI" != "n" ]; then
    if [ "$CONFIG_PCI" != "n" ]; then
       dep_tristate 'Adaptec AIC7xxx support' CONFIG_SCSI_AIC7XXX $CONFIG_SCSI
       if [ "$CONFIG_SCSI_AIC7XXX" != "n" ]; then
-	 bool '  Enable tagged command queueing (TCQ) by default' CONFIG_AIC7XXX_TAGGED_QUEUEING Y
+	 bool '  Enable tagged command queueing (TCQ) by default' CONFIG_AIC7XXX_TAGGED_QUEUEING
 	 int  '  Maximum number of TCQ commands per device' CONFIG_AIC7XXX_CMDS_PER_DEVICE 8
   	 bool '  Collect statistics to report in /proc' CONFIG_AIC7XXX_PROC_STATS N
 	 int  '  Delay in seconds after SCSI bus reset' CONFIG_AIC7XXX_RESET_DELAY 5
@@ -196,6 +195,28 @@ endmenu
 
 source drivers/fc4/Config.in
 
+if [ "$CONFIG_PCI" = "y" -a "$CONFIG_EXPERIMENTAL" = "y" ]; then
+    mainmenu_option next_comment
+    comment 'IEEE 1394 (FireWire) support'
+
+    dep_tristate 'IEEE 1394 (FireWire) support (EXPERIMENTAL)' CONFIG_IEEE1394 $CONFIG_PCI
+
+    if [ "$CONFIG_IEEE1394" != "n" ]; then
+	dep_tristate 'Texas Instruments PCILynx support' CONFIG_IEEE1394_PCILYNX $CONFIG_IEEE1394
+	if [ "$CONFIG_IEEE1394_PCILYNX" != "n" ]; then
+	    bool '  Use PCILynx local RAM' CONFIG_IEEE1394_PCILYNX_LOCALRAM
+	    bool '  Support for non-IEEE1394 local ports' CONFIG_IEEE1394_PCILYNX_PORTS
+	fi
+
+	dep_tristate 'OHCI (Open Host Controller Interface) support' CONFIG_IEEE1394_OHCI1394 $CONFIG_IEEE1394
+
+	dep_tristate 'Raw IEEE1394 I/O support' CONFIG_IEEE1394_RAWIO $CONFIG_IEEE1394
+
+	bool 'Excessive debugging output' CONFIG_IEEE1394_VERBOSEDEBUG
+    fi
+    endmenu
+fi
+
 if [ "$CONFIG_NET" = "y" ]; then
    mainmenu_option next_comment
    comment 'Network device support'
@@ -204,9 +225,10 @@ if [ "$CONFIG_NET" = "y" ]; then
    if [ "$CONFIG_NETDEVICES" = "y" ]; then
       tristate '  Dummy net driver support' CONFIG_DUMMY
       tristate '  Bonding driver support' CONFIG_BONDING
+      tristate '  Universal TUN/TAP device driver support' CONFIG_TUN
       if [ "$CONFIG_EXPERIMENTAL" = "y" ]; then
         if [ "$CONFIG_NETLINK" = "y" ]; then
-          tristate '  Ethertap network tap (EXPERIMENTAL)' CONFIG_ETHERTAP
+          tristate '  Ethertap network tap (OBSOLETE)' CONFIG_ETHERTAP
         fi
       fi
       tristate '  PPP (point-to-point) support' CONFIG_PPP
@@ -294,7 +316,7 @@ endmenu
 mainmenu_option next_comment
 comment 'XFree86 DRI support'
 bool 'Direct Rendering Manager (XFree86 DRI support)' CONFIG_DRM
-# dep_tristate '  Creator/Creator3D/Elite3D' CONFIG_DRM_FFB $CONFIG_DRM
+dep_tristate '  Creator/Creator3D' CONFIG_DRM_FFB $CONFIG_DRM
 endmenu
 
 source fs/Config.in

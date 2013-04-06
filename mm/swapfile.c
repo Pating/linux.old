@@ -223,10 +223,10 @@ static inline void unuse_pte(struct vm_area_struct * vma, unsigned long address,
 		if (pte_page(pte) != page)
 			return;
 		/* We will be removing the swap cache in a moment, so... */
-		set_pte(dir, pte_mkdirty(pte));
+		ptep_mkdirty(dir);
 		return;
 	}
-	if (pte_val(pte) != entry.val)
+	if (pte_to_swp_entry(pte).val != entry.val)
 		return;
 	set_pte(dir, pte_mkdirty(mk_pte(page, vma->vm_page_prot)));
 	swap_free(entry);
@@ -315,10 +315,12 @@ static void unuse_process(struct mm_struct * mm,
 	 */
 	if (!mm)
 		return;
+	spin_lock(&mm->page_table_lock);
 	for (vma = mm->mmap; vma; vma = vma->vm_next) {
 		pgd_t * pgd = pgd_offset(mm, vma->vm_start);
 		unuse_vma(vma, pgd, entry, page);
 	}
+	spin_unlock(&mm->page_table_lock);
 	return;
 }
 
@@ -368,15 +370,15 @@ static int try_to_unuse(unsigned int type)
 			swap_free(entry);
   			return -ENOMEM;
 		}
+		if (PageSwapCache(page))
+			delete_from_swap_cache(page);
 		read_lock(&tasklist_lock);
 		for_each_task(p)
 			unuse_process(p->mm, entry, page);
 		read_unlock(&tasklist_lock);
-		shm_unuse(entry, page);
+		shmem_unuse(entry, page);
 		/* Now get rid of the extra reference to the temporary
                    page we've been using. */
-		if (PageSwapCache(page))
-			delete_from_swap_cache(page);
 		page_cache_release(page);
 		/*
 		 * Check for and clear any overflowed swap map counts.
@@ -407,11 +409,11 @@ asmlinkage long sys_swapoff(const char * specialfile)
 	if (!capable(CAP_SYS_ADMIN))
 		return -EPERM;
 
-	lock_kernel();
 	err = user_path_walk(specialfile, &nd);
 	if (err)
 		goto out;
 
+	lock_kernel();
 	prev = -1;
 	swap_list_lock();
 	for (type = swap_list.head; type >= 0; type = swap_info[type].next) {
@@ -478,9 +480,9 @@ asmlinkage long sys_swapoff(const char * specialfile)
 	err = 0;
 
 out_dput:
+	unlock_kernel();
 	path_release(&nd);
 out:
-	unlock_kernel();
 	return err;
 }
 
@@ -555,7 +557,6 @@ asmlinkage long sys_swapon(const char * specialfile, int swap_flags)
 	unsigned long maxpages;
 	int swapfilesize;
 	struct block_device *bdev = NULL;
-	char *name;
 	
 	if (!capable(CAP_SYS_ADMIN))
 		return -EPERM;
@@ -586,14 +587,7 @@ asmlinkage long sys_swapon(const char * specialfile, int swap_flags)
 	} else {
 		p->prio = --least_priority;
 	}
-	name = getname(specialfile);
-	error = PTR_ERR(name);
-	if (IS_ERR(name))
-		goto bad_swap_2;
-	error = 0;
-	if (path_init(name, LOOKUP_FOLLOW|LOOKUP_POSITIVE, &nd))
-		error = path_walk(name, &nd);
-	putname(name);
+	error = user_path_walk(specialfile, &nd);
 	if (error)
 		goto bad_swap_2;
 
@@ -651,7 +645,7 @@ asmlinkage long sys_swapon(const char * specialfile, int swap_flags)
 		goto bad_swap;
 	}
 
-	lock_page(mem_map + MAP_NR(swap_header));
+	lock_page(virt_to_page(swap_header));
 	rw_swap_page_nolock(READ, SWP_ENTRY(type,0), (char *) swap_header, 1);
 
 	if (!memcmp("SWAP-SPACE",swap_header->magic.magic,10))

@@ -17,33 +17,16 @@
 #define DEBUGP(format, args...)
 #endif
 
-/* Protects conntrack->proto.tcp_state */
+/* Protects conntrack->proto.tcp */
 static DECLARE_RWLOCK(tcp_lock);
 
 /* FIXME: Examine ipfilter's timeouts and conntrack transitions more
    closely.  They're more complex. --RR */
 
-/* We steal a bit to indicate no reply yet (can't use status, because
-   it's set before we get into packet handling). */
-#define TCP_REPLY_BIT 0x1000
-
 /* Actually, I believe that neither ipmasq (where this code is stolen
    from) nor ipfilter do it exactly right.  A new conntrack machine taking
    into account packet loss (which creates uncertainty as to exactly
    the conntrack of the connection) is required.  RSN.  --RR */
-enum tcp_conntrack {
-	TCP_CONNTRACK_NONE,
-	TCP_CONNTRACK_ESTABLISHED,
-	TCP_CONNTRACK_SYN_SENT,
-	TCP_CONNTRACK_SYN_RECV,
-	TCP_CONNTRACK_FIN_WAIT,
-	TCP_CONNTRACK_TIME_WAIT,
-	TCP_CONNTRACK_CLOSE,
-	TCP_CONNTRACK_CLOSE_WAIT,
-	TCP_CONNTRACK_LAST_ACK,
-	TCP_CONNTRACK_LISTEN,
-	TCP_CONNTRACK_MAX
-};
 
 static const char *tcp_conntrack_names[] = {
 	"NONE",
@@ -93,19 +76,19 @@ static enum tcp_conntrack tcp_conntracks[2][5][TCP_CONNTRACK_MAX] = {
 	{
 /*	ORIGINAL */
 /* 	  sNO, sES, sSS, sSR, sFW, sTW, sCL, sCW, sLA, sLI 	*/
-/*syn*/	{sSS, sES, sSS, sES, sSS, sSS, sSS, sSS, sSS, sLI },
+/*syn*/	{sSS, sES, sSS, sSR, sSS, sSS, sSS, sSS, sSS, sLI },
 /*fin*/	{sTW, sFW, sSS, sTW, sFW, sTW, sCL, sTW, sLA, sLI },
-/*ack*/	{sES, sES, sSS, sSR, sFW, sTW, sCL, sCW, sLA, sES },
+/*ack*/	{sES, sES, sSS, sES, sFW, sTW, sCL, sCW, sLA, sES },
 /*rst*/ {sCL, sCL, sSS, sCL, sCL, sTW, sCL, sCL, sCL, sCL },
 /*none*/{sIV, sIV, sIV, sIV, sIV, sIV, sIV, sIV, sIV, sIV }
 	},
 	{
 /*	REPLY */
 /* 	  sNO, sES, sSS, sSR, sFW, sTW, sCL, sCW, sLA, sLI 	*/
-/*syn*/	{sSR, sES, sES, sSR, sSR, sSR, sSR, sSR, sSR, sSR },
+/*syn*/	{sSR, sES, sSR, sSR, sSR, sSR, sSR, sSR, sSR, sSR },
 /*fin*/	{sCL, sCW, sSS, sTW, sTW, sTW, sCL, sCW, sLA, sLI },
 /*ack*/	{sCL, sES, sSS, sSR, sFW, sTW, sCL, sCW, sCL, sLI },
-/*rst*/ {sCL, sCL, sCL, sSR, sCL, sCL, sCL, sCL, sLA, sLI },
+/*rst*/ {sCL, sCL, sCL, sCL, sCL, sCL, sCL, sCL, sLA, sLI },
 /*none*/{sIV, sIV, sIV, sIV, sIV, sIV, sIV, sIV, sIV, sIV }
 	}
 };
@@ -145,7 +128,7 @@ static unsigned int tcp_print_conntrack(char *buffer,
 	enum tcp_conntrack state;
 
 	READ_LOCK(&tcp_lock);
-	state = (conntrack->proto.tcp_state & ~TCP_REPLY_BIT);
+	state = conntrack->proto.tcp.state;
 	READ_UNLOCK(&tcp_lock);
 
 	return sprintf(buffer, "%s ", tcp_conntrack_names[state]);
@@ -176,37 +159,48 @@ static int tcp_packet(struct ip_conntrack *conntrack,
 	}
 
 	WRITE_LOCK(&tcp_lock);
-	oldtcpstate = conntrack->proto.tcp_state;
+	oldtcpstate = conntrack->proto.tcp.state;
 	newconntrack
 		= tcp_conntracks
 		[CTINFO2DIR(ctinfo)]
-		[get_conntrack_index(tcph)][oldtcpstate & ~TCP_REPLY_BIT];
+		[get_conntrack_index(tcph)][oldtcpstate];
 
 	/* Invalid */
 	if (newconntrack == TCP_CONNTRACK_MAX) {
 		DEBUGP("ip_conntrack_tcp: Invalid dir=%i index=%u conntrack=%u\n",
 		       CTINFO2DIR(ctinfo), get_conntrack_index(tcph),
-		       conntrack->proto.tcp_state);
+		       conntrack->proto.tcp.state);
 		WRITE_UNLOCK(&tcp_lock);
 		return -1;
 	}
 
-	conntrack->proto.tcp_state = newconntrack;
-	if ((oldtcpstate & TCP_REPLY_BIT)
-	    || ctinfo >= IP_CT_IS_REPLY)
-		conntrack->proto.tcp_state |= TCP_REPLY_BIT;
+	conntrack->proto.tcp.state = newconntrack;
 
+	/* Poor man's window tracking: record SYN/ACK for handshake check */
+	if (oldtcpstate == TCP_CONNTRACK_SYN_SENT
+	    && CTINFO2DIR(ctinfo) == IP_CT_DIR_REPLY
+	    && tcph->syn && tcph->ack)
+		conntrack->proto.tcp.handshake_ack
+			= htonl(ntohl(tcph->seq) + 1);
 	WRITE_UNLOCK(&tcp_lock);
 
 	/* If only reply is a RST, we can consider ourselves not to
 	   have an established connection: this is a fairly common
 	   problem case, so we can delete the conntrack
 	   immediately.  --RR */
-	if (!(oldtcpstate & TCP_REPLY_BIT) && tcph->rst) {
+	if (!(conntrack->status & IPS_SEEN_REPLY) && tcph->rst) {
 		if (del_timer(&conntrack->timeout))
 			conntrack->timeout.function((unsigned long)conntrack);
-	} else 
+	} else {
+		/* Set ASSURED if we see see valid ack in ESTABLISHED after SYN_RECV */
+		if (oldtcpstate == TCP_CONNTRACK_SYN_RECV
+		    && CTINFO2DIR(ctinfo) == IP_CT_DIR_ORIGINAL
+		    && tcph->ack && !tcph->syn
+		    && tcph->ack_seq == conntrack->proto.tcp.handshake_ack)
+			set_bit(IPS_ASSURED_BIT, &conntrack->status);
+
 		ip_ct_refresh(conntrack, tcp_timeouts[newconntrack]);
+	}
 
 	return NF_ACCEPT;
 }
@@ -229,8 +223,8 @@ static unsigned long tcp_new(struct ip_conntrack *conntrack,
 		return 0;
 	}
 
-	conntrack->proto.tcp_state = newconntrack;
-	return tcp_timeouts[conntrack->proto.tcp_state];
+	conntrack->proto.tcp.state = newconntrack;
+	return tcp_timeouts[conntrack->proto.tcp.state];
 }
 
 struct ip_conntrack_protocol ip_conntrack_protocol_tcp

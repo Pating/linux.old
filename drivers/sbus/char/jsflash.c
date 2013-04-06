@@ -35,6 +35,7 @@
 #include <linux/poll.h>
 #include <linux/init.h>
 #include <linux/string.h>
+#include <linux/smp_lock.h>
 
 /*
  * <linux/blk.h> is controlled from the outside with these definitions.
@@ -271,7 +272,7 @@ static loff_t jsf_lseek(struct file * file, loff_t offset, int orig)
 }
 
 /*
- * P3: OS SIMM Cannot be read in other size but a 32bits word.
+ * OS SIMM Cannot be read in other size but a 32bits word.
  */
 static ssize_t jsf_read(struct file * file, char * buf, 
     size_t togo, loff_t *ppos)
@@ -400,7 +401,7 @@ static int jsf_ioctl_program(unsigned long arg)
 	togo = abuf.size;
 	if ((togo & 3) || (p & 3)) return -EINVAL;
 
-	uptr = (char *) abuf.data;
+	uptr = (char *) (unsigned long) abuf.data;
 	if (verify_area(VERIFY_READ, uptr, togo))
 		return -EFAULT;
 	while (togo != 0) {
@@ -479,7 +480,6 @@ static int jsf_open(struct inode * inode, struct file * filp)
 	if (test_and_set_bit(0, (void *)&jsf0.busy) != 0)
 		return -EBUSY;
 
-	MOD_INC_USE_COUNT;
 	return 0;	/* XXX What security? */
 }
 
@@ -505,10 +505,9 @@ static int jsfd_open(struct inode *inode, struct file *file)
 
 static int jsf_release(struct inode *inode, struct file *file)
 {
-
-	MOD_DEC_USE_COUNT;
-
+	lock_kernel();
 	jsf0.busy = 0;
+	unlock_kernel();
 	return 0;
 }
 
@@ -537,6 +536,7 @@ static int jsfd_release(struct inode *inode, struct file *file)
 }
 
 static struct file_operations jsf_fops = {
+	owner:		THIS_MODULE,
 	llseek:		jsf_lseek,
 	read:		jsf_read,
 	write:		jsf_write,
@@ -650,8 +650,7 @@ int jsfd_init(void) {
 	int i;
 
 	if (jsf0.base == 0) {
-		printk("jsfd_init: no flash\n"); /* P3 */
-		return -EIO;
+		return -ENXIO;
 	}
 
 	if (register_blkdev(JSFD_MAJOR, "jsfd", &jsfd_fops)) {
@@ -659,8 +658,6 @@ int jsfd_init(void) {
 		    JSFD_MAJOR);
 		return -EIO;
 	}
-
-	printk("jsfd0: at major %d\n", MAJOR_NR); /* P3 */
 
 	blksize_size[JSFD_MAJOR] = jsfd_blksizes;
 	blk_size[JSFD_MAJOR] = jsfd_sizes;
@@ -707,5 +704,6 @@ void cleanup_module(void) {
 	misc_deregister(&jsf_dev);
 	if (unregister_blkdev(JSFD_MAJOR, "jsfd") != 0)
 		printk("jsfd: cleanup_module failed\n");
+	blk_cleanup_queue(BLK_DEFAULT_QUEUE(MAJOR_NR));
 }
 #endif

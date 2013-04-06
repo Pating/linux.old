@@ -43,7 +43,7 @@
 #define BUDDHA_BASE2	0xa00
 #define BUDDHA_BASE3	0xc00
 
-static const u_int __init buddha_bases[CATWEASEL_NUM_HWIFS] = {
+static const u_int buddha_bases[CATWEASEL_NUM_HWIFS] __initdata = {
     BUDDHA_BASE1, BUDDHA_BASE2, BUDDHA_BASE3
 };
 
@@ -62,7 +62,7 @@ static const u_int __init buddha_bases[CATWEASEL_NUM_HWIFS] = {
 #define BUDDHA_STATUS	0x1e		/* see status-bits */
 #define BUDDHA_CONTROL	0x11a
 
-static int __init buddha_offsets[IDE_NR_PORTS] = {
+static int buddha_offsets[IDE_NR_PORTS] __initdata = {
     BUDDHA_DATA, BUDDHA_ERROR, BUDDHA_NSECTOR, BUDDHA_SECTOR, BUDDHA_LCYL,
     BUDDHA_HCYL, BUDDHA_SELECT, BUDDHA_STATUS, BUDDHA_CONTROL
 };
@@ -76,7 +76,7 @@ static int __init buddha_offsets[IDE_NR_PORTS] = {
 #define BUDDHA_IRQ2	0xf40		/* interrupt */
 #define BUDDHA_IRQ3	0xf80
 
-static const int __init buddha_irqports[CATWEASEL_NUM_HWIFS] = {
+static const int buddha_irqports[CATWEASEL_NUM_HWIFS] __initdata = {
     BUDDHA_IRQ1, BUDDHA_IRQ2, BUDDHA_IRQ3
 };
 
@@ -117,19 +117,15 @@ static int __init find_buddha(void)
     buddha_num_hwifs = 0;
     while ((z = zorro_find_device(ZORRO_WILDCARD, z))) {
 	unsigned long board;
-	const char *name;
-	if (z->id == ZORRO_PROD_INDIVIDUAL_COMPUTERS_BUDDHA) {
+	if (z->id == ZORRO_PROD_INDIVIDUAL_COMPUTERS_BUDDHA)
 	    buddha_num_hwifs = BUDDHA_NUM_HWIFS;
-	    name = "Buddha IDE Interface";
-	} else if (z->id == ZORRO_PROD_INDIVIDUAL_COMPUTERS_CATWEASEL) {
+	else if (z->id == ZORRO_PROD_INDIVIDUAL_COMPUTERS_CATWEASEL)
 	    buddha_num_hwifs = CATWEASEL_NUM_HWIFS;
-	    name = "Catweasel IDE Interface and Floppy Controller";
-	} else
+	else
 	    continue;
 	board = z->resource.start;
 	if (!request_mem_region(board+BUDDHA_BASE1, 0x800, "IDE"))
 	    continue;
-	strcpy(z->name, name);
 	buddha_board = ZTWO_VADDR(board);
 	/* write to BUDDHA_IRQ_MR to enable the board IRQ */
 	*(char *)(buddha_board+BUDDHA_IRQ_MR) = 0;

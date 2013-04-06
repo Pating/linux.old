@@ -1,11 +1,8 @@
 #ifndef __EMU_WRAPPER_H
 #define __EMU_WRAPPER_H
 
-#include <linux/wrapper.h>
+#define vma_get_pgoff(v)		((v)->vm_pgoff)
 
-#define UP_INODE_SEM(a)
-#define DOWN_INODE_SEM(a)
-
-#define GET_INODE_STRUCT()
+#define PCI_SET_DMA_MASK(pdev,mask)	(((pdev)->dma_mask) = (mask))
 
 #endif

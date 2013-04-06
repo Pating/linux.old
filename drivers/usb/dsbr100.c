@@ -33,6 +33,13 @@
 
  History:
 
+ Version 0.24:
+ 	Markus: Hope I got these silly VIDEO_TUNER_LOW issues finally
+	right.  Some minor cleanup, improved standalone compilation
+
+ Version 0.23:
+ 	Markus: Sign extension bug fixed by declaring transfer_buffer unsigned
+
  Version 0.22:
  	Markus: Some (brown bag) cleanup in what VIDIOCSTUNER returns, 
 	thanks to Mike Cox for pointing the problem out.
@@ -63,7 +70,8 @@
 
 #define TB_LEN 16
 
-static void *usb_dsbr100_probe(struct usb_device *dev, unsigned int ifnum);
+static void *usb_dsbr100_probe(struct usb_device *dev, unsigned int ifnum,
+			 const struct usb_device_id *id);
 static void usb_dsbr100_disconnect(struct usb_device *dev, void *ptr);
 static int usb_dsbr100_ioctl(struct video_device *dev, unsigned int cmd, 
 	void *arg);
@@ -74,7 +82,7 @@ static void usb_dsbr100_close(struct video_device *dev);
 typedef struct
 {	struct urb readurb,writeurb;
 	struct usb_device *dev;
-	char transfer_buffer[TB_LEN];
+	unsigned char transfer_buffer[TB_LEN];
 	int curfreq;
 	int stereo;
 	int ifnum;
@@ -83,28 +91,30 @@ typedef struct
 
 static struct video_device usb_dsbr100_radio=
 {
-	"D-Link DSB R-100 USB radio",
-	VID_TYPE_TUNER,
-	VID_HARDWARE_AZTECH,
-	usb_dsbr100_open,
-	usb_dsbr100_close,
-	NULL,	/* Can't read  (no capture ability) */
-	NULL,	/* Can't write */
-	NULL,	/* No poll */
-	usb_dsbr100_ioctl,
-	NULL,
-	NULL
+	name:		"D-Link DSB R-100 USB radio",
+	type:		VID_TYPE_TUNER,
+	hardware:	VID_HARDWARE_AZTECH,
+	open:		usb_dsbr100_open,
+	close:		usb_dsbr100_close,
+	ioctl:		usb_dsbr100_ioctl,
 };
 
 static int users = 0;
+
+static struct usb_device_id usb_dsbr100_table [] = {
+	{ USB_DEVICE(DSB100_VENDOR, DSB100_PRODUCT) },
+	{ }						/* Terminating entry */
+};
+
+MODULE_DEVICE_TABLE (usb, usb_dsbr100_table);
 
 static struct usb_driver usb_dsbr100_driver = {
 	name:		"dsbr100",
 	probe:		usb_dsbr100_probe,
 	disconnect:	usb_dsbr100_disconnect,
-	driver_list: {NULL,NULL},
-	fops: NULL,
-	minor: 0
+	fops:		NULL,
+	minor:		0,
+	id_table:	usb_dsbr100_table,
 };
 
 
@@ -132,11 +142,11 @@ static int dsbr100_stop(usb_dsbr100 *radio)
 
 static int dsbr100_setfreq(usb_dsbr100 *radio, int freq)
 {
-	freq = (freq*80)/16+856;
+	freq = (freq/16*80)/1000+856;
 	if (usb_control_msg(radio->dev, usb_rcvctrlpipe(radio->dev, 0),
-		0x01, 0xC0, (freq&0xff00)>>8, freq&0xff, 
-		radio->transfer_buffer, 8, 300)<0
-	 || usb_control_msg(radio->dev, usb_rcvctrlpipe(radio->dev, 0),
+		0x01, 0xC0, (freq>>8)&0x00ff, freq&0xff, 
+		radio->transfer_buffer, 8, 300)<0 ||
+	    usb_control_msg(radio->dev, usb_rcvctrlpipe(radio->dev, 0),
 		0x00, 0xC0, 0x96, 0xB7, radio->transfer_buffer, 8, 300)<0 ||
 	    usb_control_msg(radio->dev, usb_rcvctrlpipe(radio->dev, 0),
 		0x00, 0xC0, 0x00, 0x24, radio->transfer_buffer, 8, 300)<0) {
@@ -157,19 +167,17 @@ static void dsbr100_getstat(usb_dsbr100 *radio)
 }
 
 
-static void *usb_dsbr100_probe(struct usb_device *dev, unsigned int ifnum)
+static void *usb_dsbr100_probe(struct usb_device *dev, unsigned int ifnum,
+			 const struct usb_device_id *id)
 {
 	usb_dsbr100 *radio;
 
-	if (dev->descriptor.idVendor!=DSB100_VENDOR ||
-			dev->descriptor.idProduct!=DSB100_PRODUCT)
-		return NULL;
 	if (!(radio = kmalloc(sizeof(usb_dsbr100),GFP_KERNEL)))
 		return NULL;
 	usb_dsbr100_radio.priv = radio;
 	radio->dev = dev;
 	radio->ifnum = ifnum;
-	radio->curfreq = 1454;
+	radio->curfreq = 1454000;
 	return (void*)radio;
 }
 
@@ -215,8 +223,8 @@ static int usb_dsbr100_ioctl(struct video_device *dev, unsigned int cmd,
 				return -EFAULT;
 			if(v.tuner)	/* Only 1 tuner */ 
 				return -EINVAL;
-			v.rangelow = 87*16;
-			v.rangehigh = 108*16;
+			v.rangelow = 87*16000;
+			v.rangehigh = 108*16000;
 			v.flags = VIDEO_TUNER_LOW;
 			v.mode = VIDEO_MODE_AUTO;
 			v.signal = radio->stereo*0x7000;
@@ -318,7 +326,7 @@ static void usb_dsbr100_close(struct video_device *dev)
 	MOD_DEC_USE_COUNT;
 }
 
-int __init dsbr100_init(void)
+static int __init dsbr100_init(void)
 {
 	usb_dsbr100_radio.priv = NULL;
 	usb_register(&usb_dsbr100_driver);
@@ -329,12 +337,7 @@ int __init dsbr100_init(void)
 	return 0;
 }
 
-int __init init_module(void)
-{
-	return dsbr100_init();
-}
-
-void cleanup_module(void)
+static void __exit dsbr100_exit(void)
 {
 	usb_dsbr100 *radio=usb_dsbr100_radio.priv;
 
@@ -343,6 +346,12 @@ void cleanup_module(void)
 	video_unregister_device(&usb_dsbr100_radio);
 	usb_deregister(&usb_dsbr100_driver);
 }
+
+module_init (dsbr100_init);
+module_exit (dsbr100_exit);
+
+MODULE_AUTHOR("Markus Demleitner <msdemlei@tucana.harvard.edu>");
+MODULE_DESCRIPTION("D-Link DSB-R100 USB radio driver");
 
 /*
 vi: ts=8

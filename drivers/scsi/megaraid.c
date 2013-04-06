@@ -194,9 +194,6 @@ MODULE_DESCRIPTION ("AMI MegaRAID driver");
  *================================================================
  */
 
-#define queue_task_irq(a,b)     queue_task(a,b)
-#define queue_task_irq_off(a,b) queue_task(a,b)
-
 #define MAX_SERBUF 160
 #define COM_BASE 0x2f8
 
@@ -1478,6 +1475,8 @@ int mega_findCard (Scsi_Host_Template * pHostTmpl,
   struct pci_dev *pdev = NULL;
   
   while ((pdev = pci_find_device (pciVendor, pciDev, pdev))) {
+    if (pci_enable_device(pdev))
+    	continue;
     if ((flag & BOARD_QUARTZ) && (skip_id == -1)) {
       u16 magic;
       pci_read_config_word(pdev, PCI_CONF_AMISIG, &magic);
@@ -1489,37 +1488,19 @@ int mega_findCard (Scsi_Host_Template * pHostTmpl,
 	    pciDev,
 	    pdev->slot_name);
 
-    /*
-     *	Dont crash on boot with AMI cards configured for I2O. 
-     *  (our I2O code will find them then they will fail oddly until
-     *   we figure why they upset our I2O code). This driver will die
-     *   if it tries to boot an I2O mode board and we dont stop it now.
-     *     - Alan Cox , Red Hat Software, Jan 2000
-     */
-     	    
-    if((pdev->class >> 8) == PCI_CLASS_INTELLIGENT_I2O)
-    {
-    	printk( KERN_INFO "megaraid: Board configured for I2O, ignoring this card. Reconfigure the card\n"
-		KERN_INFO "megaraid: in the BIOS for \"mass storage\" to use it with this driver.\n");
-	continue;
-    }		
-
     /* Read the base port and IRQ from PCI */
-    megaBase = pdev->resource[0].start;
+    megaBase = pci_resource_start (pdev, 0);
     megaIrq  = pdev->irq;
 
-    if (flag & BOARD_QUARTZ) {
-
-      megaBase &= PCI_BASE_ADDRESS_MEM_MASK;
+    if (flag & BOARD_QUARTZ)
       megaBase = (long) ioremap (megaBase, 128);
-    }
-    else {
-      megaBase &= PCI_BASE_ADDRESS_IO_MASK;
+    else
       megaBase += 0x10;
-    }
 
     /* Initialize SCSI Host structure */
     host = scsi_register (pHostTmpl, sizeof (mega_host_config));
+    if(host == NULL)
+    	continue;
     megaCfg = (mega_host_config *) host->hostdata;
     memset (megaCfg, 0, sizeof (mega_host_config));
 
@@ -1546,12 +1527,11 @@ int mega_findCard (Scsi_Host_Template * pHostTmpl,
     megaCtlrs[numCtlrs++] = megaCfg; 
     if (flag != BOARD_QUARTZ) {
       /* Request our IO Range */
-      if (check_region (megaBase, 16)) {
+      if (request_region (megaBase, 16, "megaraid")) {
 	printk (KERN_WARNING "megaraid: Couldn't register I/O range!" CRLFSTR);
 	scsi_unregister (host);
 	continue;
       }
-      request_region (megaBase, 16, "megaraid");
     }
 
     /* Request our IRQ */
@@ -1589,7 +1569,7 @@ int mega_findCard (Scsi_Host_Template * pHostTmpl,
 "megaraid: to protect your data, please upgrade your firmware to version\n"
 "megaraid: 3.10 or later, available from the Dell Technical Support web\n"
 "megaraid: site at\n"
-"http://support.dell.com/us/en/filelib/download/index.asp?fileid=2489\n");
+"http://support.dell.com/us/en/filelib/download/index.asp?fileid=2940\n");
 	megaraid_release (host);
 #ifdef MODULE	
 	continue;
@@ -2035,8 +2015,6 @@ static int __init megaraid_setup(char *str)
 
 __setup("megaraid=", megaraid_setup);
 
-#ifdef MODULE
-Scsi_Host_Template driver_template = MEGARAID;
+static Scsi_Host_Template driver_template = MEGARAID;
 
 #include "scsi_module.c"
-#endif

@@ -714,7 +714,9 @@ size_t parport_pc_compat_write_block_pio (struct parport *port,
 	/* Set up parallel port FIFO mode.*/
 	parport_pc_data_forward (port); /* Must be in PS2 mode */
 	parport_pc_frob_control (port, PARPORT_CONTROL_STROBE, 0);
-	change_mode (port, ECR_PPF); /* Parallel port FIFO */
+	r = change_mode (port, ECR_PPF); /* Parallel port FIFO */
+	if (r)  printk (KERN_DEBUG "%s: Warning change_mode ECR_PPF failed\n", port->name);
+
 	port->physport->ieee1284.phase = IEEE1284_PH_FWD_DATA;
 
 	/* Write the data to the FIFO. */
@@ -776,9 +778,13 @@ size_t parport_pc_ecp_write_block_pio (struct parport *port,
 	/* Switch to forward mode if necessary. */
 	if (port->physport->ieee1284.phase != IEEE1284_PH_FWD_IDLE) {
 		/* Event 47: Set nInit high. */
-		parport_frob_control (port, PARPORT_CONTROL_INIT, 0);
+		parport_frob_control (port,
+				      PARPORT_CONTROL_INIT
+				      | PARPORT_CONTROL_AUTOFD,
+				      PARPORT_CONTROL_INIT
+				      | PARPORT_CONTROL_AUTOFD);
 
-		/* Event 40: PError goes high. */
+		/* Event 49: PError goes high. */
 		r = parport_wait_peripheral (port,
 					     PARPORT_STATUS_PAPEROUT,
 					     PARPORT_STATUS_PAPEROUT);
@@ -793,7 +799,8 @@ size_t parport_pc_ecp_write_block_pio (struct parport *port,
 				 PARPORT_CONTROL_STROBE |
 				 PARPORT_CONTROL_AUTOFD,
 				 0);
-	change_mode (port, ECR_ECP); /* ECP FIFO */
+	r = change_mode (port, ECR_ECP); /* ECP FIFO */
+	if (r) printk (KERN_DEBUG "%s: Warning change_mode ECR_ECP failed\n", port->name);
 	port->physport->ieee1284.phase = IEEE1284_PH_FWD_DATA;
 
 	/* Write the data to the FIFO. */
@@ -917,7 +924,8 @@ size_t parport_pc_ecp_read_block_pio (struct parport *port,
 				 PARPORT_CONTROL_STROBE |
 				 PARPORT_CONTROL_AUTOFD,
 				 0);
-	change_mode (port, ECR_ECP); /* ECP FIFO */
+	r = change_mode (port, ECR_ECP); /* ECP FIFO */
+	if (r) printk (KERN_DEBUG "%s: Warning change_mode ECR_ECP failed\n", port->name);
 	port->ieee1284.phase = IEEE1284_PH_REV_DATA;
 
 	/* Do the transfer. */
@@ -1412,6 +1420,12 @@ static int __devinit get_superio_irq (struct parport *p)
 
 /*
  * Checks for port existence, all ports support SPP MODE
+ * Returns: 
+ *         0           :  No parallel port at this adress
+ *  PARPORT_MODE_PCSPP :  SPP port detected 
+ *                        (if the user specified an ioport himself,
+ *                         this shall always be the case!)
+ *
  */
 static int __devinit parport_SPP_supported(struct parport *pb)
 {
@@ -1447,8 +1461,8 @@ static int __devinit parport_SPP_supported(struct parport *pb)
 	if (user_specified)
 		/* That didn't work, but the user thinks there's a
 		 * port here. */
-		printk (KERN_DEBUG "0x%lx: CTR: wrote 0x%02x, read 0x%02x\n",
-			pb->base, w, r);
+		printk (KERN_DEBUG "parport 0x%lx (WARNING): CTR: "
+			"wrote 0x%02x, read 0x%02x\n", pb->base, w, r);
 
 	/* Try the data register.  The data lines aren't tri-stated at
 	 * this stage, so we expect back what we wrote. */
@@ -1463,11 +1477,15 @@ static int __devinit parport_SPP_supported(struct parport *pb)
 			return PARPORT_MODE_PCSPP;
 	}
 
-	if (user_specified)
+	if (user_specified) {
 		/* Didn't work, but the user is convinced this is the
 		 * place. */
-		printk (KERN_DEBUG "0x%lx: DATA: wrote 0x%02x, read 0x%02x\n",
-			pb->base, w, r);
+		printk (KERN_DEBUG "parport 0x%lx (WARNING): DATA: "
+			"wrote 0x%02x, read 0x%02x\n", pb->base, w, r);
+		printk (KERN_DEBUG "parport 0x%lx: You gave this address, "
+			"but there is probably no parallel port there!\n",
+			pb->base);
+	}
 
 	/* It's possible that we can't read the control register or
 	 * the data register.  In that case just believe the user. */
@@ -1692,7 +1710,7 @@ static int __devinit parport_ECP_supported(struct parport *pb)
 
 	/* Go back to mode 000 */
 	frob_econtrol (pb, 0xe0, ECR_SPP << 5);
-	pb->modes |= PARPORT_MODE_ECP;
+	pb->modes |= PARPORT_MODE_ECP | PARPORT_MODE_COMPAT;
 
 	return 1;
 }
@@ -2095,9 +2113,12 @@ struct parport *__devinit parport_pc_probe_port (unsigned long int base,
 		printmode(DMA);
 	}
 #undef printmode
+#ifndef CONFIG_PARPORT_1284
+	printk ("(,...)");
+#endif /* CONFIG_PARPORT_1284 */
 	printk("]\n");
 	if (probedirq != PARPORT_IRQ_NONE) 
-		printk("%s: irq %d detected\n", p->name, probedirq);
+		printk(KERN_INFO "%s: irq %d detected\n", p->name, probedirq);
 	parport_proc_register(p);
 
 	request_region (p->base, 3, p->name);
@@ -2164,7 +2185,8 @@ struct parport *__devinit parport_pc_probe_port (unsigned long int base,
 /* Via support maintained by Jeff Garzik <jgarzik@mandrakesoft.com> */
 static int __devinit sio_via_686a_probe (struct pci_dev *pdev)
 {
-	u8 dma, irq, tmp;
+	u8 tmp;
+	int dma, irq;
 	unsigned port1, port2, have_eppecp;
 
 	/*
@@ -2217,12 +2239,12 @@ static int __devinit sio_via_686a_probe (struct pci_dev *pdev)
 	 */
 
 	/* 0x50_3-2: PnP Routing for Parallel Port DRQ */
-	pci_read_config_byte (pdev, 0x50, &dma);
-	dma = ((dma >> 2) & 0x03);
+	pci_read_config_byte (pdev, 0x50, &tmp);
+	dma = ((tmp >> 2) & 0x03);
 	
 	/* 0x51_7-4: PnP Routing for Parallel Port IRQ */
-	pci_read_config_byte (pdev, 0x51, &irq);
-	irq = ((irq >> 4) & 0x0F);
+	pci_read_config_byte (pdev, 0x51, &tmp);
+	irq = ((tmp >> 4) & 0x0F);
 
 	/* filter bogus IRQs */
 	switch (irq) {
@@ -2243,8 +2265,13 @@ static int __devinit sio_via_686a_probe (struct pci_dev *pdev)
 
 	/* finally, do the probe with values obtained */
 	if (parport_pc_probe_port (port1, port2, irq, dma, NULL)) {
-		printk (KERN_INFO "parport_pc: Via 686A parallel port: io=0x%X, irq=%d, dma=%d\n",
-			port1, irq, dma);
+		printk (KERN_INFO
+			"parport_pc: Via 686A parallel port: io=0x%X", port1);
+		if (irq != PARPORT_IRQ_NONE)
+			printk (", irq=%d", irq);
+		if (dma != PARPORT_DMA_NONE)
+			printk (", dma=%d", dma);
+		printk ("\n");
 		return 1;
 	}
 	
@@ -2293,8 +2320,31 @@ enum parport_pc_pci_cards {
 	boca_ioppar,
 	plx_9050,
 	afavlab_tk9902,
-	timedia_1889,
+	timedia_4078a,
+	timedia_4079h,
+	timedia_4085h,
+	timedia_4088a,
+	timedia_4089a,
+	timedia_4095a,
+	timedia_4096a,
+	timedia_4078u,
+	timedia_4079a,
+	timedia_4085u,
+	timedia_4079r,
+	timedia_4079s,
+	timedia_4079d,
+	timedia_4079e,
+	timedia_4079f,
+	timedia_9079a,
+	timedia_9079b,
+	timedia_9079c,
+	timedia_4006a,
+	timedia_4014,
+	timedia_4008a,
+	timedia_4018,
+	timedia_9018a,
 	syba_2p_epp,
+	syba_1p_ecp,
 };
 
 
@@ -2334,10 +2384,33 @@ static struct parport_pc_pci {
 	/* boca_ioppar */		{ 1, { { 0, -1 }, } },
 	/* plx_9050 */			{ 2, { { 4, -1 }, { 5, -1 }, } },
 	/* afavlab_tk9902 */		{ 1, { { 0, 1 }, } },
-	/* timedia_1889 */		{ 1, { { 2, -1 }, } },
+	/* timedia_4078a */		{ 1, { { 2, -1 }, } },
+	/* timedia_4079h */             { 1, { { 2, 3 }, } },
+	/* timedia_4085h */             { 2, { { 2, -1 }, { 4, -1 }, } },
+	/* timedia_4088a */             { 2, { { 2, 3 }, { 4, 5 }, } },
+	/* timedia_4089a */             { 2, { { 2, 3 }, { 4, 5 }, } },
+	/* timedia_4095a */             { 2, { { 2, 3 }, { 4, 5 }, } },
+	/* timedia_4096a */             { 2, { { 2, 3 }, { 4, 5 }, } },
+	/* timedia_4078u */             { 1, { { 2, -1 }, } },
+	/* timedia_4079a */             { 1, { { 2, 3 }, } },
+	/* timedia_4085u */             { 2, { { 2, -1 }, { 4, -1 }, } },
+	/* timedia_4079r */             { 1, { { 2, 3 }, } },
+	/* timedia_4079s */             { 1, { { 2, 3 }, } },
+	/* timedia_4079d */             { 1, { { 2, 3 }, } },
+	/* timedia_4079e */             { 1, { { 2, 3 }, } },
+	/* timedia_4079f */             { 1, { { 2, 3 }, } },
+	/* timedia_9079a */             { 1, { { 2, 3 }, } },
+	/* timedia_9079b */             { 1, { { 2, 3 }, } },
+	/* timedia_9079c */             { 1, { { 2, 3 }, } },
+	/* timedia_4006a */             { 1, { { 0, -1 }, } },
+	/* timedia_4014  */             { 2, { { 0, -1 }, { 2, -1 }, } },
+	/* timedia_4008a */             { 1, { { 0, 1 }, } },
+	/* timedia_4018  */             { 2, { { 0, 1 }, { 2, 3 }, } },
+	/* timedia_9018a */             { 2, { { 0, 1 }, { 2, 3 }, } },
 					/* SYBA uses fixed offsets in
                                            a 1K io window */
-	/* syba_2p_epp */		{ 2, { { 0, 0x078 }, { 0, 0x178 }, } },
+	/* syba_2p_epp AP138B */	{ 2, { { 0, 0x078 }, { 0, 0x178 }, } },
+	/* syba_1p_ecp W83787 */	{ 1, { { 0, 0x078 }, } },
 };
 
 static struct pci_device_id parport_pc_pci_tbl[] __devinitdata = {
@@ -2395,9 +2468,34 @@ static struct pci_device_id parport_pc_pci_tbl[] __devinitdata = {
 	  PCI_SUBVENDOR_ID_EXSYS, PCI_SUBDEVICE_ID_EXSYS_4014, 0,0, plx_9050 },
 	{ PCI_VENDOR_ID_AFAVLAB, PCI_DEVICE_ID_AFAVLAB_TK9902,
 	  PCI_ANY_ID, PCI_ANY_ID, 0, 0, afavlab_tk9902 },
-	{ PCI_VENDOR_ID_TIMEDIA, PCI_DEVICE_ID_TIMEDIA_1889,
-	  PCI_ANY_ID, PCI_ANY_ID, 0, 0, timedia_1889 },
-	{ 0x1592, 0x0782, PCI_ANY_ID, PCI_ANY_ID, 0, 0, syba_2p_epp },
+	/* PCI_VENDOR_ID_TIMEDIA/SUNIX has many differing cards ...*/
+	{ 0x1409, 0x7168, 0x1409, 0x4078, 0, 0, timedia_4078a },
+	{ 0x1409, 0x7168, 0x1409, 0x4079, 0, 0, timedia_4079h },
+	{ 0x1409, 0x7168, 0x1409, 0x4085, 0, 0, timedia_4085h },
+	{ 0x1409, 0x7168, 0x1409, 0x4088, 0, 0, timedia_4088a },
+	{ 0x1409, 0x7168, 0x1409, 0x4089, 0, 0, timedia_4089a },
+	{ 0x1409, 0x7168, 0x1409, 0x4095, 0, 0, timedia_4095a },
+	{ 0x1409, 0x7168, 0x1409, 0x4096, 0, 0, timedia_4096a },
+	{ 0x1409, 0x7168, 0x1409, 0x5078, 0, 0, timedia_4078u },
+	{ 0x1409, 0x7168, 0x1409, 0x5079, 0, 0, timedia_4079a },
+	{ 0x1409, 0x7168, 0x1409, 0x5085, 0, 0, timedia_4085u },
+	{ 0x1409, 0x7168, 0x1409, 0x6079, 0, 0, timedia_4079r },
+	{ 0x1409, 0x7168, 0x1409, 0x7079, 0, 0, timedia_4079s },
+	{ 0x1409, 0x7168, 0x1409, 0x8079, 0, 0, timedia_4079d },
+	{ 0x1409, 0x7168, 0x1409, 0x9079, 0, 0, timedia_4079e },
+	{ 0x1409, 0x7168, 0x1409, 0xa079, 0, 0, timedia_4079f },
+	{ 0x1409, 0x7168, 0x1409, 0xb079, 0, 0, timedia_9079a },
+	{ 0x1409, 0x7168, 0x1409, 0xc079, 0, 0, timedia_9079b },
+	{ 0x1409, 0x7168, 0x1409, 0xd079, 0, 0, timedia_9079c },
+	{ 0x1409, 0x7268, 0x1409, 0x0101, 0, 0, timedia_4006a },
+	{ 0x1409, 0x7268, 0x1409, 0x0102, 0, 0, timedia_4014 },
+	{ 0x1409, 0x7268, 0x1409, 0x0103, 0, 0, timedia_4008a },
+	{ 0x1409, 0x7268, 0x1409, 0x0104, 0, 0, timedia_4018 },
+	{ 0x1409, 0x7268, 0x1409, 0x9018, 0, 0, timedia_9018a },
+	{ PCI_VENDOR_ID_SYBA, PCI_DEVICE_ID_SYBA_2P_EPP,
+	  PCI_ANY_ID, PCI_ANY_ID, 0, 0, syba_2p_epp },
+	{ PCI_VENDOR_ID_SYBA, PCI_DEVICE_ID_SYBA_1P_ECP,
+	  PCI_ANY_ID, PCI_ANY_ID, 0, 0, syba_1p_ecp },
 	{ 0, } /* terminate list */
 };
 MODULE_DEVICE_TABLE(pci,parport_pc_pci_tbl);
@@ -2430,8 +2528,9 @@ static int __devinit parport_pc_pci_probe (struct pci_dev *dev,
                                         def.) */
 		/* TODO: test if sharing interrupts works */
 		printk (KERN_DEBUG "PCI parallel port detected: %04x:%04x, "
-			"I/O at %#lx(%#lx)\n", parport_pc_pci_tbl[i].vendor,
-			parport_pc_pci_tbl[i].device, io_lo, io_hi);
+			"I/O at %#lx(%#lx)\n",
+			parport_pc_pci_tbl[i + last_sio].vendor,
+			parport_pc_pci_tbl[i + last_sio].device, io_lo, io_hi);
 		if (parport_pc_probe_port (io_lo, io_hi, PARPORT_IRQ_NONE,
 					   PARPORT_DMA_NONE, dev))
 			count++;
@@ -2597,6 +2696,7 @@ int init_module(void)
 
 void cleanup_module(void)
 {
+	/* We ought to keep track of which ports are actually ours. */
 	struct parport *p = parport_enumerate(), *tmp;
 
 	if (!user_specified)

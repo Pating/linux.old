@@ -10,23 +10,26 @@ CONFIG_UID16=y
 # CONFIG_EXPERIMENTAL is not set
 
 #
+# Loadable module support
+#
+# CONFIG_MODULES is not set
+
+#
 # Processor type and features
 #
 CONFIG_SH_GENERIC=y
 # CONFIG_SH_SOLUTION_ENGINE is not set
+# CONFIG_SH_OVERDRIVE is not set
+# CONFIG_SH_HP600 is not set
+# CONFIG_SH_UNKNOWN is not set
+# CONFIG_CPU_SUBTYPE_SH7707 is not set
 CONFIG_CPU_SUBTYPE_SH7708=y
 # CONFIG_CPU_SUBTYPE_SH7709 is not set
 # CONFIG_CPU_SUBTYPE_SH7750 is not set
 CONFIG_CPU_SH3=y
 # CONFIG_CPU_SH4 is not set
-CONFIG_LITTLE_ENDIAN=y
+CONFIG_CPU_LITTLE_ENDIAN=y
 CONFIG_MEMORY_START=0c000000
-CONFIG_IOPORT_START=ba000000
-
-#
-# Loadable module support
-#
-# CONFIG_MODULES is not set
 
 #
 # General setup
@@ -35,6 +38,7 @@ CONFIG_IOPORT_START=ba000000
 # CONFIG_SBUS is not set
 # CONFIG_NET is not set
 CONFIG_CF_ENABLER=y
+# CONFIG_HD64461 is not set
 # CONFIG_PCI is not set
 # CONFIG_HOTPLUG is not set
 # CONFIG_PCMCIA is not set
@@ -52,6 +56,11 @@ CONFIG_BINFMT_ELF=y
 # CONFIG_PARPORT is not set
 
 #
+# Memory Technology Devices (MTD)
+#
+# CONFIG_MTD is not set
+
+#
 # Block devices
 #
 # CONFIG_BLK_DEV_FD is not set
@@ -59,17 +68,16 @@ CONFIG_BINFMT_ELF=y
 # CONFIG_PARIDE is not set
 # CONFIG_BLK_CPQ_DA is not set
 # CONFIG_BLK_DEV_DAC960 is not set
-
-#
-# Additional Block Devices
-#
 # CONFIG_BLK_DEV_LOOP is not set
 # CONFIG_BLK_DEV_NBD is not set
 # CONFIG_BLK_DEV_LVM is not set
 # CONFIG_BLK_DEV_MD is not set
 # CONFIG_MD_LINEAR is not set
 # CONFIG_MD_RAID0 is not set
+# CONFIG_MD_RAID1 is not set
+# CONFIG_MD_RAID5 is not set
 CONFIG_BLK_DEV_RAM=y
+CONFIG_BLK_DEV_RAM_SIZE=4096
 CONFIG_BLK_DEV_INITRD=y
 
 #
@@ -96,6 +104,8 @@ CONFIG_BLK_DEV_IDEDISK=y
 # CONFIG_BLK_DEV_IDEDISK_QUANTUM is not set
 # CONFIG_BLK_DEV_IDEDISK_SEAGATE is not set
 # CONFIG_BLK_DEV_IDEDISK_WD is not set
+# CONFIG_BLK_DEV_COMMERIAL is not set
+# CONFIG_BLK_DEV_TIVO is not set
 # CONFIG_BLK_DEV_IDECS is not set
 # CONFIG_BLK_DEV_IDECD is not set
 # CONFIG_BLK_DEV_IDETAPE is not set
@@ -110,6 +120,7 @@ CONFIG_BLK_DEV_IDEDISK=y
 # CONFIG_BLK_DEV_ISAPNP is not set
 # CONFIG_IDE_CHIPSETS is not set
 # CONFIG_IDEDMA_AUTO is not set
+# CONFIG_DMA_NONPCI is not set
 # CONFIG_BLK_DEV_IDE_MODES is not set
 
 #
@@ -121,15 +132,15 @@ CONFIG_BLK_DEV_IDEDISK=y
 # Character devices
 #
 # CONFIG_VT is not set
-CONFIG_SERIAL=y
-CONFIG_SH_SCI_SERIAL=y
-# CONFIG_SH_SCIF_SERIAL is not set
+# CONFIG_SERIAL is not set
+CONFIG_SH_SCI=y
 CONFIG_SERIAL_CONSOLE=y
 
 #
 # Unix 98 PTY support
 #
 # CONFIG_UNIX98_PTYS is not set
+# CONFIG_HEARTBEAT is not set
 
 #
 # File systems
@@ -147,6 +158,7 @@ CONFIG_SERIAL_CONSOLE=y
 # CONFIG_UMSDOS_FS is not set
 # CONFIG_VFAT_FS is not set
 # CONFIG_EFS_FS is not set
+# CONFIG_JFFS_FS is not set
 # CONFIG_CRAMFS is not set
 # CONFIG_RAMFS is not set
 # CONFIG_ISO9660_FS is not set
@@ -188,4 +200,7 @@ CONFIG_MSDOS_PARTITION=y
 # Kernel hacking
 #
 # CONFIG_MAGIC_SYSRQ is not set
+CONFIG_SH_STANDARD_BIOS=y
 CONFIG_DEBUG_KERNEL_WITH_GDB_STUB=y
+CONFIG_GDB_STUB_VBR=a0000000
+CONFIG_SH_EARLY_PRINTK=y

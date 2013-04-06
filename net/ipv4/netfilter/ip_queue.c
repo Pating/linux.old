@@ -3,6 +3,13 @@
  * communicating with userspace via netlink.
  *
  * (C) 2000 James Morris, this code is GPL.
+ *
+ * 2000-03-27: Simplified code (thanks to Andi Kleen for clues).
+ * 2000-05-20: Fixed notifier problems (following Miguel Freitas' report).
+ * 2000-06-19: Fixed so nfmark is copied to metadata (reported by Sebastian 
+ *             Zander).
+ * 2000-08-01: Added Nick Williams' MAC support.
+ *
  */
 #include <linux/module.h>
 #include <linux/skbuff.h>
@@ -52,40 +59,36 @@ typedef struct ipq_queue {
  	ipq_peer_t peer;		/* Userland peer */
 } ipq_queue_t;
 
-
 /****************************************************************************
  *
  * Packet queue
  *
  ****************************************************************************/
 
-/* Dequeue with element packet ID, or from end of queue if ID is zero. */
-static ipq_queue_element_t *ipq_dequeue(ipq_queue_t *q, unsigned long id)
+/* Dequeue a packet if matched by cmp, or the next available if cmp is NULL */
+static ipq_queue_element_t *
+ipq_dequeue(ipq_queue_t *q,
+            int (*cmp)(ipq_queue_element_t *, unsigned long),
+            unsigned long data)
 {
 	struct list_head *i;
-	ipq_queue_element_t *e = NULL;
 
 	spin_lock_bh(&q->lock);
-	if (q->len == 0)
-		goto out_unlock;
-	i = q->list.prev;
-	if (id > 0) {
-		while (i != &q->list) {
-			if (id == (unsigned long )i)
-				goto out_unlink;
-			i = i->prev;	
+	for (i = q->list.prev; i != &q->list; i = i->prev) {
+		ipq_queue_element_t *e = (ipq_queue_element_t *)i;
+		
+		if (!cmp || cmp(e, data)) {
+			list_del(&e->list);
+			q->len--;
+			spin_unlock_bh(&q->lock);
+			return e;
 		}
-		goto out_unlock;
 	}
-out_unlink:
-	e = (ipq_queue_element_t *)i;
-	list_del(&e->list);
-	q->len--;
-out_unlock:
 	spin_unlock_bh(&q->lock);
-	return e;
+	return NULL;
 }
 
+/* Flush all packets */
 static void ipq_flush(ipq_queue_t *q)
 {
 	ipq_queue_element_t *e;
@@ -93,7 +96,7 @@ static void ipq_flush(ipq_queue_t *q)
 	spin_lock_bh(&q->lock);
 	q->flushing = 1;
 	spin_unlock_bh(&q->lock);
-	while ((e = ipq_dequeue(q, 0))) {
+	while ((e = ipq_dequeue(q, NULL, 0))) {
 		e->verdict = NF_DROP;
 		nf_reinject(e->skb, e->info, e->verdict);
 		kfree(e);
@@ -197,39 +200,42 @@ static void ipq_destroy_queue(ipq_queue_t *q)
 
 static int ipq_mangle_ipv4(ipq_verdict_msg_t *v, ipq_queue_element_t *e)
 {
+	int diff;
 	struct iphdr *user_iph = (struct iphdr *)v->payload;
 
 	if (v->data_len < sizeof(*user_iph))
 		return 0;
-	if (e->skb->nh.iph->check != user_iph->check) {
-		int diff = v->data_len - e->skb->len;
-
-		if (diff < 0)
-			skb_trim(e->skb, v->data_len);
-		else if (diff > 0) {
-			if (v->data_len > 0xFFFF)
-				return -EINVAL;
-			if (diff > skb_tailroom(e->skb)) {
-				struct sk_buff *newskb;
-
-				newskb = skb_copy_expand(e->skb,
-				                         skb_headroom(e->skb),
-				                         diff,
-				                         GFP_ATOMIC);
-				if (newskb == NULL) {
-					printk(KERN_WARNING "ip_queue: OOM "
-					       "in mangle, dropping packet\n");
-					return -ENOMEM;
-				}
-				kfree_skb(e->skb);
-				e->skb = newskb;
+	diff = v->data_len - e->skb->len;
+	if (diff < 0)
+		skb_trim(e->skb, v->data_len);
+	else if (diff > 0) {
+		if (v->data_len > 0xFFFF)
+			return -EINVAL;
+		if (diff > skb_tailroom(e->skb)) {
+			struct sk_buff *newskb;
+			
+			newskb = skb_copy_expand(e->skb,
+			                         skb_headroom(e->skb),
+			                         diff,
+			                         GFP_ATOMIC);
+			if (newskb == NULL) {
+				printk(KERN_WARNING "ip_queue: OOM "
+				      "in mangle, dropping packet\n");
+				return -ENOMEM;
 			}
-			skb_put(e->skb, diff);
+			kfree_skb(e->skb);
+			e->skb = newskb;
 		}
-		memcpy(e->skb->data, v->payload, v->data_len);
-		e->skb->nfcache |= NFC_ALTERED;
+		skb_put(e->skb, diff);
 	}
+	memcpy(e->skb->data, v->payload, v->data_len);
+	e->skb->nfcache |= NFC_ALTERED;
 	return 0;
+}
+
+static inline int id_cmp(ipq_queue_element_t *e, unsigned long id)
+{
+	return (id == (unsigned long )e);
 }
 
 static int ipq_set_verdict(ipq_queue_t *q,
@@ -237,9 +243,9 @@ static int ipq_set_verdict(ipq_queue_t *q,
 {
 	ipq_queue_element_t *e;
 
-	if (v->value < 0 || v->value > NF_MAX_VERDICT)
+	if (v->value > NF_MAX_VERDICT)
 		return -EINVAL;
-	e = ipq_dequeue(q, v->id);
+	e = ipq_dequeue(q, id_cmp, v->id);
 	if (e == NULL)
 		return -ENOENT;
 	else {
@@ -258,11 +264,13 @@ static int ipq_receive_peer(ipq_queue_t *q, ipq_peer_msg_t *m,
 {
 
 	int status = 0;
+	int busy;
 		
 	spin_lock_bh(&q->lock);
-	if (q->terminate || q->flushing)
-		return -EBUSY;
+	busy = (q->terminate || q->flushing);
 	spin_unlock_bh(&q->lock);
+	if (busy)
+		return -EBUSY;
 	if (len < sizeof(ipq_peer_msg_t))
 		return -EINVAL;
 	switch (type) {
@@ -294,6 +302,29 @@ static int ipq_receive_peer(ipq_queue_t *q, ipq_peer_msg_t *m,
 			 status = -EINVAL;
 	}
 	return status;
+}
+
+static inline int dev_cmp(ipq_queue_element_t *e, unsigned long ifindex)
+{
+	if (e->info->indev)
+		if (e->info->indev->ifindex == ifindex)
+			return 1;
+	if (e->info->outdev)
+		if (e->info->outdev->ifindex == ifindex)
+			return 1;
+	return 0;
+}
+
+/* Drop any queued packets associated with device ifindex */
+static void ipq_dev_drop(ipq_queue_t *q, int ifindex)
+{
+	ipq_queue_element_t *e;
+	
+	while ((e = ipq_dequeue(q, dev_cmp, ifindex))) {
+		e->verdict = NF_DROP;
+		nf_reinject(e->skb, e->info, e->verdict);
+		kfree(e);
+	}
 }
 
 /****************************************************************************
@@ -362,11 +393,13 @@ static struct sk_buff *netlink_build_message(ipq_queue_element_t *e, int *errp)
 	pm->data_len = data_len;
 	pm->timestamp_sec = e->skb->stamp.tv_sec;
 	pm->timestamp_usec = e->skb->stamp.tv_usec;
+	pm->mark = e->skb->nfmark;
 	pm->hook = e->info->hook;
 	if (e->info->indev) strcpy(pm->indev_name, e->info->indev->name);
 	else pm->indev_name[0] = '\0';
 	if (e->info->outdev) strcpy(pm->outdev_name, e->info->outdev->name);
 	else pm->outdev_name[0] = '\0';
+	pm->hw_protocol = e->skb->protocol;
 	if (data_len)
 		memcpy(pm->payload, e->skb->data, data_len);
 	nlh->nlmsg_len = skb->tail - old_tail;
@@ -374,7 +407,7 @@ static struct sk_buff *netlink_build_message(ipq_queue_element_t *e, int *errp)
 	return skb;
 nlmsg_failure:
 	if (skb)
-		kfree(skb);
+		kfree_skb(skb);
 	*errp = 0;
 	printk(KERN_ERR "ip_queue: error creating netlink message\n");
 	return NULL;
@@ -456,9 +489,11 @@ static void netlink_receive_user_sk(struct sock *sk, int len)
 static int receive_event(struct notifier_block *this,
                          unsigned long event, void *ptr)
 {
-	if (event == NETDEV_UNREGISTER)
-		if (nlq)
-			ipq_destroy_queue(nlq);
+	struct net_device *dev = ptr;
+
+	/* Drop any packets associated with the downed device */
+	if (event == NETDEV_DOWN)
+		ipq_dev_drop(nlq, dev->ifindex);
 	return NOTIFY_DONE;
 }
 
@@ -574,5 +609,3 @@ static void __exit fini(void)
 MODULE_DESCRIPTION("IPv4 packet queue handler");
 module_init(init);
 module_exit(fini);
-
-

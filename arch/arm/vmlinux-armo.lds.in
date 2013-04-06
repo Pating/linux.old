@@ -9,6 +9,7 @@ SECTIONS
 	. = TEXTADDR;
 
 	.init : {
+		_stext = .;
 		__init_begin = .;	/* Init code and data		*/
 			*(.text.init)
 		__proc_info_begin = .;
@@ -36,6 +37,7 @@ SECTIONS
 	/DISCARD/ : {			/* Exit code and data		*/
 		*(.text.exit)
 		*(.data.exit)
+		*(.exitcall.exit)
 	}
 
 	.text : {
@@ -78,9 +80,10 @@ SECTIONS
 
 
 	.bss : {
-		  __bss_start = .;	/* BSS				*/
+		__bss_start = .;	/* BSS				*/
 		*(.bss)
-		  _end = . ;
+		*(COMMON)
+		_end = . ;
 	}
 
 					/* Stabs debugging sections.	*/

@@ -5,6 +5,9 @@
  *               highlevel or lowlevel code
  *
  * Copyright (C) 1999, 2000 Andreas E. Bombe
+ *
+ * This code is licensed under the GPL.  See the file COPYING in the root
+ * directory of the kernel sources for details.
  */
 
 #include <linux/config.h>
@@ -25,6 +28,7 @@
 #include "highlevel.h"
 #include "ieee1394_transactions.h"
 #include "csr.h"
+#include "guid.h"
 
 
 atomic_t hpsb_generation = ATOMIC_INIT(0);
@@ -45,6 +49,26 @@ static void dump_packet(const char *text, quadlet_t *data, int size)
 }
 
 
+/**
+ * alloc_hpsb_packet - allocate new packet structure
+ * @data_size: size of the data block to be allocated
+ *
+ * This function allocates, initializes and returns a new &struct hpsb_packet.
+ * It can be used in interrupt context.  A header block is always included, its
+ * size is big enough to contain all possible 1394 headers.  The data block is
+ * only allocated when @data_size is not zero.
+ *
+ * For packets for which responses will be received the @data_size has to be big
+ * enough to contain the response's data block since no further allocation
+ * occurs at response matching time.
+ *
+ * The packet's generation value will be set to the current generation number
+ * for ease of use.  Remember to overwrite it with your own recorded generation
+ * number if you can not be sure that your code will not race with a bus reset.
+ *
+ * Return value: A pointer to a &struct hpsb_packet or NULL on allocation
+ * failure.
+ */
 struct hpsb_packet *alloc_hpsb_packet(size_t data_size)
 {
         struct hpsb_packet *packet = NULL;
@@ -83,6 +107,14 @@ struct hpsb_packet *alloc_hpsb_packet(size_t data_size)
         return packet;
 }
 
+
+/**
+ * free_hpsb_packet - free packet and data associated with it
+ * @packet: packet to free (is NULL safe)
+ *
+ * This function will free packet->data, packet->header and finally the packet
+ * itself.
+ */
 void free_hpsb_packet(struct hpsb_packet *packet)
 {
         if (packet == NULL) {
@@ -95,30 +127,37 @@ void free_hpsb_packet(struct hpsb_packet *packet)
 }
 
 
-void reset_host_bus(struct hpsb_host *host)
+int hpsb_reset_bus(struct hpsb_host *host)
 {
         if (!host->initialized) {
-                return;
+                return 1;
         }
 
-        hpsb_bus_reset(host);
-        host->template->devctl(host, RESET_BUS, 0);
+        if (!hpsb_bus_reset(host)) {
+                host->template->devctl(host, RESET_BUS, 0);
+                return 0;
+        } else {
+                return 1;
+        }
 }
 
 
-void hpsb_bus_reset(struct hpsb_host *host)
+int hpsb_bus_reset(struct hpsb_host *host)
 {
-        if (!host->in_bus_reset) {
-                abort_requests(host);
-                host->in_bus_reset = 1;
-                host->irm_id = -1;
-                host->busmgr_id = -1;
-                host->node_count = 0;
-                host->selfid_count = 0;
-        } else {
+        if (host->in_bus_reset) {
                 HPSB_NOTICE(__FUNCTION__ 
                             " called while bus reset already in progress");
+                return 1;
         }
+
+        abort_requests(host);
+        host->in_bus_reset = 1;
+        host->irm_id = -1;
+        host->busmgr_id = -1;
+        host->node_count = 0;
+        host->selfid_count = 0;
+
+        return 0;
 }
 
 
@@ -279,7 +318,7 @@ void hpsb_selfid_complete(struct hpsb_host *host, int phyid, int isroot)
                 if (host->reset_retries++ < 20) {
                         /* selfid stage did not complete without error */
                         HPSB_NOTICE("error in SelfID stage - resetting");
-                        reset_host_bus(host);
+                        hpsb_reset_bus(host);
                         return;
                 } else {
                         HPSB_NOTICE("stopping out-of-control reset loop");
@@ -300,6 +339,7 @@ void hpsb_selfid_complete(struct hpsb_host *host, int phyid, int isroot)
 
         host->reset_retries = 0;
         inc_hpsb_generation();
+        if (isroot) host->template->devctl(host, ACT_CYCLE_MASTER, 1);
         highlevel_host_reset(host);
 }
 
@@ -336,6 +376,20 @@ void hpsb_packet_sent(struct hpsb_host *host, struct hpsb_packet *packet,
         queue_task(&host->timeout_tq, &tq_timer);
 }
 
+/**
+ * hpsb_send_packet - transmit a packet on the bus
+ * @packet: packet to send
+ *
+ * The packet is sent through the host specified in the packet->host field.
+ * Before sending, the packet's transmit speed is automatically determined using
+ * the local speed map when it is an async, non-broadcast packet.
+ *
+ * Possibilities for failure are that host is either not initialized, in bus
+ * reset, the packet's generation number doesn't match the current generation
+ * number or the host reports a transmit error.
+ *
+ * Return value: False (0) on failure, true (1) otherwise.
+ */
 int hpsb_send_packet(struct hpsb_packet *packet)
 {
         struct hpsb_host *host = packet->host;
@@ -346,8 +400,12 @@ int hpsb_send_packet(struct hpsb_packet *packet)
         }
 
         packet->state = queued;
-        packet->speed_code = host->speed_map[(host->node_id & NODE_MASK) * 64
-                                            + (packet->node_id & NODE_MASK)];
+
+        if (packet->type == async && packet->node_id != ALL_NODES) {
+                packet->speed_code =
+                        host->speed_map[(host->node_id & NODE_MASK) * 64
+                                       + (packet->node_id & NODE_MASK)];
+        }
 
 #ifdef CONFIG_IEEE1394_VERBOSEDEBUG
         switch (packet->speed_code) {
@@ -491,7 +549,7 @@ struct hpsb_packet *create_reply_packet(struct hpsb_host *host, quadlet_t *data,
                 if (packet == NULL) break
 
 void handle_incoming_packet(struct hpsb_host *host, int tcode, quadlet_t *data,
-                            size_t size)
+                            size_t size, int write_acked)
 {
         struct hpsb_packet *packet;
         int length, rcode, extcode;
@@ -505,7 +563,8 @@ void handle_incoming_packet(struct hpsb_host *host, int tcode, quadlet_t *data,
                 addr = (((u64)(data[1] & 0xffff)) << 32) | data[2];
                 rcode = highlevel_write(host, source, data+3, addr, 4);
 
-                if (((data[0] >> 16) & NODE_MASK) != NODE_MASK) {
+                if (!write_acked
+                    && ((data[0] >> 16) & NODE_MASK) != NODE_MASK) {
                         /* not a broadcast write, reply */
                         PREP_REPLY_PACKET(0);
                         fill_async_write_resp(packet, rcode);
@@ -518,7 +577,8 @@ void handle_incoming_packet(struct hpsb_host *host, int tcode, quadlet_t *data,
                 rcode = highlevel_write(host, source, data+4, addr,
                                         data[3]>>16);
 
-                if (((data[0] >> 16) & NODE_MASK) != NODE_MASK) {
+                if (!write_acked
+                    && ((data[0] >> 16) & NODE_MASK) != NODE_MASK) {
                         /* not a broadcast write, reply */
                         PREP_REPLY_PACKET(0);
                         fill_async_write_resp(packet, rcode);
@@ -601,7 +661,8 @@ void handle_incoming_packet(struct hpsb_host *host, int tcode, quadlet_t *data,
 #undef PREP_REPLY_PACKET
 
 
-void hpsb_packet_received(struct hpsb_host *host, quadlet_t *data, size_t size)
+void hpsb_packet_received(struct hpsb_host *host, quadlet_t *data, size_t size,
+                          int write_acked)
 {
         int tcode;
 
@@ -629,7 +690,7 @@ void hpsb_packet_received(struct hpsb_host *host, quadlet_t *data, size_t size)
         case TCODE_READQ:
         case TCODE_READB:
         case TCODE_LOCK_REQUEST:
-                handle_incoming_packet(host, tcode, data, size);
+                handle_incoming_packet(host, tcode, data, size, write_acked);
                 break;
 
 
@@ -721,47 +782,6 @@ void abort_timedouts(struct hpsb_host *host)
 }
 
 
-#if 0
-int hpsb_host_thread(void *hostPointer)
-{
-        struct hpsb_host *host = (struct hpsb_host *)hostPointer;
-
-        /* I don't understand why, but I just want to be on the safe side. */
-        lock_kernel();
-
-        HPSB_INFO(__FUNCTION__ " starting for one %s adapter",
-                  host->template->name);
-
-        exit_mm(current);
-        exit_files(current);
-        exit_fs(current);
-
-        strcpy(current->comm, "ieee1394 thread");
-
-        /* ... but then again, I think the following is safe. */
-        unlock_kernel();
-
-        for (;;) {
-                siginfo_t info;
-                unsigned long signr;
-
-                if (signal_pending(current)) {
-                        spin_lock_irq(&current->sigmask_lock);
-                        signr = dequeue_signal(&current->blocked, &info);
-                        spin_unlock_irq(&current->sigmask_lock);
-
-                        break;
-                }
-
-                abort_timedouts(host);
-        }
-
-        HPSB_INFO(__FUNCTION__ " exiting");
-        return 0;
-}
-#endif
-
-
 #ifndef MODULE
 
 void __init ieee1394_init(void)
@@ -769,6 +789,7 @@ void __init ieee1394_init(void)
         register_builtin_lowlevels();
         init_hpsb_highlevel();
         init_csr();
+        init_ieee1394_guid();
 }
 
 #else
@@ -777,6 +798,8 @@ int init_module(void)
 {
         init_hpsb_highlevel();
         init_csr();
+        init_ieee1394_guid();
+
         return 0;
 }
 

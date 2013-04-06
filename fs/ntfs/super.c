@@ -125,7 +125,7 @@ ntfs_init_upcase(ntfs_inode *upcase)
 	io.param=(char*)upcase->vol->upcase;
 	io.size=2*UPCASE_LENGTH;
 	ntfs_read_attr(upcase,upcase->vol->at_data,0,0,&io);
-	upcase->vol->upcase_length = io.size;
+	upcase->vol->upcase_length = io.size / 2;
 }
 
 static int
@@ -221,7 +221,6 @@ ntfs_init_attrdef(ntfs_inode* attrdef)
 int ntfs_get_version(ntfs_inode* volume)
 {
 	ntfs_attribute *volinfo;
-	int i;
 
 	volinfo = ntfs_find_attr(volume, volume->vol->at_volume_information, 0);
 	if (!volinfo) 

@@ -5,7 +5,7 @@
  *
  *		The Internet Protocol (IP) module.
  *
- * Version:	$Id: ip_input.c,v 1.48 2000/04/15 01:48:10 davem Exp $
+ * Version:	$Id: ip_input.c,v 1.51 2000/12/08 17:15:53 davem Exp $
  *
  * Authors:	Ross Biro, <bir7@leland.Stanford.Edu>
  *		Fred N. van Kempen, <waltje@uWalt.NL.Mugnet.ORG>
@@ -225,12 +225,6 @@ static inline int ip_local_deliver_finish(struct sk_buff *skb)
 	nf_debug_ip_local_deliver(skb);
 #endif /*CONFIG_NETFILTER_DEBUG*/
 
-	/* Free rx_dev before enqueueing to sockets */
-	if (skb->rx_dev) {
-		dev_put(skb->rx_dev);
-		skb->rx_dev = NULL;
-	}
-
         /* Point into the IP datagram, just past the header. */
         skb->h.raw = skb->nh.raw + iph->ihl*4;
 
@@ -297,7 +291,6 @@ int ip_local_deliver(struct sk_buff *skb)
 		skb = ip_defrag(skb);
 		if (!skb)
 			return 0;
-		iph = skb->nh.iph;
 	}
 
 	return NF_HOOK(PF_INET, NF_IP_LOCAL_IN, skb, skb->dev, NULL,
@@ -342,7 +335,7 @@ static inline int ip_rcv_finish(struct sk_buff *skb)
 
 		skb = skb_cow(skb, skb_headroom(skb));
 		if (skb == NULL)
-			return 0;
+			return NET_RX_DROP;
 		iph = skb->nh.iph;
 
 		skb->ip_summed = 0;
@@ -373,7 +366,7 @@ inhdr_error:
 	IP_INC_STATS_BH(IpInHdrErrors);
 drop:
         kfree_skb(skb);
-        return(0);
+        return NET_RX_DROP;
 }
 
 /*
@@ -430,6 +423,6 @@ inhdr_error:
 drop:
         kfree_skb(skb);
 out:
-        return(0);
+        return NET_RX_DROP;
 }
 

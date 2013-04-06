@@ -1,4 +1,3 @@
-# $Id: Makefile,v 1.14 1999/10/09 00:00:58 ralf Exp $
 #
 # Makefile for the Linux/MIPS kernel.
 #
@@ -36,11 +35,13 @@ endif
 #
 # SGIs have very different interrupt/timer hardware.
 #
-ifndef CONFIG_SGI_IP22
-  ifndef CONFIG_DECSTATION
-    ifndef CONFIG_BAGET_MIPS
-      O_OBJS += time.o
-      OX_OBJS += irq.o
+ifndef CONFIG_DECSTATION
+  ifndef CONFIG_BAGET_MIPS
+    O_OBJS += time.o
+    ifndef CONFIG_SGI_IP22
+      ifndef CONFIG_ORION
+        OX_OBJS += irq.o
+      endif
     endif
   endif
 endif

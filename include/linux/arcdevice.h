@@ -76,7 +76,7 @@
 #define D_TIMING	4096	/* show time needed to copy buffers to card */
 
 #ifndef ARCNET_DEBUG_MAX
-#define ARCNET_DEBUG_MAX (~0)	/* enable ALL debug messages       */
+#define ARCNET_DEBUG_MAX (127)	/* change to ~0 if you want detailed debugging */
 #endif
 
 #ifndef ARCNET_DEBUG
@@ -95,7 +95,7 @@ extern int arcnet_debug;
 
 /* see how long a function call takes to run, expressed in CPU cycles */
 #define TIME(name, bytes, call) BUGLVL(D_TIMING) { \
-	    cycles_t _x, _y; \
+	    unsigned long _x, _y; \
 	    _x = get_cycles(); \
 	    call; \
 	    _y = get_cycles(); \
@@ -241,11 +241,13 @@ struct arcnet_local {
 		setup2,		/* Contents of setup2 register */
 		intmask;	/* current value of INTMASK register */
 	uint8_t default_proto[256];	/* default encap to use for each host */
-	int cur_tx,		/* buffer used by current transmit, or -1 */
+	int	cur_tx,		/* buffer used by current transmit, or -1 */
 		next_tx,	/* buffer where a packet is ready to send */
 		cur_rx;		/* current receive buffer */
-	int lastload_dest,	/* can last loaded packet be acked? */
+	int	lastload_dest,	/* can last loaded packet be acked? */
 		lasttrans_dest;	/* can last TX'd packet be acked? */
+	int	timed_out;	/* need to process TX timeout and drop packet */
+	unsigned long last_timeout;	/* time of last reported timeout */
 	char *card_name;	/* card ident string */
 	int card_flags;		/* special card features */
 
@@ -338,7 +340,6 @@ void arcnet_rfc1051_init(void);
 void arcnet_raw_init(void);
 
 int com90xx_probe(struct net_device *dev);
-void com20020pci_probe_all(void);
 
 #endif				/* __KERNEL__ */
 

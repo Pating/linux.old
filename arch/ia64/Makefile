@@ -11,26 +11,36 @@
 NM := $(CROSS_COMPILE)nm -B
 AWK := awk
 
-LINKFLAGS = -static -T arch/$(ARCH)/vmlinux.lds
-# next line is for HP compiler backend:
-#AFLAGS += -DGCC_RETVAL_POINTER_IN_R8
-# The next line is needed when compiling with the July snapshot of the Cygnus compiler:
-#EXTRA	= -D__GCC_DOESNT_KNOW_IN_REGS__
-# next two lines are for the September snapshot of the Cygnus compiler:
-AFLAGS += -D__GCC_MULTIREG_RETVALS__ -Wa,-x
-EXTRA	= -D__GCC_MULTIREG_RETVALS__
+export AWK
 
-CFLAGS := $(CFLAGS) -pipe $(EXTRA) -Wa,-x -ffixed-r13 -mfixed-range=f10-f15,f32-f127
+LINKFLAGS = -static -T arch/$(ARCH)/vmlinux.lds
+AFLAGS += -Wa,-x 
+AFLAGS_KERNEL := -mconstant-gp
+EXTRA	=
+
+CFLAGS := $(CFLAGS) -pipe $(EXTRA) -Wa,-x -ffixed-r13 -mfixed-range=f10-f15,f32-f127 \
+	  -funwind-tables -falign-functions=32
+# -frename-registers
+CFLAGS_KERNEL := -mconstant-gp
+
+ifeq ($(CONFIG_ITANIUM_ASTEP_SPECIFIC),y)
+	CFLAGS += -ma-step
+endif
+ifeq ($(CONFIG_ITANIUM_BSTEP_SPECIFIC),y)
+	CFLAGS += -mb-step
+endif
 
 ifdef CONFIG_IA64_GENERIC
 	CORE_FILES      :=      arch/$(ARCH)/hp/hp.a	\
 				arch/$(ARCH)/sn/sn.a	\
 				arch/$(ARCH)/dig/dig.a	\
+				arch/$(ARCH)/sn/io/sgiio.o \
 				$(CORE_FILES)
 	SUBDIRS		:=	arch/$(ARCH)/hp		\
 				arch/$(ARCH)/sn/sn1	\
 				arch/$(ARCH)/sn		\
 				arch/$(ARCH)/dig	\
+				arch/$(ARCH)/sn/io	\
 				$(SUBDIRS)
 
 else # !GENERIC
@@ -42,11 +52,15 @@ ifdef CONFIG_IA64_HP_SIM
                                 $(CORE_FILES)
 endif
 
-ifdef CONFIG_IA64_SGI_SN1_SIM
+ifdef CONFIG_IA64_SGI_SN1
+CFLAGS += -DBRINGUP
         SUBDIRS         :=      arch/$(ARCH)/sn/sn1	\
 				arch/$(ARCH)/sn		\
+				arch/$(ARCH)/sn/io	\
+				arch/$(ARCH)/sn/fprom	\
 				$(SUBDIRS)
         CORE_FILES      :=      arch/$(ARCH)/sn/sn.a	\
+				arch/$(ARCH)/sn/io/sgiio.o\
 				$(CORE_FILES)
 endif
 
@@ -85,7 +99,7 @@ vmlinux: arch/$(ARCH)/vmlinux.lds
 
 arch/$(ARCH)/vmlinux.lds: arch/$(ARCH)/vmlinux.lds.S FORCE
 	$(CPP) -D__ASSEMBLY__ -C -P -I$(HPATH) -I$(HPATH)/asm-$(ARCH) \
-		arch/$(ARCH)/vmlinux.lds.S > $@
+		-traditional arch/$(ARCH)/vmlinux.lds.S > $@
 
 FORCE: ;
 

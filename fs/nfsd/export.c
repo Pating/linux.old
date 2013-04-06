@@ -1,3 +1,4 @@
+#define MSNFS	/* HACK HACK */
 /*
  * linux/fs/nfsd/export.c
  *
@@ -9,8 +10,6 @@
  * creates a client control block and adds it to the hash
  * table. Then, you call NFSCTL_EXPORT for each fs.
  *
- * You cannot currently read the export information from the
- * kernel. It would be nice to have a /proc file though.
  *
  * Copyright (C) 1995, 1996 Olaf Kirch, <okir@monad.swb.de>
  */
@@ -58,12 +57,12 @@ struct svc_clnthash {
 	struct svc_client *	h_client;
 };
 static struct svc_clnthash *	clnt_hash[CLIENT_HASHMAX];
-static svc_client *		clients = NULL;
-static int			initialized = 0;
+static svc_client *		clients;
+static int			initialized;
 
-static int			hash_lock = 0;
-static int			want_lock = 0;
-static int			hash_count = 0;
+static int			hash_lock;
+static int			want_lock;
+static int			hash_count;
 static DECLARE_WAIT_QUEUE_HEAD(	hash_wait );
 
 
@@ -388,12 +387,10 @@ exp_rootfh(struct svc_client *clp, kdev_t dev, ino_t ino,
 
 	err = -EPERM;
 	if (path) {
-		err = 0;
-		if (path_init(path, LOOKUP_POSITIVE, &nd))
-			err = path_walk(path, &nd);
-		if (err) {
+		if (path_init(path, LOOKUP_POSITIVE, &nd) &&
+		    path_walk(path, &nd)) {
 			printk("nfsd: exp_rootfh path not found %s", path);
-			return -EPERM;
+			return err;
 		}
 		dev = nd.dentry->d_inode->i_dev;
 		ino = nd.dentry->d_inode->i_ino;
@@ -430,16 +427,16 @@ exp_rootfh(struct svc_client *clp, kdev_t dev, ino_t ino,
 	 * fh must be initialized before calling fh_compose
 	 */
 	fh_init(&fh, maxsize);
-	if (fh_compose(&fh, exp, nd.dentry))
+	if (fh_compose(&fh, exp, dget(nd.dentry)))
 		err = -EINVAL;
 	else
 		err = 0;
 	memcpy(f, &fh.fh_handle, sizeof(struct knfsd_fh));
 	fh_put(&fh);
-	return err;
 
 out:
-	path_release(&nd);
+	if (path)
+		path_release(&nd);
 	return err;
 }
 
@@ -560,6 +557,9 @@ struct flags {
 	{ NFSEXP_CROSSMNT, {"nohide", ""}},
 	{ NFSEXP_NOSUBTREECHECK, {"no_subtree_check", ""}},
 	{ NFSEXP_NOAUTHNLM, {"insecure_locks", ""}},
+#ifdef NSMFS
+	{ NFSEXP_MSNFS, {"msnfs", ""}},
+#endif
 	{ 0, {"", ""}}
 };
 

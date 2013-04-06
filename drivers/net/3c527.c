@@ -146,7 +146,7 @@ struct mca_adapters_t {
 	char		*name;
 };
 
-const struct mca_adapters_t mc32_adapters[] = {
+static struct mca_adapters_t mc32_adapters[] __initdata = {
 	{ 0x0041, "3COM EtherLink MC/32" },
 	{ 0x8EF5, "IBM High Performance Lan Adapter" },
 	{ 0x0000, NULL }
@@ -183,6 +183,8 @@ int __init mc32_probe(struct net_device *dev)
 	static int current_mca_slot = -1;
 	int i;
 	int adapter_found = 0;
+
+	SET_MODULE_OWNER(dev);
 
 	/* Do not check any supplied i/o locations. 
 	   POS registers usually don't fail :) */
@@ -272,19 +274,6 @@ static int __init mc32_probe1(struct net_device *dev, int slot)
 		return -ENODEV;
 	}
 
-	/*
-	 * Don't allocate the private data here, it is done later
-	 * This makes it easier to free the memory when this driver
-	 * is used as a module.
-	 */
-
-	if(dev==NULL)
-	{
-		dev = init_etherdev(0, 0);
-		if (dev == NULL)
-			return -ENOMEM;
-	}
-
 	/* Fill in the 'dev' fields. */
 	dev->base_addr = mca_io_bases[(POS>>1)&7];
 	dev->mem_start = mca_mem_bases[(POS>>4)&7];
@@ -360,25 +349,22 @@ static int __init mc32_probe1(struct net_device *dev, int slot)
 	 *	Grab the IRQ
 	 */
 
-	if(request_irq(dev->irq, &mc32_interrupt, 0, cardname, dev))
-	{
-		printk("%s: unable to get IRQ %d.\n",
-				   dev->name, dev->irq);
-		return -EAGAIN;
+	i = request_irq(dev->irq, &mc32_interrupt, 0, dev->name, dev);
+	if (i) {
+		printk("%s: unable to get IRQ %d.\n", dev->name, dev->irq);
+		return i;
 	}
 
 	/* Initialize the device structure. */
-	if (dev->priv == NULL) {
-		dev->priv = kmalloc(sizeof(struct mc32_local), GFP_KERNEL);
-		if (dev->priv == NULL)
-		{
-			free_irq(dev->irq, dev);
-			return -ENOMEM;
-		}
+	dev->priv = kmalloc(sizeof(struct mc32_local), GFP_KERNEL);
+	if (dev->priv == NULL)
+	{
+		free_irq(dev->irq, dev);
+		return -ENOMEM;
 	}
 
 	memset(dev->priv, 0, sizeof(struct mc32_local));
-	lp = (struct mc32_local *)dev->priv;
+	lp = dev->priv;
 	lp->slot = slot;
 
 	i=0;
@@ -910,8 +896,6 @@ static int mc32_open(struct net_device *dev)
 	mc32_tx_begin(dev);
 
 	netif_start_queue(dev);	
-	MOD_INC_USE_COUNT;
-
 	return 0;
 }
 
@@ -1331,8 +1315,6 @@ static int mc32_close(struct net_device *dev)
 	
 	/* Update the statistics here. */
 
-	MOD_DEC_USE_COUNT;
-
 	return 0;
 
 }
@@ -1457,11 +1439,7 @@ static void mc32_reset_multicast_list(struct net_device *dev)
 
 #ifdef MODULE
 
-static struct net_device this_device = {
-	"", /* will be inserted by linux/drivers/net/mc32_init.c */
-	0, 0, 0, 0,
-	0, 0,  /* I/O address, IRQ */
-	0, 0, 0, NULL, mc32_probe };
+static struct net_device this_device;
 
 
 /**
@@ -1476,6 +1454,7 @@ int init_module(void)
 {
 	int result;
 
+	this_device.init = mc32_probe;
 	if ((result = register_netdev(&this_device)) != 0)
 		return result;
 
@@ -1510,7 +1489,7 @@ void cleanup_module(void)
 		slot = lp->slot;
 		mca_mark_as_unused(slot);
 		mca_set_adapter_name(slot, NULL);
-		kfree_s(this_device.priv, sizeof(struct mc32_local));
+		kfree(this_device.priv);
 	}
 	free_irq(this_device.irq, &this_device);
 }

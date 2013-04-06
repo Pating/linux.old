@@ -19,6 +19,7 @@
 #include <linux/miscdevice.h>
 #include <linux/random.h>
 #include <linux/init.h>
+#include <linux/smp_lock.h>
 
 #include <asm/uaccess.h>
 #include <asm/system.h>
@@ -110,8 +111,7 @@ void busmouse_add_movementbuttons(int mousedev, int dx, int dy, int buttons)
 	if (changed) {
 		wake_up(&mse->wait);
 
-		if (mse->fasyncptr)
-			kill_fasync(mse->fasyncptr, SIGIO, POLL_IN);
+		kill_fasync(&mse->fasyncptr, SIGIO, POLL_IN);
 	}
 }
 
@@ -168,17 +168,17 @@ static int busmouse_release(struct inode *inode, struct file *file)
 	struct busmouse_data *mse = (struct busmouse_data *)file->private_data;
 	int ret = 0;
 
+	lock_kernel();
 	busmouse_fasync(-1, file, 0);
 
 	if (--mse->active == 0) {
-		if (mse->ops &&
-		    mse->ops->release)
+		if (mse->ops->release)
 			ret = mse->ops->release(inode, file);
-
+	   	if (mse->ops->owner)
+			__MOD_DEC_USE_COUNT(mse->ops->owner);
 		mse->ready = 0;
-
-		MOD_DEC_USE_COUNT;
 	}
+	unlock_kernel();
 
 	return ret;
 }
@@ -187,21 +187,27 @@ static int busmouse_open(struct inode *inode, struct file *file)
 {
 	struct busmouse_data *mse;
 	unsigned int mousedev;
-	int ret = -ENODEV;
+	int ret;
 
 	mousedev = DEV_TO_MOUSE(inode->i_rdev);
 	if (mousedev >= NR_MICE)
 		return -EINVAL;
-	
+
 	down(&mouse_sem);
 	mse = busmouse_data[mousedev];
-	if (!mse)
-		/* shouldn't happen, but... */
+	ret = -ENODEV;
+	if (!mse || !mse->ops)	/* shouldn't happen, but... */
 		goto end;
-	
-	if (mse->ops &&
-	    mse->ops->open)
+
+	if (mse->ops->owner && !try_inc_mod_count(mse->ops->owner))
+		goto end;
+
+	ret = 0;
+	if (mse->ops->open) {
 		ret = mse->ops->open(inode, file);
+		if (ret && mse->ops->owner)
+			__MOD_DEC_USE_COUNT(mse->ops->owner);
+	}
 
 	if (ret)
 		goto end;
@@ -211,17 +217,12 @@ static int busmouse_open(struct inode *inode, struct file *file)
 	if (mse->active++)
 		goto end;
 
-	MOD_INC_USE_COUNT;
-
 	spin_lock_irq(&mse->lock);
 
 	mse->ready   = 0;
 	mse->dxpos   = 0;
 	mse->dypos   = 0;
-	if (mse->ops)
-		mse->buttons = mse->ops->init_button_state;
-	else
-		mse->buttons = 7;
+	mse->buttons = mse->ops->init_button_state;
 
 	spin_unlock_irq(&mse->lock);
 end:
@@ -333,6 +334,7 @@ static unsigned int busmouse_poll(struct file *file, poll_table *wait)
 
 struct file_operations busmouse_fops=
 {
+	owner:		THIS_MODULE,
 	read:		busmouse_read,
 	write:		busmouse_write,
 	poll:		busmouse_poll,

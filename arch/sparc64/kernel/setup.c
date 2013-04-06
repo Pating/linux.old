@@ -1,4 +1,4 @@
-/*  $Id: setup.c,v 1.54 2000/05/09 17:40:14 davem Exp $
+/*  $Id: setup.c,v 1.58 2001/01/01 01:46:15 davem Exp $
  *  linux/arch/sparc64/kernel/setup.c
  *
  *  Copyright (C) 1995,1996  David S. Miller (davem@caip.rutgers.edu)
@@ -37,6 +37,7 @@
 #include <asm/pgtable.h>
 #include <asm/idprom.h>
 #include <asm/head.h>
+#include <asm/starfire.h>
 
 #ifdef CONFIG_IP_PNP
 #include <net/ipconfig.h>
@@ -74,17 +75,10 @@ prom_console_write(struct console *con, const char *s, unsigned n)
 }
 
 static struct console prom_console = {
-	"prom",
-	prom_console_write,
-	NULL,
-	NULL,
-	NULL,
-	NULL,
-	NULL,
-	CON_CONSDEV | CON_ENABLED,
-	-1,
-	0,
-	NULL
+	name:		"prom",
+	write:		prom_console_write,
+	flags:		CON_CONSDEV | CON_ENABLED,
+	index:		-1,
 };
 
 #define PROM_TRUE	-1
@@ -293,17 +287,10 @@ unsigned long cmdline_memory_size = 0;
 
 #ifdef PROM_DEBUG_CONSOLE
 static struct console prom_debug_console = {
-	"debug",
-	prom_console_write,
-	NULL,
-	NULL,
-	NULL,
-	NULL,
-	NULL,
-	CON_PRINTBUFFER,
-	-1,
-	0,
-	NULL
+	name:		"debug",
+	write:		prom_console_write,
+	flags:		CON_PRINTBUFFER,
+	index:		-1,
 };
 #endif
 
@@ -444,8 +431,6 @@ extern unsigned long phys_base;
 
 static struct pt_regs fake_swapper_regs = { { 0, }, 0, 0, 0, 0 };
 
-extern struct consw sun_serial_con;
-
 void register_prom_callbacks(void)
 {
 	prom_setcallback(prom_callback);
@@ -480,6 +465,9 @@ void __init setup_arch(char **cmdline_p)
 #elif defined(CONFIG_PROM_CONSOLE)
 	conswitchp = &prom_con;
 #endif
+
+	/* Work out if we are starfire early on */
+	check_if_starfire();
 
 	boot_flags_init(*cmdline_p);
 
@@ -612,7 +600,7 @@ int get_cpuinfo(char *buffer)
             prom_rev, prom_prev >> 16, (prom_prev >> 8) & 0xff, prom_prev & 0xff,
 	    linux_num_cpus, smp_num_cpus
 #ifndef CONFIG_SMP
-            , loops_per_sec/500000, (loops_per_sec/5000) % 100
+            , loops_per_jiffy/(500000/HZ), (loops_per_jiffy/(5000/HZ)) % 100
 #endif
 	    );
 #ifdef CONFIG_SMP

@@ -11,9 +11,12 @@
 #include <linux/pm.h>
 #include <linux/pci.h>
 #include <linux/apm_bios.h>
+#include <linux/kernel.h>
+#include <linux/string.h>
 
 #include <asm/semaphore.h>
 #include <asm/processor.h>
+#include <asm/i387.h>
 #include <asm/uaccess.h>
 #include <asm/checksum.h>
 #include <asm/io.h>
@@ -22,9 +25,9 @@
 #include <asm/irq.h>
 #include <asm/mmx.h>
 #include <asm/desc.h>
+#include <asm/pgtable.h>
 
 extern void dump_thread(struct pt_regs *, struct user *);
-extern int dump_fpu(elf_fpregset_t *);
 extern spinlock_t rtc_lock;
 
 #if defined(CONFIG_APM) || defined(CONFIG_APM_MODULE)
@@ -46,11 +49,14 @@ extern unsigned long get_cmos_time(void);
 
 /* platform dependent support */
 EXPORT_SYMBOL(boot_cpu_data);
+#ifdef CONFIG_EISA
 EXPORT_SYMBOL(EISA_bus);
+#endif
 EXPORT_SYMBOL(MCA_bus);
 EXPORT_SYMBOL(__verify_write);
 EXPORT_SYMBOL(dump_thread);
 EXPORT_SYMBOL(dump_fpu);
+EXPORT_SYMBOL(dump_extended_fpu);
 EXPORT_SYMBOL(__ioremap);
 EXPORT_SYMBOL(iounmap);
 EXPORT_SYMBOL(__io_virt_debug);
@@ -62,7 +68,7 @@ EXPORT_SYMBOL(kernel_thread);
 EXPORT_SYMBOL(pm_idle);
 EXPORT_SYMBOL(pm_power_off);
 EXPORT_SYMBOL(get_cmos_time);
-EXPORT_SYMBOL(apm_bios_info);
+EXPORT_SYMBOL(apm_info);
 EXPORT_SYMBOL(gdt);
 
 EXPORT_SYMBOL_NOVERS(__down_failed);
@@ -88,6 +94,7 @@ EXPORT_SYMBOL_NOVERS(__put_user_4);
 
 EXPORT_SYMBOL(strtok);
 EXPORT_SYMBOL(strpbrk);
+EXPORT_SYMBOL(simple_strtol);
 
 EXPORT_SYMBOL(strncpy_from_user);
 EXPORT_SYMBOL(__strncpy_from_user);
@@ -99,6 +106,10 @@ EXPORT_SYMBOL(strnlen_user);
 
 EXPORT_SYMBOL(pci_alloc_consistent);
 EXPORT_SYMBOL(pci_free_consistent);
+
+#ifdef CONFIG_PCI
+EXPORT_SYMBOL(pcibios_penalize_isa_irq);
+#endif
 
 #ifdef CONFIG_X86_USE_3DNOW
 EXPORT_SYMBOL(_mmx_memcpy);
@@ -134,6 +145,15 @@ EXPORT_SYMBOL(screen_info);
 
 EXPORT_SYMBOL(get_wchan);
 
-EXPORT_SYMBOL(irq_stat);
-
 EXPORT_SYMBOL(rtc_lock);
+
+#undef memcpy
+#undef memset
+extern void * memset(void *,int,__kernel_size_t);
+extern void * memcpy(void *,const void *,__kernel_size_t);
+EXPORT_SYMBOL_NOVERS(memcpy);
+EXPORT_SYMBOL_NOVERS(memset);
+
+#ifdef CONFIG_X86_PAE
+EXPORT_SYMBOL(empty_zero_page);
+#endif

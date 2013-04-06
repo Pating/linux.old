@@ -37,6 +37,7 @@
 #include <linux/miscdevice.h>
 #include <linux/watchdog.h>
 #include <linux/reboot.h>
+#include <linux/smp_lock.h>
 #include <linux/init.h>
 #include <asm/uaccess.h>
 
@@ -52,8 +53,12 @@ MODULE_PARM(soft_margin,"i");
  *	Our timer
  */
  
-struct timer_list watchdog_ticktock;
-static int timer_alive = 0;
+static void watchdog_fire(unsigned long);
+
+static struct timer_list watchdog_ticktock = {
+	function:	watchdog_fire,
+};
+static int timer_alive;
 
 
 /*
@@ -79,7 +84,9 @@ static int softdog_open(struct inode *inode, struct file *file)
 {
 	if(timer_alive)
 		return -EBUSY;
+#ifdef CONFIG_WATCHDOG_NOWAYOUT	 
 	MOD_INC_USE_COUNT;
+#endif	
 	/*
 	 *	Activate timer
 	 */
@@ -94,11 +101,12 @@ static int softdog_release(struct inode *inode, struct file *file)
 	 *	Shut off the timer.
 	 * 	Lock it in if it's a module and we defined ...NOWAYOUT
 	 */
+	 lock_kernel();
 #ifndef CONFIG_WATCHDOG_NOWAYOUT	 
 	del_timer(&watchdog_ticktock);
-	MOD_DEC_USE_COUNT;
 #endif	
 	timer_alive=0;
+	unlock_kernel();
 	return 0;
 }
 
@@ -146,6 +154,7 @@ static int softdog_ioctl(struct inode *inode, struct file *file,
 
 static struct file_operations softdog_fops=
 {
+	owner:		THIS_MODULE,
 	write:		softdog_write,
 	ioctl:		softdog_ioctl,
 	open:		softdog_open,
@@ -159,23 +168,24 @@ static struct miscdevice softdog_miscdev=
 	&softdog_fops
 };
 
-void __init watchdog_init(void)
+static int __init watchdog_init(void)
 {
-	misc_register(&softdog_miscdev);
-	init_timer(&watchdog_ticktock);
-	watchdog_ticktock.function=watchdog_fire;
+	int ret;
+
+	ret = misc_register(&softdog_miscdev);
+
+	if (ret)
+		return ret;
+
 	printk("Software Watchdog Timer: 0.05, timer margin: %d sec\n", soft_margin);
+
+	return 0;
 }	
 
-#ifdef MODULE
-int init_module(void)
-{
-	watchdog_init();
-	return 0;
-}
-
-void cleanup_module(void)
+static void __exit watchdog_exit(void)
 {
 	misc_deregister(&softdog_miscdev);
 }
-#endif
+
+module_init(watchdog_init);
+module_exit(watchdog_exit);

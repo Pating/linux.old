@@ -1,4 +1,4 @@
-/* $Id: pcikbd.c,v 1.46 2000/05/03 06:37:05 davem Exp $
+/* $Id: pcikbd.c,v 1.49 2000/07/13 08:06:40 davem Exp $
  * pcikbd.c: Ultra/AX PC keyboard support.
  *
  * Copyright (C) 1997  Eddie C. Dost  (ecd@skynet.be)
@@ -24,6 +24,7 @@
 #include <linux/kbd_kern.h>
 #include <linux/delay.h>
 #include <linux/spinlock.h>
+#include <linux/smp_lock.h>
 #include <linux/init.h>
 
 #include <asm/ebus.h>
@@ -737,8 +738,7 @@ void pcimouse_interrupt(int irq, void *dev_id, struct pt_regs *regs)
 
 	spin_unlock_irqrestore(&pcikbd_lock, flags);
 
-	if (queue->fasync)
-		kill_fasync(queue->fasync, SIGIO, POLL_IN);
+	kill_fasync(&queue->fasync, SIGIO, POLL_IN);
 	wake_up_interruptible(&queue->proc_list);
 }
 
@@ -746,9 +746,10 @@ static int aux_release(struct inode * inode, struct file * file)
 {
 	unsigned long flags;
 
+	lock_kernel();
 	aux_fasync(-1, file, 0);
 	if (--aux_count)
-		return 0;
+		goto out;
 
 	spin_lock_irqsave(&pcikbd_lock, flags);
 
@@ -761,8 +762,9 @@ static int aux_release(struct inode * inode, struct file * file)
 	poll_aux_status();
 
 	spin_unlock_irqrestore(&pcikbd_lock, flags);
+out:
+	unlock_kernel();
 
-	MOD_DEC_USE_COUNT;
 	return 0;
 }
 
@@ -789,8 +791,6 @@ static int aux_open(struct inode * inode, struct file * file)
 		return -EBUSY;
 	}
 	queue->head = queue->tail = 0;		/* Flush input queue */
-
-	MOD_INC_USE_COUNT;
 
 	poll_aux_status();
 	pcimouse_outb(KBD_CCMD_MOUSE_ENABLE, pcimouse_iobase+KBD_CNTL_REG);    /* Enable Aux */
@@ -902,6 +902,7 @@ static unsigned int aux_poll(struct file *file, poll_table * wait)
 }
 
 struct file_operations psaux_fops = {
+	owner:		THIS_MODULE,
 	read:		aux_read,
 	write:		aux_write,
 	poll:		aux_poll,
@@ -916,6 +917,7 @@ static int aux_no_open(struct inode *inode, struct file *file)
 }
 
 struct file_operations psaux_no_fops = {
+	owner:		THIS_MODULE,
 	open:		aux_no_open,
 };
 

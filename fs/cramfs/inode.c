@@ -34,7 +34,7 @@ static struct address_space_operations cramfs_aops;
 
 static struct inode *get_cramfs_inode(struct super_block *sb, struct cramfs_inode * cramfs_inode)
 {
-	struct inode * inode = get_empty_inode();
+	struct inode * inode = new_inode(sb);
 
 	if (inode) {
 		inode->i_mode = cramfs_inode->mode;
@@ -42,14 +42,10 @@ static struct inode *get_cramfs_inode(struct super_block *sb, struct cramfs_inod
 		inode->i_size = cramfs_inode->size;
 		inode->i_gid = cramfs_inode->gid;
 		inode->i_ino = CRAMINO(cramfs_inode);
-		inode->i_sb = sb;
-		inode->i_dev = sb->s_dev;
-		inode->i_nlink = 1; /* arguably wrong for directories,
-				       but it's the best we can do
-				       without reading the directory
-				       contents.  1 yields the right
-				       result in GNU find, even
-				       without -noleaf option. */
+		/* inode->i_nlink is left 1 - arguably wrong for directories,
+		   but it's the best we can do without reading the directory
+	           contents.  1 yields the right result in GNU find, even
+		   without -noleaf option. */
 		insert_inode_hash(inode);
 		if (S_ISREG(inode->i_mode)) {
 			inode->i_fop = &generic_ro_fops;
@@ -95,7 +91,7 @@ static struct inode *get_cramfs_inode(struct super_block *sb, struct cramfs_inod
 static unsigned char read_buffers[READ_BUFFERS][BUFFER_SIZE];
 static unsigned buffer_blocknr[READ_BUFFERS];
 static struct super_block * buffer_dev[READ_BUFFERS];
-static int next_buffer = 0;
+static int next_buffer;
 
 /*
  * Returns a pointer to a buffer containing at least LEN bytes of
@@ -258,7 +254,7 @@ static int cramfs_readdir(struct file *filp, void *dirent, filldir_t filldir)
 				break;
 			namelen--;
 		}
-		error = filldir(dirent, name, namelen, offset, CRAMINO(de));
+		error = filldir(dirent, name, namelen, offset, CRAMINO(de), de->mode >> 12);
 		if (error)
 			break;
 
@@ -310,7 +306,7 @@ static struct dentry * cramfs_lookup(struct inode *dir, struct dentry *dentry)
 
 static int cramfs_readpage(struct file *file, struct page * page)
 {
-	struct inode *inode = (struct inode*)page->mapping->host;
+	struct inode *inode = page->mapping->host;
 	u32 maxblock, bytes_filled;
 
 	maxblock = (inode->i_size + PAGE_CACHE_SIZE - 1) >> PAGE_CACHE_SHIFT;
@@ -328,12 +324,13 @@ static int cramfs_readpage(struct file *file, struct page * page)
 		if (compr_len == 0)
 			; /* hole */
 		else
-			bytes_filled = cramfs_uncompress_block((void *) page_address(page),
+			bytes_filled = cramfs_uncompress_block(page_address(page),
 				 PAGE_CACHE_SIZE,
 				 cramfs_read(sb, start_offset, compr_len),
 				 compr_len);
 	}
-	memset((void *) (page_address(page) + bytes_filled), 0, PAGE_CACHE_SIZE - bytes_filled);
+	memset(page_address(page) + bytes_filled, 0, PAGE_CACHE_SIZE - bytes_filled);
+	flush_dcache_page(page);
 	SetPageUptodate(page);
 	UnlockPage(page);
 	return 0;

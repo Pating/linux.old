@@ -1,4 +1,4 @@
-/* $Id: sparc_ksyms.c,v 1.97 2000/05/09 17:40:13 davem Exp $
+/* $Id: sparc_ksyms.c,v 1.105 2000/12/11 05:24:25 anton Exp $
  * arch/sparc/kernel/ksyms.c: Sparc specific ksyms support.
  *
  * Copyright (C) 1996 David S. Miller (davem@caip.rutgers.edu)
@@ -19,6 +19,9 @@
 #include <linux/in6.h>
 #include <linux/spinlock.h>
 #include <linux/mm.h>
+#ifdef CONFIG_PCI
+#include <linux/pci.h>
+#endif
 
 #include <asm/oplib.h>
 #include <asm/delay.h>
@@ -108,13 +111,11 @@ EXPORT_SYMBOL_PRIVATE(_rw_read_enter);
 EXPORT_SYMBOL_PRIVATE(_rw_read_exit);
 EXPORT_SYMBOL_PRIVATE(_rw_write_enter);
 #endif
-#ifdef CONFIG_SMP
-EXPORT_SYMBOL(__global_save_flags);
-EXPORT_SYMBOL(__global_restore_flags);
-EXPORT_SYMBOL(__global_sti);
-EXPORT_SYMBOL(__global_cli);
-#endif
-
+/* semaphores */
+EXPORT_SYMBOL(__up);
+EXPORT_SYMBOL(__down);
+EXPORT_SYMBOL(__down_trylock);
+EXPORT_SYMBOL(__down_interruptible);
 /* rw semaphores */
 EXPORT_SYMBOL_NOVERS(___down_read);
 EXPORT_SYMBOL_NOVERS(___down_write);
@@ -134,17 +135,23 @@ EXPORT_SYMBOL_PRIVATE(_change_bit);
 EXPORT_SYMBOL_PRIVATE(_set_le_bit);
 EXPORT_SYMBOL_PRIVATE(_clear_le_bit);
 
-/* IRQ implementation. */
 #ifdef CONFIG_SMP
+/* Kernel wide locking */
 EXPORT_SYMBOL(kernel_flag);
+
+/* IRQ implementation. */
 EXPORT_SYMBOL(global_irq_holder);
-EXPORT_SYMBOL(global_irq_lock);
-EXPORT_SYMBOL(global_bh_lock);
-EXPORT_SYMBOL(global_irq_count);
 EXPORT_SYMBOL(synchronize_irq);
+EXPORT_SYMBOL(__global_cli);
+EXPORT_SYMBOL(__global_sti);
+EXPORT_SYMBOL(__global_save_flags);
+EXPORT_SYMBOL(__global_restore_flags);
+
+/* Misc SMP information */
+EXPORT_SYMBOL(smp_num_cpus);
+EXPORT_SYMBOL(__cpu_number_map);
+EXPORT_SYMBOL(__cpu_logical_map);
 #endif
-EXPORT_SYMBOL(local_irq_count);
-EXPORT_SYMBOL(local_bh_count);
 
 EXPORT_SYMBOL(udelay);
 EXPORT_SYMBOL(mstk48t02_regs);
@@ -189,7 +196,17 @@ EXPORT_SYMBOL(sbus_iounmap);
 EXPORT_SYMBOL(sbus_ioremap);
 #endif
 #if CONFIG_PCI
-/* We do not have modular drivers for PCI devices yet. */
+/* Actually, ioremap/iounmap are not PCI specific. But it is ok for drivers. */
+EXPORT_SYMBOL(ioremap);
+EXPORT_SYMBOL(iounmap);
+
+EXPORT_SYMBOL(insl);
+EXPORT_SYMBOL(outsl);
+EXPORT_SYMBOL(pci_alloc_consistent);
+EXPORT_SYMBOL(pci_free_consistent);
+EXPORT_SYMBOL(pci_map_single);
+EXPORT_SYMBOL(pci_unmap_single);
+EXPORT_SYMBOL(pci_dma_sync_single);
 #endif
 
 /* Solaris/SunOS binary compatibility */
@@ -228,7 +245,7 @@ EXPORT_SYMBOL(__prom_getsibling);
 /* sparc library symbols */
 EXPORT_SYMBOL(bcopy);
 EXPORT_SYMBOL_NOVERS(memscan);
-EXPORT_SYMBOL(strlen);
+EXPORT_SYMBOL_NOVERS(strlen);
 EXPORT_SYMBOL(strnlen);
 EXPORT_SYMBOL(strcpy);
 EXPORT_SYMBOL(strncpy);
@@ -241,6 +258,7 @@ EXPORT_SYMBOL(strrchr);
 EXPORT_SYMBOL(strpbrk);
 EXPORT_SYMBOL(strtok);
 EXPORT_SYMBOL(strstr);
+EXPORT_SYMBOL(page_kernel);
 
 /* Special internal versions of library functions. */
 EXPORT_SYMBOL(__copy_1page);

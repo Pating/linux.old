@@ -40,18 +40,9 @@ int proc_pid_status(struct task_struct*,char*);
 int proc_pid_statm(struct task_struct*,char*);
 int proc_pid_cpu(struct task_struct*,char*);
 
-/* MOUNT_REWRITE: make all files have non-NULL ->f_vfsmnt (pipefs, sockfs) */
-/* Until then... */
-#define NULL_VFSMNT	/* remove as soon as pipefs and sockfs will be there */
-
 static int proc_fd_link(struct inode *inode, struct dentry **dentry, struct vfsmount **mnt)
 {
 	if (inode->u.proc_i.file) {
-#ifdef NULL_VFSMNT
-		if (!inode->u.proc_i.file->f_vfsmnt)
-			mntget(*mnt);
-		else
-#endif
 		*mnt = mntget(inode->u.proc_i.file->f_vfsmnt);
 		*dentry = dget(inode->u.proc_i.file->f_dentry);
 		return 0;
@@ -101,8 +92,10 @@ static int proc_cwd_link(struct inode *inode, struct dentry **dentry, struct vfs
 		atomic_inc(&fs->count);
 	task_unlock(inode->u.proc_i.task);
 	if (fs) {
+		read_lock(&fs->lock);
 		*mnt = mntget(fs->pwdmnt);
 		*dentry = dget(fs->pwd);
+		read_unlock(&fs->lock);
 		result = 0;
 		put_fs_struct(fs);
 	}
@@ -119,8 +112,10 @@ static int proc_root_link(struct inode *inode, struct dentry **dentry, struct vf
 		atomic_inc(&fs->count);
 	task_unlock(inode->u.proc_i.task);
 	if (fs) {
+		read_lock(&fs->lock);
 		*mnt = mntget(fs->rootmnt);
 		*dentry = dget(fs->root);
+		read_unlock(&fs->lock);
 		result = 0;
 		put_fs_struct(fs);
 	}
@@ -160,6 +155,24 @@ static int proc_pid_cmdline(struct task_struct *task, char * buffer)
 		if (len > PAGE_SIZE)
 			len = PAGE_SIZE;
 		res = access_process_vm(task, mm->arg_start, buffer, len, 0);
+		// If the nul at the end of args has been overwritten, then
+		// assume application is using setproctitle(3).
+		if ( res > 0 && buffer[res-1] != '\0' )
+		{
+			len = strnlen( buffer, res );
+			if ( len < res )
+			{
+			    res = len;
+			}
+			else
+			{
+				len = mm->env_end - mm->env_start;
+				if (len > PAGE_SIZE - res)
+					len = PAGE_SIZE - res;
+				res += access_process_vm(task, mm->env_start, buffer+res, len, 0);
+				res = strnlen( buffer, res );
+			}
+		}
 		mmput(mm);
 	}
 	return res;
@@ -194,19 +207,20 @@ static int standard_permission(struct inode *inode, int mask)
 	return -EACCES;
 }
 
-static int proc_permission(struct inode *inode, int mask)
+static int proc_check_root(struct inode *inode)
 {
 	struct dentry *de, *base, *root;
 	struct vfsmount *our_vfsmnt, *vfsmnt, *mnt;
+	int res = 0;
 
-	if (standard_permission(inode, mask) != 0)
-		return -EACCES;
-
-	base = current->fs->root;
-	our_vfsmnt = current->fs->rootmnt;
 	if (proc_root_link(inode, &root, &vfsmnt)) /* Ewww... */
 		return -ENOENT;
+	read_lock(&current->fs->lock);
+	our_vfsmnt = mntget(current->fs->rootmnt);
+	base = dget(current->fs->root);
+	read_unlock(&current->fs->lock);
 
+	spin_lock(&dcache_lock);
 	de = root;
 	mnt = vfsmnt;
 
@@ -219,14 +233,25 @@ static int proc_permission(struct inode *inode, int mask)
 
 	if (!is_subdir(de, base))
 		goto out;
+	spin_unlock(&dcache_lock);
 
+exit:
+	dput(base);
+	mntput(our_vfsmnt);
 	dput(root);
 	mntput(mnt);
-	return 0;
+	return res;
 out:
-	dput(root);
-	mntput(mnt);
-	return -EACCES;
+	spin_unlock(&dcache_lock);
+	res = -EACCES;
+	goto exit;
+}
+
+static int proc_permission(struct inode *inode, int mask)
+{
+	if (standard_permission(inode, mask) != 0)
+		return -EACCES;
+	return proc_check_root(inode);
 }
 
 static ssize_t pid_maps_read(struct file * file, char * buf,
@@ -285,7 +310,7 @@ static struct file_operations proc_info_file_operations = {
 };
 
 #define MAY_PTRACE(p) \
-(p==current||(p->p_pptr==current&&(p->flags&PF_PTRACED)&&p->state==TASK_STOPPED))
+(p==current||(p->p_pptr==current&&(p->ptrace & PT_PTRACED)&&p->state==TASK_STOPPED))
 
 static ssize_t mem_read(struct file * file, char * buf,
 			size_t count, loff_t *ppos)
@@ -326,6 +351,10 @@ static ssize_t mem_read(struct file * file, char * buf,
 	return copied;
 }
 
+#define mem_write NULL
+
+#ifndef mem_write
+/* This is a security hazard */
 static ssize_t mem_write(struct file * file, const char * buf,
 			 size_t count, loff_t *ppos)
 {
@@ -364,6 +393,7 @@ static ssize_t mem_write(struct file * file, const char * buf,
 	free_page((unsigned long) page);
 	return copied;
 }
+#endif
 
 static struct file_operations proc_mem_operations = {
 	read:		mem_read,
@@ -377,23 +407,20 @@ static struct inode_operations proc_mem_inode_operations = {
 static int proc_pid_follow_link(struct dentry *dentry, struct nameidata *nd)
 {
 	struct inode *inode = dentry->d_inode;
-	int error;
-#ifdef NULL_VFSMNT
-	struct vfsmount *dummy = mntget(nd->mnt);
-#endif
+	int error = -EACCES;
 
 	/* We don't need a base pointer in the /proc filesystem */
 	path_release(nd);
 
-	error = proc_permission(inode, MAY_EXEC);
+	if (current->fsuid != inode->i_uid && !capable(CAP_DAC_OVERRIDE))
+		goto out;
+	error = proc_check_root(inode);
 	if (error)
 		goto out;
 
 	error = inode->u.proc_i.op.proc_get_link(inode, &nd->dentry, &nd->mnt);
+	nd->last_type = LAST_BIND;
 out:
-#ifdef NULL_VFSMNT
-	mntput(dummy);
-#endif
 	return error;
 }
 
@@ -401,29 +428,15 @@ static int do_proc_readlink(struct dentry *dentry, struct vfsmount *mnt,
 			    char * buffer, int buflen)
 {
 	struct inode * inode;
-	char * tmp = (char*)__get_free_page(GFP_KERNEL), *path, *pattern;
+	char * tmp = (char*)__get_free_page(GFP_KERNEL), *path;
 	int len;
 
 	if (!tmp)
 		return -ENOMEM;
 		
-	/* Check for special dentries.. */
-	pattern = NULL;
 	inode = dentry->d_inode;
-	if (inode && IS_ROOT(dentry)) {
-		if (S_ISSOCK(inode->i_mode))
-			pattern = "socket:[%lu]";
-		if (S_ISFIFO(inode->i_mode))
-			pattern = "pipe:[%lu]";
-	}
-	
-	if (pattern) {
-		len = sprintf(tmp, pattern, inode->i_ino);
-		path = tmp;
-	} else {
-		path = d_path(dentry, mnt, tmp, PAGE_SIZE);
-		len = tmp + PAGE_SIZE - 1 - path;
-	}
+	path = d_path(dentry, mnt, tmp, PAGE_SIZE);
+	len = tmp + PAGE_SIZE - 1 - path;
 
 	if (len < buflen)
 		buflen = len;
@@ -434,12 +447,14 @@ static int do_proc_readlink(struct dentry *dentry, struct vfsmount *mnt,
 
 static int proc_pid_readlink(struct dentry * dentry, char * buffer, int buflen)
 {
-	int error;
+	int error = -EACCES;
 	struct inode *inode = dentry->d_inode;
 	struct dentry *de;
 	struct vfsmount *mnt = NULL;
 
-	error = proc_permission(inode, MAY_EXEC);
+	if (current->fsuid != inode->i_uid && !capable(CAP_DAC_OVERRIDE))
+		goto out;
+	error = proc_check_root(inode);
 	if (error)
 		goto out;
 
@@ -520,12 +535,12 @@ static int proc_readfd(struct file * filp, void * dirent, filldir_t filldir)
 	fd = filp->f_pos;
 	switch (fd) {
 		case 0:
-			if (filldir(dirent, ".", 1, 0, inode->i_ino) < 0)
+			if (filldir(dirent, ".", 1, 0, inode->i_ino, DT_DIR) < 0)
 				goto out;
 			filp->f_pos++;
 		case 1:
 			ino = fake_ino(pid, PROC_PID_INO);
-			if (filldir(dirent, "..", 2, 1, ino) < 0)
+			if (filldir(dirent, "..", 2, 1, ino, DT_DIR) < 0)
 				goto out;
 			filp->f_pos++;
 		default:
@@ -553,7 +568,7 @@ static int proc_readfd(struct file * filp, void * dirent, filldir_t filldir)
 				} while (i);
 
 				ino = fake_ino(pid, PROC_PID_FD_DIR + fd);
-				if (filldir(dirent, buf+j, NUMBUF-j, fd+2, ino) < 0)
+				if (filldir(dirent, buf+j, NUMBUF-j, fd+2, ino, DT_LNK) < 0)
 					break;
 			}
 			put_files_struct(files);
@@ -576,13 +591,13 @@ static int proc_base_readdir(struct file * filp,
 	i = filp->f_pos;
 	switch (i) {
 		case 0:
-			if (filldir(dirent, ".", 1, i, inode->i_ino) < 0)
+			if (filldir(dirent, ".", 1, i, inode->i_ino, DT_DIR) < 0)
 				return 0;
 			i++;
 			filp->f_pos++;
 			/* fall through */
 		case 1:
-			if (filldir(dirent, "..", 2, i, PROC_ROOT_INO) < 0)
+			if (filldir(dirent, "..", 2, i, PROC_ROOT_INO, DT_DIR) < 0)
 				return 0;
 			i++;
 			filp->f_pos++;
@@ -593,7 +608,8 @@ static int proc_base_readdir(struct file * filp,
 				return 1;
 			p = base_stuff + i;
 			while (p->name) {
-				if (filldir(dirent, p->name, p->len, filp->f_pos, fake_ino(pid, p->type)) < 0)
+				if (filldir(dirent, p->name, p->len, filp->f_pos,
+					    fake_ino(pid, p->type), p->mode >> 12) < 0)
 					return 0;
 				filp->f_pos++;
 				p++;
@@ -610,14 +626,12 @@ static struct inode *proc_pid_make_inode(struct super_block * sb, struct task_st
 
 	/* We need a new inode */
 	
-	inode = get_empty_inode();
+	inode = new_inode(sb);
 	if (!inode)
 		goto out;
 
 	/* Common stuff */
 
-	inode->i_sb = sb;
-	inode->i_dev = sb->s_dev;
 	inode->i_mtime = inode->i_atime = inode->i_ctime = CURRENT_TIME;
 	inode->i_ino = fake_ino(task->pid, ino);
 
@@ -688,6 +702,7 @@ static struct dentry_operations pid_base_dentry_operations =
 };
 
 /* Lookups */
+#define MAX_MULBY10	((~0U-9)/10)
 
 static struct dentry *proc_lookupfd(struct inode * dir, struct dentry * dentry)
 {
@@ -708,10 +723,10 @@ static struct dentry *proc_lookupfd(struct inode * dir, struct dentry * dentry)
 		name++;
 		if (c > 9)
 			goto out;
+		if (fd >= MAX_MULBY10)
+			goto out;
 		fd *= 10;
 		fd += c;
-		if (fd & 0xffff8000)
-			goto out;
 	}
 
 	inode = proc_pid_make_inode(dir->i_sb, task, PROC_PID_FD_DIR+fd);
@@ -901,11 +916,9 @@ struct dentry *proc_pid_lookup(struct inode *dir, struct dentry * dentry)
 	name = dentry->d_name.name;
 	len = dentry->d_name.len;
 	if (len == 4 && !memcmp(name, "self", 4)) {
-		inode = get_empty_inode();
+		inode = new_inode(dir->i_sb);
 		if (!inode)
 			return ERR_PTR(-ENOMEM);
-		inode->i_sb = dir->i_sb;
-		inode->i_dev = dir->i_sb->s_dev;
 		inode->i_mtime = inode->i_atime = inode->i_ctime = CURRENT_TIME;
 		inode->i_ino = fake_ino(0, PROC_PID_INO);
 		inode->u.proc_i.file = NULL;
@@ -922,11 +935,11 @@ struct dentry *proc_pid_lookup(struct inode *dir, struct dentry * dentry)
 		name++;
 		if (c > 9)
 			goto out;
+		if (pid >= MAX_MULBY10)
+			goto out;
 		pid *= 10;
 		pid += c;
 		if (!pid)
-			goto out;
-		if (pid & 0xffff0000)
 			goto out;
 	}
 
@@ -1004,7 +1017,7 @@ int proc_pid_readdir(struct file * filp, void * dirent, filldir_t filldir)
 
 	if (!nr) {
 		ino_t ino = fake_ino(0,PROC_PID_INO);
-		if (filldir(dirent, "self", 4, filp->f_pos, ino) < 0)
+		if (filldir(dirent, "self", 4, filp->f_pos, ino, DT_LNK) < 0)
 			return 0;
 		filp->f_pos++;
 		nr++;
@@ -1019,7 +1032,7 @@ int proc_pid_readdir(struct file * filp, void * dirent, filldir_t filldir)
 
 		do buf[--j] = '0' + (pid % 10); while (pid/=10);
 
-		if (filldir(dirent, buf+j, PROC_NUMBUF-j, filp->f_pos, ino) < 0)
+		if (filldir(dirent, buf+j, PROC_NUMBUF-j, filp->f_pos, ino, DT_DIR) < 0)
 			break;
 		filp->f_pos++;
 	}

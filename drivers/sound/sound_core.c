@@ -36,6 +36,7 @@
 
 #include <linux/config.h>
 #include <linux/module.h>
+#include <linux/init.h>
 #include <linux/malloc.h>
 #include <linux/types.h>
 #include <linux/kernel.h>
@@ -61,9 +62,6 @@ extern int msnd_classic_init(void);
 #endif
 #ifdef CONFIG_SOUND_MSNDPIN
 extern int msnd_pinnacle_init(void);
-#endif
-#ifdef CONFIG_SOUND_CMPCI
-extern init_cmpci(void);
 #endif
 
 /*
@@ -154,7 +152,7 @@ spinlock_t sound_loader_lock = SPIN_LOCK_UNLOCKED;
  *	list. Acquires locks as needed
  */
 
-static devfs_handle_t devfs_handle = NULL;
+static devfs_handle_t devfs_handle;
  
 static int sound_insert_unit(struct sound_unit **list, struct file_operations *fops, int index, int low, int top, const char *name, umode_t mode)
 {
@@ -175,9 +173,9 @@ static int sound_insert_unit(struct sound_unit **list, struct file_operations *f
 		sprintf (name_buf, "%s", name);
 	else
 		sprintf (name_buf, "%s%d", name, (r - low) / SOUND_STEP);
-	s->de = devfs_register (devfs_handle, name_buf, 0,
+	s->de = devfs_register (devfs_handle, name_buf,
 				DEVFS_FL_NONE, SOUND_MAJOR, s->unit_minor,
-				S_IFCHR | mode, 0, 0, fops, NULL);
+				S_IFCHR | mode, fops, NULL);
 	return r;
 }
 
@@ -456,6 +454,8 @@ static int soundcore_open(struct inode *, struct file *);
 
 static struct file_operations soundcore_fops=
 {
+	/* We must have an owner or the module locking fails */
+	owner:	THIS_MODULE,
 	open:	soundcore_open,
 };
 
@@ -478,6 +478,7 @@ int soundcore_open(struct inode *inode, struct file *file)
 	int chain;
 	int unit=MINOR(inode->i_rdev);
 	struct sound_unit *s;
+	struct file_operations *new_fops = NULL;
 
 	chain=unit&0x0F;
 	if(chain==4 || chain==5)	/* dsp/audio/dsp16 */
@@ -489,7 +490,9 @@ int soundcore_open(struct inode *inode, struct file *file)
 	
 	spin_lock(&sound_loader_lock);
 	s = __look_for_unit(chain, unit);
-	if (s == NULL) {
+	if (s)
+		new_fops = fops_get(s->unit_fops);
+	if (!new_fops) {
 		char mod[32];
 	
 		spin_unlock(&sound_loader_lock);
@@ -506,14 +509,29 @@ int soundcore_open(struct inode *inode, struct file *file)
 		request_module(mod);
 		spin_lock(&sound_loader_lock);
 		s = __look_for_unit(chain, unit);
+		if (s)
+			new_fops = fops_get(s->unit_fops);
 	}
-	if (s) {
-		file->f_op=s->unit_fops;
+	if (new_fops) {
+		/*
+		 * We rely upon the fact that we can't be unloaded while the
+		 * subdriver is there, so if ->open() is successful we can
+		 * safely drop the reference counter and if it is not we can
+		 * revert to old ->f_op. Ugly, indeed, but that's the cost of
+		 * switching ->f_op in the first place.
+		 */
+		int err = 0;
+		struct file_operations *old_fops = file->f_op;
+		file->f_op = new_fops;
 		spin_unlock(&sound_loader_lock);
 		if(file->f_op->open)
-			return file->f_op->open(inode,file);
-		else
-			return 0;
+			err = file->f_op->open(inode,file);
+		if (err) {
+			fops_put(file->f_op);
+			file->f_op = fops_get(old_fops);
+		}
+		fops_put(old_fops);
+		return err;
 	}
 	spin_unlock(&sound_loader_lock);
 	return -ENODEV;
@@ -522,12 +540,11 @@ int soundcore_open(struct inode *inode, struct file *file)
 extern int mod_firmware_load(const char *, char **);
 EXPORT_SYMBOL(mod_firmware_load);
 
-#ifdef MODULE
 
 MODULE_DESCRIPTION("Core sound module");
 MODULE_AUTHOR("Alan Cox");
 
-void cleanup_module(void)
+static void __exit cleanup_soundcore(void)
 {
 	/* We have nothing to really do here - we know the lists must be
 	   empty */
@@ -535,31 +552,17 @@ void cleanup_module(void)
 	devfs_unregister (devfs_handle);
 }
 
-int init_module(void)
-#else
-int soundcore_init(void)
-#endif
+static int __init init_soundcore(void)
 {
 	if(devfs_register_chrdev(SOUND_MAJOR, "sound", &soundcore_fops)==-1)
 	{
 		printk(KERN_ERR "soundcore: sound device already in use.\n");
 		return -EBUSY;
 	}
-	devfs_handle = devfs_mk_dir (NULL, "sound", 0, NULL);
-	/*
-	 *	Now init non OSS drivers
-	 */
-#ifdef CONFIG_SOUND_CMPCI
-	init_cmpci();
-#endif
-#ifdef CONFIG_SOUND_MSNDCLAS
-	msnd_classic_init();
-#endif
-#ifdef CONFIG_SOUND_MSNDPIN
-	msnd_pinnacle_init();
-#endif
-#ifdef CONFIG_SOUND_VWSND
-	init_vwsnd();
-#endif
+	devfs_handle = devfs_mk_dir (NULL, "sound", NULL);
+
 	return 0;
 }
+
+module_init(init_soundcore);
+module_exit(cleanup_soundcore);

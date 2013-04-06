@@ -1,4 +1,4 @@
-/* $Id: page.h,v 1.35 2000/04/13 04:45:59 davem Exp $ */
+/* $Id: page.h,v 1.36 2000/08/10 01:04:53 davem Exp $ */
 
 #ifndef _SPARC64_PAGE_H
 #define _SPARC64_PAGE_H
@@ -105,7 +105,8 @@ register unsigned long PAGE_OFFSET asm("g4");
 
 #define __pa(x)			((unsigned long)(x) - PAGE_OFFSET)
 #define __va(x)			((void *)((unsigned long) (x) + PAGE_OFFSET))
-#define MAP_NR(addr)		((__pa(addr)-phys_base) >> PAGE_SHIFT)
+#define virt_to_page(kaddr)	(mem_map + ((__pa(kaddr)-phys_base) >> PAGE_SHIFT))
+#define VALID_PAGE(page)	((page - mem_map) < max_mapnr)
 
 #define virt_to_phys __pa
 #define phys_to_virt __va

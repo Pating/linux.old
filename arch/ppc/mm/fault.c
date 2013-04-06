@@ -67,7 +67,7 @@ void do_page_fault(struct pt_regs *regs, unsigned long address,
 #if defined(CONFIG_4xx)
 	int is_write = error_code & ESR_DST;
 #else
-	int is_write = error_code & 0x02000000;
+	int is_write = 0;
 
 	/*
 	 * Fortunately the bit assignments in SRR1 for an instruction
@@ -77,6 +77,8 @@ void do_page_fault(struct pt_regs *regs, unsigned long address,
 	 */
 	if (regs->trap == 0x400)
 		error_code &= 0x48200000;
+	else
+		is_write = error_code & 0x02000000;
 #endif /* CONFIG_4xx */
 
 #if defined(CONFIG_XMON) || defined(CONFIG_KGDB)
@@ -238,11 +240,17 @@ bad_page_fault(struct pt_regs *regs, unsigned long address)
 /* The pgtable.h claims some functions generically exist, but I
  * can't find them......
  */
-pte_t *find_pte(struct mm_struct *mm, unsigned long address)
+pte_t *va_to_pte(unsigned long address)
 {
 	pgd_t *dir;
 	pmd_t *pmd;
 	pte_t *pte;
+	struct mm_struct *mm;
+
+	if (address < TASK_SIZE)
+		mm = current->mm;
+	else
+		mm = &init_mm;
 
 	dir = pgd_offset(mm, address & PAGE_MASK);
 	if (dir) {
@@ -267,7 +275,7 @@ unsigned long va_to_phys(unsigned long address)
 {
 	pte_t *pte;
 	
-	pte = find_pte(current->mm, address);
+	pte = va_to_pte(address);
 	if (pte)
 		return(((unsigned long)(pte_val(*pte)) & PAGE_MASK) | (address & ~(PAGE_MASK-1)));
 	return (0);

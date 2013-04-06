@@ -28,13 +28,14 @@ typedef struct zone_struct {
 	spinlock_t		lock;
 	unsigned long		offset;
 	unsigned long		free_pages;
-	char			low_on_memory;
-	char			zone_wake_kswapd;
+	unsigned long		inactive_clean_pages;
+	unsigned long		inactive_dirty_pages;
 	unsigned long		pages_min, pages_low, pages_high;
 
 	/*
 	 * free areas of different sizes
 	 */
+	struct list_head	inactive_clean_list;
 	free_area_t		free_area[MAX_ORDER];
 
 	/*
@@ -99,13 +100,15 @@ extern pg_data_t *pgdat_list;
  * The following two are not meant for general usage. They are here as
  * prototypes for the discontig memory code.
  */
-extern void show_free_areas_core(int);
+struct page;
+extern void show_free_areas_core(pg_data_t *pgdat);
 extern void free_area_init_core(int nid, pg_data_t *pgdat, struct page **gmap,
-  unsigned long *zones_size, unsigned long paddr, unsigned long *zholes_size);
-
-#ifndef CONFIG_DISCONTIGMEM
+  unsigned long *zones_size, unsigned long paddr, unsigned long *zholes_size,
+  struct page *pmap);
 
 extern pg_data_t contig_page_data;
+
+#ifndef CONFIG_DISCONTIGMEM
 
 #define NODE_DATA(nid)		(&contig_page_data)
 #define NODE_MEM_MAP(nid)	mem_map

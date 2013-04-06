@@ -15,6 +15,10 @@ struct notifier_block;
 #include <linux/netfilter_ipv4/ip_conntrack.h>
 #include <linux/netfilter_ipv4/ip_conntrack_core.h>
 
+/* Theoretically, we could one day use 2.4 helpers, but for now it
+   just confuses depmod --RR */
+EXPORT_NO_SYMBOLS;
+
 static struct firewall_ops *fwops;
 
 /* From ip_fw_compat_redir.c */
@@ -32,6 +36,9 @@ check_for_unredirect(struct sk_buff *skb);
 /* From ip_fw_compat_masq.c */
 extern unsigned int
 do_masquerade(struct sk_buff **pskb, const struct net_device *dev);
+
+extern unsigned int
+check_for_masq_error(struct sk_buff *pskb);
 
 extern unsigned int
 check_for_demasq(struct sk_buff **pskb);
@@ -67,8 +74,11 @@ confirm_connection(struct sk_buff *skb)
 	if (skb->nfct) {
 		struct ip_conntrack *ct
 			= (struct ip_conntrack *)skb->nfct->master;
+		/* ctinfo is the index of the nfct inside the conntrack */
+		enum ip_conntrack_info ctinfo = skb->nfct - ct->infos;
 
-		if (!(ct->status & IPS_CONFIRMED))
+		if ((ctinfo == IP_CT_NEW || ctinfo == IP_CT_RELATED)
+		    && !(ct->status & IPS_CONFIRMED))
 			ip_conntrack_confirm(ct);
 	}
 }
@@ -83,7 +93,8 @@ fw_in(unsigned int hooknum,
 	int ret = FW_BLOCK;
 	u_int16_t redirpt;
 
-	(*pskb)->nfcache |= NFC_UNKNOWN;
+	/* Assume worse case: any hook could change packet */
+	(*pskb)->nfcache |= NFC_UNKNOWN | NFC_ALTERED;
 	(*pskb)->ip_summed = CHECKSUM_NONE;
 
 	switch (hooknum) {
@@ -151,9 +162,13 @@ fw_in(unsigned int hooknum,
 		if (hooknum == NF_IP_PRE_ROUTING) {
 			check_for_demasq(pskb);
 			check_for_redirect(*pskb);
-		} else if (hooknum == NF_IP_POST_ROUTING)
+		} else if (hooknum == NF_IP_POST_ROUTING) {
 			check_for_unredirect(*pskb);
-
+			/* Handle ICMP errors from client here */
+			if ((*pskb)->nh.iph->protocol == IPPROTO_ICMP
+			    && (*pskb)->nfct)
+				check_for_masq_error(*pskb);
+		}
 		return NF_ACCEPT;
 
 	case FW_MASQUERADE:

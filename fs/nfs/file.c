@@ -30,7 +30,6 @@
 #include <linux/smp_lock.h>
 
 #include <asm/uaccess.h>
-#include <asm/segment.h>
 #include <asm/system.h>
 
 #define NFSDBG_FACILITY		NFSDBG_FILE
@@ -39,7 +38,7 @@ static int  nfs_file_mmap(struct file *, struct vm_area_struct *);
 static ssize_t nfs_file_read(struct file *, char *, size_t, loff_t *);
 static ssize_t nfs_file_write(struct file *, const char *, size_t, loff_t *);
 static int  nfs_file_flush(struct file *);
-static int  nfs_fsync(struct file *, struct dentry *dentry);
+static int  nfs_fsync(struct file *, struct dentry *dentry, int datasync);
 
 struct file_operations nfs_file_operations = {
 	read:		nfs_file_read,
@@ -53,6 +52,7 @@ struct file_operations nfs_file_operations = {
 };
 
 struct inode_operations nfs_file_inode_operations = {
+	permission:	nfs_permission,
 	revalidate:	nfs_revalidate,
 	setattr:	nfs_notify_change,
 };
@@ -91,13 +91,14 @@ static ssize_t
 nfs_file_read(struct file * file, char * buf, size_t count, loff_t *ppos)
 {
 	struct dentry * dentry = file->f_dentry;
+	struct inode * inode = dentry->d_inode;
 	ssize_t result;
 
 	dfprintk(VFS, "nfs: read(%s/%s, %lu@%lu)\n",
 		dentry->d_parent->d_name.name, dentry->d_name.name,
 		(unsigned long) count, (unsigned long) *ppos);
 
-	result = nfs_revalidate_inode(NFS_DSERVER(dentry), dentry);
+	result = nfs_revalidate_inode(NFS_SERVER(inode), inode);
 	if (!result)
 		result = generic_file_read(file, buf, count, ppos);
 	return result;
@@ -107,12 +108,13 @@ static int
 nfs_file_mmap(struct file * file, struct vm_area_struct * vma)
 {
 	struct dentry *dentry = file->f_dentry;
+	struct inode *inode = dentry->d_inode;
 	int	status;
 
 	dfprintk(VFS, "nfs: mmap(%s/%s)\n",
 		dentry->d_parent->d_name.name, dentry->d_name.name);
 
-	status = nfs_revalidate_inode(NFS_DSERVER(dentry), dentry);
+	status = nfs_revalidate_inode(NFS_SERVER(inode), inode);
 	if (!status)
 		status = generic_file_mmap(file, vma);
 	return status;
@@ -124,7 +126,7 @@ nfs_file_mmap(struct file * file, struct vm_area_struct * vma)
  * whether any write errors occurred for this process.
  */
 static int
-nfs_fsync(struct file *file, struct dentry *dentry)
+nfs_fsync(struct file *file, struct dentry *dentry, int datasync)
 {
 	struct inode *inode = dentry->d_inode;
 	int status;
@@ -159,7 +161,7 @@ static int nfs_commit_write(struct file *file, struct page *page, unsigned offse
 {
 	long status;
 	loff_t pos = ((loff_t)page->index<<PAGE_CACHE_SHIFT) + to;
-	struct inode *inode = (struct inode*)page->mapping->host;
+	struct inode *inode = page->mapping->host;
 
 	kunmap(page);
 	lock_kernel();
@@ -177,25 +179,24 @@ static int nfs_commit_write(struct file *file, struct page *page, unsigned offse
  */
 static int nfs_sync_page(struct page *page)
 {
-	struct inode	*inode = (struct inode *)page->mapping->host;
+	struct address_space *mapping;
+	struct inode	*inode;
 	unsigned long	index = page_index(page);
-	unsigned int	rpages, wpages;
+	unsigned int	rpages;
 	int		result;
 
+	mapping = page->mapping;
+	if (!mapping)
+		return 0;
+	inode = mapping->host;
 	if (!inode)
 		return 0;
 
 	rpages = NFS_SERVER(inode)->rpages;
 	result = nfs_pagein_inode(inode, index, rpages);
 	if (result < 0)
-		goto out_bad;
-	wpages = NFS_SERVER(inode)->wpages;
-	result = nfs_sync_file(inode, NULL, index, wpages, FLUSH_STABLE);
-	if (result < 0)
-		goto out_bad;
+		return result;
 	return 0;
- out_bad:
-	return result;
 }
 
 struct address_space_operations nfs_file_aops = {
@@ -223,7 +224,7 @@ nfs_file_write(struct file *file, const char *buf, size_t count, loff_t *ppos)
 	result = -EBUSY;
 	if (IS_SWAPFILE(inode))
 		goto out_swapfile;
-	result = nfs_revalidate_inode(NFS_DSERVER(dentry), dentry);
+	result = nfs_revalidate_inode(NFS_SERVER(inode), inode);
 	if (result)
 		goto out;
 
@@ -282,7 +283,9 @@ nfs_lock(struct file *filp, int cmd, struct file_lock *fl)
 	 * Flush all pending writes before doing anything
 	 * with locks..
 	 */
+	down(&filp->f_dentry->d_inode->i_sem);
 	status = nfs_wb_all(inode);
+	up(&filp->f_dentry->d_inode->i_sem);
 	if (status < 0)
 		return status;
 
@@ -292,10 +295,15 @@ nfs_lock(struct file *filp, int cmd, struct file_lock *fl)
 		status = 0;
 
 	/*
-	 * Make sure we re-validate anything we've got cached.
+	 * Make sure we clear the cache whenever we try to get the lock.
 	 * This makes locking act as a cache coherency point.
 	 */
  out_ok:
-	NFS_CACHEINV(inode);
+	if ((cmd == F_SETLK || cmd == F_SETLKW) && fl->fl_type != F_UNLCK) {
+		down(&filp->f_dentry->d_inode->i_sem);
+		nfs_wb_all(inode);      /* we may have slept */
+		nfs_zap_caches(inode);
+		up(&filp->f_dentry->d_inode->i_sem);
+	}
 	return status;
 }

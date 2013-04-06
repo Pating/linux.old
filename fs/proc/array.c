@@ -157,7 +157,7 @@ static inline char * task_state(struct task_struct *p, char *buffer)
 		"Uid:\t%d\t%d\t%d\t%d\n"
 		"Gid:\t%d\t%d\t%d\t%d\n",
 		get_task_state(p),
-		p->pid, p->p_opptr->pid, p->p_pptr->pid != p->p_opptr->pid ? p->p_opptr->pid : 0,
+		p->pid, p->p_opptr->pid, p->p_pptr->pid != p->p_opptr->pid ? p->p_pptr->pid : 0,
 		p->uid, p->euid, p->suid, p->fsuid,
 		p->gid, p->egid, p->sgid, p->fsgid);
 	read_unlock(&tasklist_lock);	
@@ -241,7 +241,7 @@ static inline char * task_sig(struct task_struct *p, char *buffer)
 	sigset_t ign, catch;
 
 	buffer += sprintf(buffer, "SigPnd:\t");
-	buffer = render_sigset_t(&p->signal, buffer);
+	buffer = render_sigset_t(&p->pending.signal, buffer);
 	*buffer++ = '\n';
 	buffer += sprintf(buffer, "SigBlk:\t");
 	buffer = render_sigset_t(&p->blocked, buffer);
@@ -301,12 +301,11 @@ int proc_pid_stat(struct task_struct *task, char * buffer)
 {
 	unsigned long vsize, eip, esp, wchan;
 	long priority, nice;
-	int tty_pgrp;
+	int tty_pgrp = -1, tty_nr = 0;
 	sigset_t sigign, sigcatch;
 	char state;
 	int res;
 	pid_t ppid;
-	int tty_nr;
 	struct mm_struct *mm;
 
 	state = *get_task_state(task);
@@ -315,6 +314,10 @@ int proc_pid_stat(struct task_struct *task, char * buffer)
 	mm = task->mm;
 	if(mm)
 		atomic_inc(&mm->mm_users);
+	if (task->tty) {
+		tty_pgrp = task->tty->pgrp;
+		tty_nr = kdev_t_to_nr(task->tty->device);
+	}
 	task_unlock(task);
 	if (mm) {
 		struct vm_area_struct *vma;
@@ -333,20 +336,11 @@ int proc_pid_stat(struct task_struct *task, char * buffer)
 
 	collect_sigign_sigcatch(task, &sigign, &sigcatch);
 
-	task_lock(task);
-	if (task->tty)
-		tty_pgrp = task->tty->pgrp;
-	else
-		tty_pgrp = -1;
-	tty_nr = task->tty ? kdev_t_to_nr(task->tty->device) : 0;
-	task_unlock(task);
-
 	/* scale priority and nice values from timeslices to -20..20 */
 	/* to make it look like a "normal" Unix priority/nice value  */
 	priority = task->counter;
-	priority = 20 - (priority * 10 + DEF_PRIORITY / 2) / DEF_PRIORITY;
-	nice = task->priority;
-	nice = 20 - (nice * 20 + DEF_PRIORITY / 2) / DEF_PRIORITY;
+	priority = 20 - (priority * 10 + DEF_COUNTER / 2) / DEF_COUNTER;
+	nice = task->nice;
 
 	read_lock(&tasklist_lock);
 	ppid = task->p_opptr->pid;
@@ -378,7 +372,7 @@ int proc_pid_stat(struct task_struct *task, char * buffer)
 		task->start_time,
 		vsize,
 		mm ? mm->rss : 0, /* you might want to shift this left 3 */
-		task->rlim ? task->rlim[RLIMIT_RSS].rlim_cur : 0,
+		task->rlim[RLIMIT_RSS].rlim_cur,
 		mm ? mm->start_code : 0,
 		mm ? mm->end_code : 0,
 		mm ? mm->start_stack : 0,
@@ -388,7 +382,7 @@ int proc_pid_stat(struct task_struct *task, char * buffer)
 		 * It must be decimal for Linux 2.0 compatibility.
 		 * Use /proc/#/status for real-time signals.
 		 */
-		task->signal .sig[0] & 0x7fffffffUL,
+		task->pending.signal.sig[0] & 0x7fffffffUL,
 		task->blocked.sig[0] & 0x7fffffffUL,
 		sigign      .sig[0] & 0x7fffffffUL,
 		sigcatch    .sig[0] & 0x7fffffffUL,
@@ -422,6 +416,7 @@ static inline void statm_pte_range(pmd_t * pmd, unsigned long address, unsigned 
 		end = PMD_SIZE;
 	do {
 		pte_t page = *pte;
+		struct page *ptpage;
 
 		address += PAGE_SIZE;
 		pte++;
@@ -433,8 +428,9 @@ static inline void statm_pte_range(pmd_t * pmd, unsigned long address, unsigned 
 		++*pages;
 		if (pte_dirty(page))
 			++*dirty;
-		if ((pte_pagenr(page) >= max_mapnr) || 
-					PageReserved(pte_pagenr(page) + mem_map))
+		ptpage = pte_page(page);
+		if ((!VALID_PAGE(ptpage)) || 
+					PageReserved(ptpage))
 			continue;
 		if (page_count(pte_page(page)) > 1)
 			++*shared;
@@ -579,7 +575,7 @@ ssize_t proc_pid_read_maps (struct task_struct *task, struct file * file, char *
 		goto getlen_out;
 
 	/* Check whether the mmaps could change if we sleep */
-	volatile_task = (task != current || atomic_read(&mm->mm_users) > 1);
+	volatile_task = (task != current || atomic_read(&mm->mm_users) > 2);
 
 	/* decode f_pos */
 	lineno = *ppos >> MAPS_LINE_SHIFT;

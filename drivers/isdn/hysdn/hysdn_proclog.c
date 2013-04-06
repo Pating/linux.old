@@ -1,4 +1,4 @@
-/* $Id: hysdn_proclog.c,v 1.4 2000/03/03 16:37:12 kai Exp $
+/* $Id: hysdn_proclog.c,v 1.9 2000/11/25 17:01:01 kai Exp $
 
  * Linux driver for HYSDN cards, /proc/net filesystem log functions.
  * written by Werner Cornelius (werner@titro.de) for Hypercope GmbH
@@ -19,24 +19,6 @@
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  *
- * $Log: hysdn_proclog.c,v $
- * Revision 1.4  2000/03/03 16:37:12  kai
- * incorporated some cosmetic changes from the official kernel tree back
- * into CVS
- *
- * Revision 1.3  2000/03/02 00:11:07  werner
- *
- * Changes related to procfs for 2.3.48
- *
- * Revision 1.2  2000/02/14 19:23:03  werner
- *
- * Changed handling of proc filesystem tables to a more portable version
- *
- * Revision 1.1  2000/02/10 19:45:18  werner
- *
- * Initial release
- *
- *
  */
 
 #define __NO_VERSION__
@@ -45,10 +27,9 @@
 #include <linux/poll.h>
 #include <linux/proc_fs.h>
 #include <linux/pci.h>
+#include <linux/smp_lock.h>
 
 #include "hysdn_defs.h"
-
-static char *hysdn_proclog_revision = "$Revision: 1.4 $";
 
 /* the proc subdir for the interface is defined in the procconf module */
 extern struct proc_dir_entry *hysdn_proc_entry;
@@ -293,7 +274,7 @@ hysdn_log_open(struct inode *ino, struct file *filep)
 	struct procdata *pd;
 	ulong flags;
 
-	MOD_INC_USE_COUNT;	/* lock module */
+	lock_kernel();
 	card = card_root;
 	while (card) {
 		pd = card->proclog;
@@ -302,7 +283,7 @@ hysdn_log_open(struct inode *ino, struct file *filep)
 		card = card->next;	/* search next entry */
 	}
 	if (!card) {
-		MOD_DEC_USE_COUNT;	/* unlock module */
+		unlock_kernel();
 		return (-ENODEV);	/* device is unknown/invalid */
 	}
 	filep->private_data = card;	/* remember our own card */
@@ -321,9 +302,10 @@ hysdn_log_open(struct inode *ino, struct file *filep)
 			(struct log_data **) filep->private_data = &(pd->log_head);
 		restore_flags(flags);
 	} else {		/* simultaneous read/write access forbidden ! */
-		MOD_DEC_USE_COUNT;	/* unlock module */
+		unlock_kernel();
 		return (-EPERM);	/* no permission this time */
 	}
+	unlock_kernel();
 	return (0);
 }				/* hysdn_log_open */
 
@@ -343,6 +325,7 @@ hysdn_log_close(struct inode *ino, struct file *filep)
 	int flags, retval = 0;
 
 
+	lock_kernel();
 	if ((filep->f_mode & (FMODE_READ | FMODE_WRITE)) == FMODE_WRITE) {
 		/* write only access -> write debug level written */
 		retval = 0;	/* success */
@@ -384,8 +367,8 @@ hysdn_log_close(struct inode *ino, struct file *filep)
 					kfree(inf);
 				}
 	}			/* read access */
+	unlock_kernel();
 
-	MOD_DEC_USE_COUNT;
 	return (retval);
 }				/* hysdn_log_close */
 
@@ -451,8 +434,10 @@ hysdn_proclog_init(hysdn_card * card)
 	if ((pd = (struct procdata *) kmalloc(sizeof(struct procdata), GFP_KERNEL)) != NULL) {
 		memset(pd, 0, sizeof(struct procdata));
 		sprintf(pd->log_name, "%s%d", PROC_LOG_BASENAME, card->myid);
-		if ((pd->log = create_proc_entry(pd->log_name, S_IFREG | S_IRUGO | S_IWUSR, hysdn_proc_entry)) != NULL)
+		if ((pd->log = create_proc_entry(pd->log_name, S_IFREG | S_IRUGO | S_IWUSR, hysdn_proc_entry)) != NULL) {
 		        pd->log->proc_fops = &log_fops; 
+		        pd->log->owner = THIS_MODULE;
+		}
 
 		init_waitqueue_head(&(pd->rd_queue));
 

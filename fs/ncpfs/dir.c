@@ -21,6 +21,7 @@
 #include <asm/uaccess.h>
 #include <asm/byteorder.h>
 #include <linux/locks.h>
+#include <linux/smp_lock.h>
 
 #include <linux/ncp_fs.h>
 
@@ -253,7 +254,7 @@ leave_me:;
 
 
 static int
-ncp_lookup_validate(struct dentry * dentry, int flags)
+__ncp_lookup_validate(struct dentry * dentry, int flags)
 {
 	struct ncp_server *server;
 	struct inode *dir = dentry->d_parent->d_inode;
@@ -315,6 +316,16 @@ finished:
 	return val;
 }
 
+static int
+ncp_lookup_validate(struct dentry * dentry, int flags)
+{
+	int res;
+	lock_kernel();
+	res = __ncp_lookup_validate(dentry, flags);
+	unlock_kernel();
+	return res;
+}
+
 /* most parts from nfsd_d_validate() */
 static int
 ncp_d_validate(struct dentry *dentry)
@@ -331,7 +342,8 @@ ncp_d_validate(struct dentry *dentry)
 		goto bad_addr;
 	if ((dent_addr & ~align_mask) != dent_addr)
 		goto bad_align;
-	if (!kern_addr_valid(dent_addr))
+	if ((!kern_addr_valid(dent_addr)) || (!kern_addr_valid(dent_addr -1 +
+						sizeof(struct dentry))))
 		goto bad_addr;
 	/*
 	 * Looks safe enough to dereference ...
@@ -361,26 +373,38 @@ ncp_dget_fpos(struct dentry *dentry, struct dentry *parent, unsigned long fpos)
 	struct dentry *dent = dentry;
 	struct list_head *next;
 
-	if (ncp_d_validate(dent))
-		if ((dent->d_parent == parent) &&
-		    ((unsigned long)dent->d_fsdata == fpos))
-			goto out;
+	if (ncp_d_validate(dent)) {
+		if (dent->d_parent == parent &&
+		   (unsigned long)dent->d_fsdata == fpos) {
+			if (!dent->d_inode) {
+				dput(dent);
+				dent = NULL;
+			}
+			return dent;
+		}
+		dput(dent);
+	}
 
 	/* If a pointer is invalid, we search the dentry. */
+	spin_lock(&dcache_lock);
 	next = parent->d_subdirs.next;
 	while (next != &parent->d_subdirs) {
 		dent = list_entry(next, struct dentry, d_child);
-		if ((unsigned long)dent->d_fsdata == fpos)
+		if ((unsigned long)dent->d_fsdata == fpos) {
+			if (dent->d_inode)
+				dget_locked(dent);
+			else
+				dent = NULL;
+			spin_unlock(&dcache_lock);
 			goto out;
+		}
 		next = next->next;
 	}
+	spin_unlock(&dcache_lock);
 	return NULL;
 
 out:
-	if (dent->d_inode)
-		return dget(dent);
-
-	return NULL;
+	return dent;
 }
 
 static time_t ncp_obtain_mtime(struct dentry *dentry)
@@ -423,13 +447,13 @@ static int ncp_readdir(struct file *filp, void *dirent, filldir_t filldir)
 
 	result = 0;
 	if (filp->f_pos == 0) {
-		if (filldir(dirent, ".", 1, 0, inode->i_ino))
+		if (filldir(dirent, ".", 1, 0, inode->i_ino, DT_DIR))
 			goto out;
 		filp->f_pos = 1;
 	}
 	if (filp->f_pos == 1) {
 		if (filldir(dirent, "..", 2, 1,
-				dentry->d_parent->d_inode->i_ino))
+				dentry->d_parent->d_inode->i_ino, DT_DIR))
 			goto out;
 		filp->f_pos = 2;
 	}
@@ -438,7 +462,7 @@ static int ncp_readdir(struct file *filp, void *dirent, filldir_t filldir)
 	if (!page)
 		goto read_really;
 
-	ctl.cache = cache = (union ncp_dir_cache *) kmap(page);
+	ctl.cache = cache = kmap(page);
 	ctl.head  = cache->head;
 
 	if (!Page_Uptodate(page) || !ctl.head.eof)
@@ -466,7 +490,7 @@ static int ncp_readdir(struct file *filp, void *dirent, filldir_t filldir)
 			ctl.page = find_lock_page(&inode->i_data, ctl.ofs);
 			if (!ctl.page)
 				goto invalid_cache;
-			ctl.cache = (union ncp_dir_cache *) kmap(ctl.page);
+			ctl.cache = kmap(ctl.page);
 			if (!Page_Uptodate(ctl.page))
 				goto invalid_cache;
 		}
@@ -480,7 +504,7 @@ static int ncp_readdir(struct file *filp, void *dirent, filldir_t filldir)
 				goto invalid_cache;
 			res = filldir(dirent, dent->d_name.name,
 					dent->d_name.len, filp->f_pos,
-					dent->d_inode->i_ino);
+					dent->d_inode->i_ino, DT_UNKNOWN);
 			dput(dent);
 			if (res)
 				goto finished;
@@ -611,7 +635,7 @@ ncp_fill_cache(struct file *filp, void *dirent, filldir_t filldir,
 		ctl.ofs  += 1;
 		ctl.page  = grab_cache_page(&inode->i_data, ctl.ofs);
 		if (ctl.page)
-			ctl.cache = (union ncp_dir_cache *) kmap(ctl.page);
+			ctl.cache = kmap(ctl.page);
 	}
 	if (ctl.cache) {
 		ctl.cache->dentry[ctl.idx] = newdent;
@@ -627,7 +651,7 @@ end_advance:
 		if (!ino)
 			ino = iunique(inode->i_sb, 2);
 		ctl.filled = filldir(dirent, qname.name, qname.len,
-							filp->f_pos, ino);
+				     filp->f_pos, ino, DT_UNKNOWN);
 		if (!ctl.filled)
 			filp->f_pos += 1;
 	}
@@ -973,7 +997,7 @@ static int ncp_unlink(struct inode *dir, struct dentry *dentry)
 	/*
 	 * Check whether to close the file ...
 	 */
-	if (inode && NCP_FINFO(inode)->opened) {
+	if (inode) {
 		PPRINTK("ncp_unlink: closing file\n");
 		ncp_make_closed(inode);
 	}
@@ -982,7 +1006,7 @@ static int ncp_unlink(struct inode *dir, struct dentry *dentry)
 #ifdef CONFIG_NCPFS_STRONG
 	/* 9C is Invalid path.. It should be 8F, 90 - read only, but
 	   it is not :-( */
-	if (error == 0x9C && server->m.flags & NCP_MOUNT_STRONG) { /* R/O */
+	if ((error == 0x9C || error == 0x90) && server->m.flags & NCP_MOUNT_STRONG) { /* R/O */
 		error = ncp_force_unlink(dir, dentry);
 	}
 #endif
@@ -1051,7 +1075,7 @@ static int ncp_rename(struct inode *old_dir, struct dentry *old_dentry,
 	error = ncp_ren_or_mov_file_or_subdir(server, old_dir, __old_name,
 						      new_dir, __new_name);
 #ifdef CONFIG_NCPFS_STRONG
-	if ((error == 0x90 || error == -EACCES) &&
+	if ((error == 0x90 || error == 0x8B || error == -EACCES) &&
 			server->m.flags & NCP_MOUNT_STRONG) {	/* RO */
 		error = ncp_force_rename(old_dir, old_dentry, __old_name,
 					 new_dir, new_dentry, __new_name);

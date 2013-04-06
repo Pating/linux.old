@@ -1,4 +1,4 @@
-/* $Id: hypersparc.S,v 1.15 2000/05/09 17:40:13 davem Exp $
+/* $Id: hypersparc.S,v 1.17 2000/07/16 21:48:52 anton Exp $
  * hypersparc.S: High speed Hypersparc mmu/cache operations.
  *
  * Copyright (C) 1997 David S. Miller (davem@caip.rutgers.edu)
@@ -12,23 +12,12 @@
 #include <linux/config.h>
 #include <linux/init.h>
 
-#define WINDOW_FLUSH(tmp1, tmp2)					\
-	mov	0, tmp1;						\
-98:	ld	[%g6 + AOFF_task_thread + AOFF_thread_uwinmask], tmp2;	\
-	orcc	%g0, tmp2, %g0;						\
-	add	tmp1, 1, tmp1;						\
-	bne	98b;							\
-	 save	%sp, -64, %sp;						\
-99:	subcc	tmp1, 1, tmp1;						\
-	bne	99b;							\
-	 restore %g0, %g0, %g0;
-
 	.text
 	.align	4
 
 	.globl	hypersparc_flush_cache_all, hypersparc_flush_cache_mm
 	.globl	hypersparc_flush_cache_range, hypersparc_flush_cache_page
-	.globl	hypersparc_flush_page_to_ram, hypersparc_flush_chunk
+	.globl	hypersparc_flush_page_to_ram
 	.globl	hypersparc_flush_page_for_dma, hypersparc_flush_sig_insns
 	.globl	hypersparc_flush_tlb_all, hypersparc_flush_tlb_mm
 	.globl	hypersparc_flush_tlb_range, hypersparc_flush_tlb_page
@@ -229,7 +218,6 @@ hypersparc_flush_sig_insns:
 
 	/* HyperSparc is copy-back. */
 hypersparc_flush_page_to_ram:
-hypersparc_flush_chunk:
 	sethi	%hi(vac_line_size), %g1
 	ld	[%g1 + %lo(vac_line_size)], %o4
 	andn	%o0, (PAGE_SIZE - 1), %o0

@@ -83,10 +83,10 @@
 /*
  * Events that this OSM is interested in
  */
-#define I2OB_EVENT_MASK	I2O_EVT_IND_BSA_VOLUME_LOAD |	\
-				I2O_EVT_IND_BSA_VOLUME_UNLOAD | \
-				I2O_EVT_IND_BSA_VOLUME_UNLOAD_REQ | \
-				I2O_EVT_IND_BSA_CAPACITY_CHANGE
+#define I2OB_EVENT_MASK		(I2O_EVT_IND_BSA_VOLUME_LOAD |	\
+				 I2O_EVT_IND_BSA_VOLUME_UNLOAD | \
+				 I2O_EVT_IND_BSA_VOLUME_UNLOAD_REQ | \
+				 I2O_EVT_IND_BSA_CAPACITY_CHANGE)
 
 
 /*
@@ -147,7 +147,7 @@ struct i2ob_request
 	struct i2ob_request *next;
 	struct request *req;
 	int num;
-} __cacheline_aligned;
+};
 
 /*
  * Per IOP requst queue information
@@ -584,7 +584,6 @@ static int i2ob_evt(void *dummy)
 	int i;
 
 	lock_kernel();
-	exit_files(current);
 	daemonize();
 	unlock_kernel();
 
@@ -593,6 +592,7 @@ static int i2ob_evt(void *dummy)
 
 	while(1)
 	{
+#warning "RACE"
 		interruptible_sleep_on(&i2ob_evt_wait);
  		if(signal_pending(current)) {
 			evt_running = 0;
@@ -1575,7 +1575,7 @@ static struct block_device_operations i2ob_fops =
 static struct gendisk i2ob_gendisk = 
 {
 	MAJOR_NR,
-	"i2ohd",
+	"i2o/hd",
 	4,
 	1<<4,
 	i2ob,
@@ -1664,6 +1664,7 @@ int i2o_block_init(void)
 	if(i2o_install_handler(&i2o_block_handler)<0)
 	{
 		unregister_blkdev(MAJOR_NR, "i2o_block");
+		blk_cleanup_queue(BLK_DEFAULT_QUEUE(MAJOR_NR));
 		printk(KERN_ERR "i2o_block: unable to register OSM.\n");
 		return -EINVAL;
 	}
@@ -1729,6 +1730,11 @@ void cleanup_module(void)
 	 */
 	if (unregister_blkdev(MAJOR_NR, "i2o_block") != 0)
 		printk("i2o_block: cleanup_module failed\n");
+
+	/*
+	 * free request queue
+	 */
+	blk_cleanup_queue(BLK_DEFAULT_QUEUE(MAJOR_NR));
 
 	if(evt_running) {
 		i = kill_proc(evt_pid, SIGTERM, 1);

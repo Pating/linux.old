@@ -41,11 +41,12 @@
 
 /* External variables not in a header file. */
 extern int panic_timeout;
-extern int console_loglevel, C_A_D;
+extern int C_A_D;
 extern int bdf_prm[], bdflush_min[], bdflush_max[];
 extern int sysctl_overcommit_memory;
 extern int max_threads;
 extern int nr_queued_signals, max_queued_signals;
+extern int sysrq_enabled;
 
 /* this is needed for the proc_dointvec_minmax for [fs_]overflow UID and GID */
 static int maxolduid = 65535;
@@ -54,11 +55,16 @@ static int minolduid;
 #ifdef CONFIG_KMOD
 extern char modprobe_path[];
 #endif
+#ifdef CONFIG_HOTPLUG
+extern char hotplug_path[];
+#endif
 #ifdef CONFIG_CHR_DEV_SG
 extern int sg_big_buff;
 #endif
 #ifdef CONFIG_SYSVIPC
 extern size_t shm_ctlmax;
+extern size_t shm_ctlall;
+extern int shm_ctlmni;
 extern int msg_ctlmax;
 extern int msg_ctlmnb;
 extern int msg_ctlmni;
@@ -185,6 +191,10 @@ static ctl_table kern_table[] = {
 	{KERN_MODPROBE, "modprobe", &modprobe_path, 256,
 	 0644, NULL, &proc_dostring, &sysctl_string },
 #endif
+#ifdef CONFIG_HOTPLUG
+	{KERN_HOTPLUG, "hotplug", &hotplug_path, 256,
+	 0644, NULL, &proc_dostring, &sysctl_string },
+#endif
 #ifdef CONFIG_CHR_DEV_SG
 	{KERN_SG_BIG_BUFF, "sg-big-buff", &sg_big_buff, sizeof (int),
 	 0444, NULL, &proc_dointvec},
@@ -200,6 +210,10 @@ static ctl_table kern_table[] = {
 #ifdef CONFIG_SYSVIPC
 	{KERN_SHMMAX, "shmmax", &shm_ctlmax, sizeof (size_t),
 	 0644, NULL, &proc_doulongvec_minmax},
+	{KERN_SHMALL, "shmall", &shm_ctlall, sizeof (size_t),
+	 0644, NULL, &proc_doulongvec_minmax},
+	{KERN_SHMMNI, "shmmni", &shm_ctlmni, sizeof (int),
+	 0644, NULL, &proc_dointvec},
 	{KERN_MSGMAX, "msgmax", &msg_ctlmax, sizeof (int),
 	 0644, NULL, &proc_dointvec},
 	{KERN_MSGMNI, "msgmni", &msg_ctlmni, sizeof (int),
@@ -227,7 +241,7 @@ static ctl_table kern_table[] = {
 
 static ctl_table vm_table[] = {
 	{VM_FREEPG, "freepages", 
-	 &freepages, sizeof(freepages_t), 0644, NULL, &proc_dointvec},
+	 &freepages, sizeof(freepages_t), 0444, NULL, &proc_dointvec},
 	{VM_BDFLUSH, "bdflush", &bdf_prm, 9*sizeof(int), 0644, NULL,
 	 &proc_dointvec_minmax, &sysctl_intvec, NULL,
 	 &bdflush_min, &bdflush_max},
@@ -255,9 +269,9 @@ static ctl_table fs_table[] = {
 	 0444, NULL, &proc_dointvec},
 	{FS_STATINODE, "inode-state", &inodes_stat, 7*sizeof(int),
 	 0444, NULL, &proc_dointvec},
-	{FS_NRFILE, "file-nr", &nr_files, 3*sizeof(int),
+	{FS_NRFILE, "file-nr", &files_stat, 3*sizeof(int),
 	 0444, NULL, &proc_dointvec},
-	{FS_MAXFILE, "file-max", &max_files, sizeof(int),
+	{FS_MAXFILE, "file-max", &files_stat.max_files, sizeof(int),
 	 0644, NULL, &proc_dointvec},
 	{FS_NRSUPER, "super-nr", &nr_super_blocks, sizeof(int),
 	 0444, NULL, &proc_dointvec},
@@ -275,6 +289,12 @@ static ctl_table fs_table[] = {
 	{FS_OVERFLOWGID, "overflowgid", &fs_overflowgid, sizeof(int), 0644, NULL,
 	 &proc_dointvec_minmax, &sysctl_intvec, NULL,
 	 &minolduid, &maxolduid},
+	{FS_LEASES, "leases-enable", &leases_enable, sizeof(int),
+	 0644, NULL, &proc_dointvec},
+	{FS_DIR_NOTIFY, "dir-notify-enable", &dir_notify_enable,
+	 sizeof(int), 0644, NULL, &proc_dointvec},
+	{FS_LEASE_TIME, "lease-break-time", &lease_break_time, sizeof(int),
+	 0644, NULL, &proc_dointvec},
 	{0}
 };
 
@@ -557,7 +577,7 @@ static void unregister_proc_table(ctl_table * table, struct proc_dir_entry *root
 		}
 
 		/* Don't unregister proc entries that are still being used.. */
-		if (de->count)
+		if (atomic_read(&de->count))
 			continue;
 
 		table->de = NULL;
@@ -803,8 +823,11 @@ int proc_dointvec(ctl_table *table, int write, struct file *filp,
 int proc_dointvec_bset(ctl_table *table, int write, struct file *filp,
 			void *buffer, size_t *lenp)
 {
+	if (!capable(CAP_SYS_MODULE)) {
+		return -EPERM;
+	}
 	return do_proc_dointvec(table,write,filp,buffer,lenp,1,
-		(current->pid == 1) ? OP_SET : OP_AND);
+				(current->pid == 1) ? OP_SET : OP_AND);
 }
 
 int proc_dointvec_minmax(ctl_table *table, int write, struct file *filp,
@@ -1200,78 +1223,6 @@ int sysctl_jiffies(ctl_table *table, int *name, int nlen,
 	return 1;
 }
 
-int do_string (
-	void *oldval, size_t *oldlenp, void *newval, size_t newlen,
-	int rdwr, char *data, size_t max)
-{
-	int l = strlen(data) + 1;
-	if (newval && !rdwr)
-		return -EPERM;
-	if (newval && newlen >= max)
-		return -EINVAL;
-	if (oldval) {
-		int old_l;
-		if(get_user(old_l, oldlenp))
-			return -EFAULT;
-		if (l > old_l)
-			return -ENOMEM;
-		if(put_user(l, oldlenp) || copy_to_user(oldval, data, l))
-			return -EFAULT;
-	}
-	if (newval) {
-		if(copy_from_user(data, newval, newlen))
-			return -EFAULT;
-		data[newlen] = 0;
-	}
-	return 0;
-}
-
-int do_int (
-	void *oldval, size_t *oldlenp, void *newval, size_t newlen,
-	int rdwr, int *data)
-{
-	if (newval && !rdwr)
-		return -EPERM;
-	if (newval && newlen != sizeof(int))
-		return -EINVAL;
-	if (oldval) {
-		int old_l;
-		if(get_user(old_l, oldlenp))
-			return -EFAULT;
-		if (old_l < sizeof(int))
-			return -ENOMEM;
-		if(put_user(sizeof(int), oldlenp)||copy_to_user(oldval, data, sizeof(int)))
-			return -EFAULT;
-	}
-	if (newval)
-		if(copy_from_user(data, newval, sizeof(int)))
-			return -EFAULT;
-	return 0;
-}
-
-int do_struct (
-	void *oldval, size_t *oldlenp, void *newval, size_t newlen,
-	int rdwr, void *data, size_t len)
-{
-	if (newval && !rdwr)
-		return -EPERM;
-	if (newval && newlen != len)
-		return -EINVAL;
-	if (oldval) {
-		int old_l;
-		if(get_user(old_l, oldlenp))
-			return -EFAULT;
-		if (old_l < len)
-			return -ENOMEM;
-		if(put_user(len, oldlenp) || copy_to_user(oldval, data, len))
-			return -EFAULT;
-	}
-	if (newval)
-		if(copy_from_user(data, newval, len))
-			return -EFAULT;
-	return 0;
-}
-
 
 #else /* CONFIG_SYSCTL */
 
@@ -1289,6 +1240,13 @@ int sysctl_string(ctl_table *table, int *name, int nlen,
 }
 
 int sysctl_intvec(ctl_table *table, int *name, int nlen,
+		void *oldval, size_t *oldlenp,
+		void *newval, size_t newlen, void **context)
+{
+	return -ENOSYS;
+}
+
+int sysctl_jiffies(ctl_table *table, int *name, int nlen,
 		void *oldval, size_t *oldlenp,
 		void *newval, size_t newlen, void **context)
 {

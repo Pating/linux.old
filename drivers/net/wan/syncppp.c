@@ -723,7 +723,7 @@ static void sppp_cisco_input (struct sppp *sp, struct sk_buff *skb)
 		struct in_device *in_dev;
 		struct in_ifaddr *ifa;
 		u32 addr = 0, mask = ~0; /* FIXME: is the mask correct? */
-
+#ifdef CONFIG_INET
 		if ((in_dev=in_dev_get(dev)) != NULL)
 		{
 			read_lock(&in_dev->lock);
@@ -739,6 +739,7 @@ static void sppp_cisco_input (struct sppp *sp, struct sk_buff *skb)
 			read_unlock(&in_dev->lock);
 			in_dev_put(in_dev);
 		}
+#endif		
 		/* I hope both addr and mask are in the net order */
 		sppp_cisco_send (sp, CISCO_ADDR_REPLY, addr, mask);
 		break;
@@ -865,7 +866,7 @@ EXPORT_SYMBOL(sppp_close);
  *	
  *	Close down any existing synchronous session and commence
  *	from scratch. In the PPP case this means negotiating LCP/IPCP
- *	and friends, while for Cisco HDLC we simply need to staet sending
+ *	and friends, while for Cisco HDLC we simply need to start sending
  *	keepalives
  */
 

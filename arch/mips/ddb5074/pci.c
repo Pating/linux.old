@@ -286,7 +286,6 @@ void __init pcibios_init(void)
     pci_scan_bus(0, &nile4_pci_ops, NULL);
     ddb5074_pci_fixup();
     pci_assign_unassigned_resources();
-    pci_set_bus_ranges();
     pcibios_fixup_irqs();
 }
 
@@ -319,6 +318,13 @@ int pcibios_enable_resources(struct pci_dev *dev)
 	u16 cmd, old_cmd;
 	int idx;
 	struct resource *r;
+
+	/*
+	 *  Don't touch the Nile 4
+	 */
+	if (dev->vendor == PCI_VENDOR_ID_NEC &&
+	    dev->device == PCI_DEVICE_ID_NEC_NILE4)
+	    return 0;
 
 	pci_read_config_word(dev, PCI_COMMAND, &cmd);
 	old_cmd = cmd;

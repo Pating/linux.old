@@ -9,6 +9,8 @@
  * Copyright (C) 1999 by Kaz Kojima & Niibe Yutaka
  */
 
+#include <linux/config.h>
+
 /*
  * computes the checksum of a memory block at buff, length len,
  * and adds in "sum" (32-bit)
@@ -80,7 +82,8 @@ static __inline__ unsigned int csum_fold(unsigned int sum)
 		"add	%1, %0\n\t"
 		"not	%0, %0\n\t"
 		: "=r" (sum), "=&r" (__dummy)
-		: "0" (sum));
+		: "0" (sum)
+		: "t");
 	return sum;
 }
 
@@ -113,7 +116,8 @@ static __inline__ unsigned short ip_fast_csum(unsigned char * iph, unsigned int 
 	   are modified, we must also specify them as outputs, or gcc
 	   will assume they contain their original values. */
 	: "=r" (sum), "=r" (iph), "=r" (ihl), "=&r" (__dummy0), "=&z" (__dummy1)
-	: "1" (iph), "2" (ihl));
+	: "1" (iph), "2" (ihl)
+	: "t");
 
 	return	csum_fold(sum);
 }
@@ -136,7 +140,8 @@ static __inline__ unsigned long csum_tcpudp_nofold(unsigned long saddr,
 		"movt	%0\n\t"
 		"add	%1, %0"
 		: "=r" (sum), "=r" (len_proto)
-		: "r" (daddr), "r" (saddr), "1" (len_proto), "0" (sum));
+		: "r" (daddr), "r" (saddr), "1" (len_proto), "0" (sum)
+		: "t");
 	return sum;
 }
 
@@ -164,6 +169,7 @@ static __inline__ unsigned short ip_compute_csum(unsigned char * buff, int len)
 }
 
 #define _HAVE_ARCH_IPV6_CSUM
+#ifdef CONFIG_IPV6
 static __inline__ unsigned short int csum_ipv6_magic(struct in6_addr *saddr,
 						     struct in6_addr *daddr,
 						     __u32 len,
@@ -194,10 +200,12 @@ static __inline__ unsigned short int csum_ipv6_magic(struct in6_addr *saddr,
 		"add	%1, %0\n"
 		: "=r" (sum), "=&r" (__dummy)
 		: "r" (saddr), "r" (daddr), 
-		  "r" (htonl(len)), "r" (htonl(proto)), "0" (sum));
+		  "r" (htonl(len)), "r" (htonl(proto)), "0" (sum)
+		: "t");
 
 	return csum_fold(sum);
 }
+#endif
 
 /* 
  *	Copy and checksum to user

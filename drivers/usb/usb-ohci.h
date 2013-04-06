@@ -1,20 +1,16 @@
- /*
+/*
  * URB OHCI HCD (Host Controller Driver) for USB.
  * 
- *(C) Copyright 1999 Roman Weissgaerber <weissg@vienna.at>
+ * (C) Copyright 1999 Roman Weissgaerber <weissg@vienna.at>
+ * (C) Copyright 2000 David Brownell <david-b@pacbell.net>
  * 
  * usb-ohci.h
- * 
  */
 
  
-#define MODSTR "ohci: "
-
-
 static int cc_to_error[16] = { 
 
 /* mapping of the OHCI CC status to error codes */ 
-#ifdef USB_ST_CRC /* status codes */
 	/* No  Error  */               USB_ST_NOERROR,
 	/* CRC Error  */               USB_ST_CRC,
 	/* Bit Stuff  */               USB_ST_BITSTUFF,
@@ -33,32 +29,6 @@ static int cc_to_error[16] = {
 	/* Not Access */               USB_ST_NORESPONSE 
 };
 
-#else  /* error codes */
-	/* No  Error  */               0,
-	/* CRC Error  */               -EILSEQ,
-	/* Bit Stuff  */               -EPROTO,
-	/* Data Togg  */               -EILSEQ,
-	/* Stall      */               -EPIPE,
-	/* DevNotResp */               -ETIMEDOUT,
-	/* PIDCheck   */               -EPROTO,
-	/* UnExpPID   */               -EPROTO,
-	/* DataOver   */               -EOVERFLOW,
-	/* DataUnder  */               -EREMOTEIO,
-	/* reservd    */               -ETIMEDOUT,
-	/* reservd    */               -ETIMEDOUT,
-	/* BufferOver */               -ECOMM,
-	/* BuffUnder  */               -ECOMM,
-	/* Not Access */               -ETIMEDOUT,
-	/* Not Access */               -ETIMEDOUT  
-};
-#define USB_ST_URB_PENDING		-EINPROGRESS
-#endif
-
- 
-
-struct ed;
-struct td;
-/* for ED and TD structures */
 
 /* ED States */
 
@@ -66,7 +36,7 @@ struct td;
 #define ED_UNLINK 	0x01
 #define ED_OPER		0x02
 #define ED_DEL		0x04
-#define ED_URB_DEL  0x08
+#define ED_URB_DEL  	0x08
 
 /* usb_ohci_ed */
 typedef struct ed {
@@ -133,24 +103,12 @@ typedef struct td {
   	__u32 hwBE;		/* Memory Buffer End Pointer */
   	__u16 hwPSW[MAXPSW];
 
-  	__u8 type;
+  	__u8 unused;
   	__u8 index;
   	struct ed * ed;
   	struct td * next_dl_td;
   	urb_t * urb;
 } td_t;
-
-
-/* TD types */
-#define BULK		0x03
-#define INT			0x01
-#define CTRL		0x02
-#define ISO			0x00
- 
-#define SEND            0x01
-#define ST_ADDR         0x02
-#define ADD_LEN         0x04
-#define DEL             0x08
 
 
 #define OHCI_ED_SKIP	(1 << 14)
@@ -373,7 +331,7 @@ typedef struct
 	__u16 length;	// number of tds associated with this request
 	__u16 td_cnt;	// number of tds already serviced
 	int   state;
-	void * wait;
+	wait_queue_head_t * wait;
 	td_t * td[0];	// list pointer to all corresponding TDs associated with this request
 
 } urb_priv_t;
@@ -392,13 +350,14 @@ typedef struct ohci {
 
 	int irq;
 	int disabled;			/* e.g. got a UE, we're hung */
+	atomic_t resume_count;		/* defending against multiple resumes */
 
 	struct ohci_regs * regs;	/* OHCI controller's memory */
 	struct list_head ohci_hcd_list;	/* list of all ohci_hcd */
 
 	struct ohci * next; 		// chain of uhci device contexts
-	struct list_head urb_list; 	// list of all pending urbs
-	spinlock_t urb_list_lock; 	// lock to keep consistency 
+	// struct list_head urb_list; 	// list of all pending urbs
+	// spinlock_t urb_list_lock; 	// lock to keep consistency 
   
 	int ohci_int_load[32];		/* load of the 32 Interrupt Chains (for load balancing)*/
 	ed_t * ed_rm_list[2];     /* lists of all endpoints to be removed */
@@ -410,6 +369,10 @@ typedef struct ohci {
 	struct usb_bus * bus;    
 	struct usb_device * dev[128];
 	struct virt_root_hub rh;
+
+	/* PCI device handle and settings */
+	struct pci_dev	*ohci_dev;
+	u8		pci_latency;
 } ohci_t;
 
 
@@ -419,7 +382,7 @@ typedef struct ohci {
 struct ohci_device {
 	ed_t 	ed[NUM_EDS];
 	int ed_cnt;
-	void  * wait;
+	wait_queue_head_t * wait;
 };
 
 // #define ohci_to_usb(ohci)	((ohci)->usb)
@@ -439,12 +402,100 @@ static int rh_submit_urb(urb_t * urb);
 static int rh_unlink_urb(urb_t * urb);
 static int rh_init_int_timer(urb_t * urb);
 
-#ifdef DEBUG
-#define OHCI_FREE(x) kfree(x); printk("OHCI FREE: %d: %4x\n", -- __ohci_free_cnt, (unsigned int) x)
-#define OHCI_ALLOC(x,size) (x) = kmalloc(size, in_interrupt() ? GFP_ATOMIC : GFP_KERNEL); printk("OHCI ALLO: %d: %4x\n", ++ __ohci_free_cnt,(unsigned int) x)
-static int __ohci_free_cnt = 0;
-#else
-#define OHCI_FREE(x) kfree(x) 
-#define OHCI_ALLOC(x,size) (x) = kmalloc(size, in_interrupt() ? GFP_ATOMIC : GFP_KERNEL) 
-#endif
+/*-------------------------------------------------------------------------*/
+
+#define ALLOC_FLAGS (in_interrupt () ? GFP_ATOMIC : GFP_KERNEL)
  
+#ifdef OHCI_MEM_SLAB
+#define	__alloc(t,c) kmem_cache_alloc(c,ALLOC_FLAGS)
+#define	__free(c,x) kmem_cache_free(c,x)
+static kmem_cache_t *td_cache, *ed_cache;
+
+/*
+ * WARNING:  do NOT use this with "forced slab debug"; it won't respect
+ * our hardware alignment requirement.
+ */
+#ifndef OHCI_MEM_FLAGS
+#define	OHCI_MEM_FLAGS 0
+#endif
+
+static int ohci_mem_init (void)
+{
+	/* redzoning (or forced debug!) breaks alignment */
+	int	flags = (OHCI_MEM_FLAGS) & ~SLAB_RED_ZONE;
+
+	/* TDs accessed by controllers and host */
+	td_cache = kmem_cache_create ("ohci_td", sizeof (struct td), 0,
+		flags | SLAB_HWCACHE_ALIGN, NULL, NULL);
+	if (!td_cache) {
+		dbg ("no TD cache?");
+		return -ENOMEM;
+	}
+
+	/* EDs are accessed by controllers and host;  dev part is host-only */
+	ed_cache = kmem_cache_create ("ohci_ed", sizeof (struct ohci_device), 0,
+		flags | SLAB_HWCACHE_ALIGN, NULL, NULL);
+	if (!ed_cache) {
+		dbg ("no ED cache?");
+		kmem_cache_destroy (td_cache);
+		td_cache = 0;
+		return -ENOMEM;
+	}
+	dbg ("slab flags 0x%x", flags);
+	return 0;
+}
+
+static void ohci_mem_cleanup (void)
+{
+	if (ed_cache && kmem_cache_destroy (ed_cache))
+		err ("ed_cache remained");
+	ed_cache = 0;
+
+	if (td_cache && kmem_cache_destroy (td_cache))
+		err ("td_cache remained");
+	td_cache = 0;
+}
+
+#else
+#define	__alloc(t,c) kmalloc(sizeof(t),ALLOC_FLAGS)
+#define	__free(dev,x) kfree(x)
+#define td_cache 0
+#define ed_cache 0
+
+static inline int ohci_mem_init (void) { return 0; }
+static inline void ohci_mem_cleanup (void) { return; }
+
+/* FIXME: pci_consistent version */
+
+#endif
+
+
+/* TDs ... */
+static inline struct td *
+td_alloc (struct ohci *hc)
+{
+	struct td *td = (struct td *) __alloc (struct td, td_cache);
+	return td;
+}
+
+static inline void
+td_free (struct ohci *hc, struct td *td)
+{
+	__free (td_cache, td);
+}
+
+
+/* DEV + EDs ... only the EDs need to be consistent */
+static inline struct ohci_device *
+dev_alloc (struct ohci *hc)
+{
+	struct ohci_device *dev = (struct ohci_device *)
+		__alloc (struct ohci_device, ed_cache);
+	return dev;
+}
+
+static inline void
+dev_free (struct ohci_device *dev)
+{
+	__free (ed_cache, dev);
+}

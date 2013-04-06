@@ -36,7 +36,7 @@
 /* Note mask bit is true for ENABLED irqs.  */
 static unsigned long cached_irq_mask;
 /* dp264 boards handle at max four CPUs */
-static unsigned long cpu_irq_affinity[4] = { ~0UL, ~0UL, ~0UL, ~0UL };
+static unsigned long cpu_irq_affinity[4] = { 0UL, 0UL, 0UL, 0UL };
 
 spinlock_t dp264_irq_lock = SPIN_LOCK_UNLOCKED;
 
@@ -52,6 +52,7 @@ tsunami_update_irq_hw(unsigned long mask)
 	volatile unsigned long *dim0, *dim1, *dim2, *dim3;
 	unsigned long mask0, mask1, mask2, mask3, dummy;
 
+	mask &= ~isa_enable;
 	mask0 = mask & cpu_irq_affinity[0];
 	mask1 = mask & cpu_irq_affinity[1];
 	mask2 = mask & cpu_irq_affinity[2];
@@ -170,7 +171,6 @@ cpu_set_irq_affinity(unsigned int irq, unsigned long affinity)
 			aff &= ~(1UL << irq);
 		cpu_irq_affinity[cpu] = aff;
 	}
-
 }
 
 static void
@@ -275,7 +275,7 @@ clipper_srm_device_interrupt(unsigned long vector, struct pt_regs * regs)
 
 	irq = (vector - 0x800) >> 4;
 
-	/*
+/*
 	 * The SRM console reports PCI interrupts with a vector calculated by:
 	 *
 	 *	0x900 + (0x10 * DRIR-bit)
@@ -393,7 +393,7 @@ clipper_init_irq(void)
 static int __init
 dp264_map_irq(struct pci_dev *dev, u8 slot, u8 pin)
 {
-	static char irq_tab[6][5] __initlocaldata = {
+	static char irq_tab[6][5] __initdata = {
 		/*INT    INTA   INTB   INTC   INTD */
 		{    -1,    -1,    -1,    -1,    -1}, /* IdSel 5 ISA Bridge */
 		{ 16+ 3, 16+ 3, 16+ 2, 16+ 2, 16+ 2}, /* IdSel 6 SCSI builtin*/
@@ -427,7 +427,7 @@ dp264_map_irq(struct pci_dev *dev, u8 slot, u8 pin)
 static int __init
 monet_map_irq(struct pci_dev *dev, u8 slot, u8 pin)
 {
-	static char irq_tab[13][5] __initlocaldata = {
+	static char irq_tab[13][5] __initdata = {
 		/*INT    INTA   INTB   INTC   INTD */
 		{    45,    45,    45,    45,    45}, /* IdSel 3 21143 PCI1 */
 		{    -1,    -1,    -1,    -1,    -1}, /* IdSel 4 unused */
@@ -488,7 +488,7 @@ monet_swizzle(struct pci_dev *dev, u8 *pinp)
 static int __init
 webbrick_map_irq(struct pci_dev *dev, u8 slot, u8 pin)
 {
-	static char irq_tab[13][5] __initlocaldata = {
+	static char irq_tab[13][5] __initdata = {
 		/*INT    INTA   INTB   INTC   INTD */
 		{    -1,    -1,    -1,    -1,    -1}, /* IdSel 7 ISA Bridge */
 		{    -1,    -1,    -1,    -1,    -1}, /* IdSel 8 unused */
@@ -509,7 +509,7 @@ webbrick_map_irq(struct pci_dev *dev, u8 slot, u8 pin)
 static int __init
 clipper_map_irq(struct pci_dev *dev, u8 slot, u8 pin)
 {
-	static char irq_tab[7][5] __initlocaldata = {
+	static char irq_tab[7][5] __initdata = {
 		/*INT    INTA   INTB   INTC   INTD */
 		{ 16+ 8, 16+ 8, 16+ 9, 16+10, 16+11}, /* IdSel 1 slot 1 */
 		{ 16+12, 16+12, 16+13, 16+14, 16+15}, /* IdSel 2 slot 2 */
@@ -543,6 +543,16 @@ monet_init_pci(void)
 	common_init_pci();
 	SMC669_Init(1);
 	es1888_init();
+}
+
+static void __init
+webbrick_init_arch(void)
+{
+	tsunami_init_arch();
+
+	/* Tsunami caches 4 PTEs at a time; DS10 has only 1 hose. */
+	hose_head->sg_isa->align_entry = 4;
+	hose_head->sg_pci->align_entry = 4;
 }
 
 
@@ -611,7 +621,7 @@ struct alpha_machine_vector webbrick_mv __initmv = {
 	nr_irqs:		64,
 	device_interrupt:	dp264_device_interrupt,
 
-	init_arch:		tsunami_init_arch,
+	init_arch:		webbrick_init_arch,
 	init_irq:		dp264_init_irq,
 	init_rtc:		common_init_rtc,
 	init_pci:		common_init_pci,

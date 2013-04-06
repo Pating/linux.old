@@ -1,5 +1,9 @@
 /*
  * linux/drivers/net/am79c961.h
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
  */
 
 #ifndef _LINUX_am79c961a_H
@@ -73,7 +77,8 @@
 #define MODE_COLL	0x0010
 #define MODE_DRETRY	0x0020
 #define MODE_INTLOOP	0x0040
-#define MODE_PORT0	0x0080
+#define MODE_PORT_AUI	0x0000
+#define MODE_PORT_10BT	0x0080
 #define MODE_DRXPA	0x2000
 #define MODE_DRXBA	0x4000
 #define MODE_PROMISC	0x8000
@@ -105,9 +110,10 @@
 #define TST_LCAR	0x0800
 #define TST_LCOL	0x1000
 #define TST_UFLO	0x4000
+#define TST_BUFF	0x8000
 
 struct dev_priv {
-    struct enet_statistics stats;
+    struct net_device_stats stats;
     unsigned long	rxbuffer[RX_BUFFERS];
     unsigned long	txbuffer[TX_BUFFERS];
     unsigned char	txhead;
@@ -116,6 +122,7 @@ struct dev_priv {
     unsigned char	rxtail;
     unsigned long	rxhdr;
     unsigned long	txhdr;
+    spinlock_t		chip_lock;
 };
 
 extern int	am79c961_probe (struct net_device *dev);

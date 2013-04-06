@@ -89,10 +89,8 @@ struct ipt_table_info
 	unsigned int hook_entry[NF_IP_NUMHOOKS];
 	unsigned int underflow[NF_IP_NUMHOOKS];
 
-	char padding[SMP_ALIGN((NF_IP_NUMHOOKS*2+2)*sizeof(unsigned int))];
-
 	/* ipt_entry tables: one per CPU */
-	char entries[0];
+	char entries[0] __attribute__((aligned(SMP_CACHE_BYTES)));
 };
 
 static LIST_HEAD(ipt_target);
@@ -101,7 +99,7 @@ static LIST_HEAD(ipt_tables);
 #define ADD_COUNTER(c,b,p) do { (c).bcnt += (b); (c).pcnt += (p); } while(0)
 
 #ifdef CONFIG_SMP
-#define TABLE_OFFSET(t,p) (SMP_ALIGN((t)->size)*cpu_number_map(p))
+#define TABLE_OFFSET(t,p) (SMP_ALIGN((t)->size)*(p))
 #else
 #define TABLE_OFFSET(t,p) 0
 #endif
@@ -283,7 +281,8 @@ ipt_do_table(struct sk_buff **pskb,
 	read_lock_bh(&table->lock);
 	IP_NF_ASSERT(table->valid_hooks & (1 << hook));
 	table_base = (void *)table->private->entries
-		+ TABLE_OFFSET(table->private, smp_processor_id());
+		+ TABLE_OFFSET(table->private,
+			       cpu_number_map(smp_processor_id()));
 	e = get_entry(table_base, table->private->hook_entry[hook]);
 
 #ifdef CONFIG_NETFILTER_DEBUG
@@ -642,7 +641,7 @@ check_match(struct ipt_entry_match *m,
 
 	match = find_match_lock(m->u.user.name, &ret, &ipt_mutex);
 	if (!match) {
-		duprintf("check_match: `%s' not found\n", m->u.name);
+		duprintf("check_match: `%s' not found\n", m->u.user.name);
 		return ret;
 	}
 	if (match->me)
@@ -689,8 +688,8 @@ check_entry(struct ipt_entry *e, const char *name, unsigned int size,
 	t = ipt_get_target(e);
 	target = find_target_lock(t->u.user.name, &ret, &ipt_mutex);
 	if (!target) {
-		duprintf("check_entry: `%s' not found\n", t->u.name);
-		return ret;
+		duprintf("check_entry: `%s' not found\n", t->u.user.name);
+		goto cleanup_matches;
 	}
 	if (target->me)
 		__MOD_INC_USE_COUNT(target->me);
@@ -860,7 +859,7 @@ translate_table(const char *name,
 
 	/* And one copy for every other CPU */
 	for (i = 1; i < smp_num_cpus; i++) {
-		memcpy(newinfo->entries + SMP_ALIGN(newinfo->size*i),
+		memcpy(newinfo->entries + SMP_ALIGN(newinfo->size)*i,
 		       newinfo->entries,
 		       SMP_ALIGN(newinfo->size));
 	}
@@ -1029,7 +1028,7 @@ get_entries(const struct ipt_get_entries *entries,
 			 t->private->number);
 		if (entries->size == t->private->size)
 			ret = copy_entries_to_user(t->private->size,
-						   t, uptr->entries);
+						   t, uptr->entrytable);
 		else {
 			duprintf("get_entries: I've got %u not %u!\n",
 				 t->private->size,
@@ -1300,9 +1299,10 @@ ipt_register_target(struct ipt_target *target)
 
 	MOD_INC_USE_COUNT;
 	ret = down_interruptible(&ipt_mutex);
-	if (ret != 0)
+	if (ret != 0) {
+		MOD_DEC_USE_COUNT;
 		return ret;
-
+	}
 	if (!list_named_insert(&ipt_target, target)) {
 		duprintf("ipt_register_target: `%s' already in list!\n",
 			 target->name);
@@ -1333,9 +1333,7 @@ ipt_register_match(struct ipt_match *match)
 		MOD_DEC_USE_COUNT;
 		return ret;
 	}
-	if (list_named_insert(&ipt_match, match)) {
-		ret = 0;
-	} else {
+	if (!list_named_insert(&ipt_match, match)) {
 		duprintf("ipt_register_match: `%s' already in list!\n",
 			 match->name);
 		MOD_DEC_USE_COUNT;
@@ -1360,7 +1358,7 @@ int ipt_register_table(struct ipt_table *table)
 	int ret;
 	struct ipt_table_info *newinfo;
 	static struct ipt_table_info bootstrap
-		= { 0, 0, { 0 }, { 0 }, { }, { } };
+		= { 0, 0, { 0 }, { 0 }, { } };
 
 	MOD_INC_USE_COUNT;
 	newinfo = vmalloc(sizeof(struct ipt_table_info)
@@ -1748,6 +1746,14 @@ static void __exit fini(void)
 	proc_net_remove("ip_tables_names");
 #endif
 }
+
+EXPORT_SYMBOL(ipt_register_table);
+EXPORT_SYMBOL(ipt_unregister_table);
+EXPORT_SYMBOL(ipt_register_match);
+EXPORT_SYMBOL(ipt_unregister_match);
+EXPORT_SYMBOL(ipt_do_table);
+EXPORT_SYMBOL(ipt_register_target);
+EXPORT_SYMBOL(ipt_unregister_target);
 
 module_init(init);
 module_exit(fini);

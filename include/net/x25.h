@@ -154,8 +154,6 @@ extern void x25_destroy_socket(struct sock *);
 extern int  x25_rx_call_request(struct sk_buff *, struct x25_neigh *, unsigned int);
 extern void x25_kill_by_neigh(struct x25_neigh *);
 
-#include <net/x25call.h>
-
 /* x25_dev.c */
 extern void x25_send_frame(struct sk_buff *, struct x25_neigh *);
 extern int  x25_lapb_receive_frame(struct sk_buff *, struct net_device *, struct packet_type *);
@@ -171,6 +169,7 @@ extern void x25_limit_facilities(struct x25_facilities *, struct x25_neigh *);
 
 /* x25_in.c */
 extern int  x25_process_rx_frame(struct sock *, struct sk_buff *);
+extern int  x25_backlog_rcv(struct sock *, struct sk_buff *);
 
 /* x25_link.c */
 extern void x25_link_control(struct sk_buff *, struct x25_neigh *, unsigned short);
@@ -188,7 +187,7 @@ extern struct x25_neigh *x25_get_neigh(struct net_device *);
 extern void x25_link_free(void);
 
 /* x25_out.c */
-extern void x25_output(struct sock *, struct sk_buff *);
+extern  int x25_output(struct sock *, struct sk_buff *);
 extern void x25_kick(struct sock *);
 extern void x25_enquiry_response(struct sock *);
 
@@ -222,5 +221,8 @@ extern unsigned long x25_display_timer(struct sock *);
 /* sysctl_net_x25.c */
 extern void x25_register_sysctl(void);
 extern void x25_unregister_sysctl(void);
-
+struct x25_skb_cb {
+	unsigned flags;
+};
+#define X25_SKB_CB(s) ((struct x25_skb_cb *) ((s)->cb))
 #endif

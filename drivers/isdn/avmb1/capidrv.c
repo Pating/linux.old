@@ -1,11 +1,37 @@
 /*
- * $Id: capidrv.c,v 1.32 2000/04/07 15:19:58 calle Exp $
+ * $Id: capidrv.c,v 1.39 2000/11/23 20:45:14 kai Exp $
  *
  * ISDN4Linux Driver, using capi20 interface (kernelcapi)
  *
  * Copyright 1997 by Carsten Paeth (calle@calle.in-berlin.de)
  *
  * $Log: capidrv.c,v $
+ * Revision 1.39  2000/11/23 20:45:14  kai
+ * fixed module_init/exit stuff
+ * Note: compiled-in kernel doesn't work pre 2.2.18 anymore.
+ *
+ * Revision 1.38  2000/11/14 08:43:07  calle
+ * Bugfix for v110. Connectparamters where setup for sync ...
+ *
+ * Revision 1.37  2000/11/01 14:05:02  calle
+ * - use module_init/module_exit from linux/init.h.
+ * - all static struct variables are initialized with "membername:" now.
+ * - avm_cs.c, let it work with newer pcmcia-cs.
+ *
+ * Revision 1.36  2000/06/26 15:13:41  keil
+ * features should be or'ed
+ *
+ * Revision 1.35  2000/06/19 15:11:25  keil
+ * avoid use of freed structs
+ * changes from 2.4.0-ac21
+ *
+ * Revision 1.34  2000/06/19 13:13:55  calle
+ * Added Modemsupport!
+ *
+ * Revision 1.33  2000/05/06 00:52:36  kai
+ * merged changes from kernel tree
+ * fixed timer and net_device->name breakage
+ *
  * Revision 1.32  2000/04/07 15:19:58  calle
  * remove warnings
  *
@@ -186,13 +212,14 @@
 #include <linux/capi.h>
 #include <linux/kernelcapi.h>
 #include <linux/ctype.h>
+#include <linux/init.h>
 #include <asm/segment.h>
 
 #include "capiutil.h"
 #include "capicmd.h"
 #include "capidrv.h"
 
-static char *revision = "$Revision: 1.32 $";
+static char *revision = "$Revision: 1.39 $";
 static int debugmode = 0;
 
 MODULE_AUTHOR("Carsten Paeth <calle@calle.in-berlin.de>");
@@ -327,6 +354,8 @@ static inline __u32 b1prot(int l2, int l3)
 		return 2;
         case ISDN_PROTO_L2_FAX:
 		return 4;
+	case ISDN_PROTO_L2_MODEM:
+		return 8;
 	}
 }
 
@@ -343,6 +372,7 @@ static inline __u32 b2prot(int l2, int l3)
         case ISDN_PROTO_L2_V11096:
         case ISDN_PROTO_L2_V11019:
         case ISDN_PROTO_L2_V11038:
+	case ISDN_PROTO_L2_MODEM:
 		return 1;
         case ISDN_PROTO_L2_FAX:
 		return 4;
@@ -360,6 +390,7 @@ static inline __u32 b3prot(int l2, int l3)
         case ISDN_PROTO_L2_V11096:
         case ISDN_PROTO_L2_V11019:
         case ISDN_PROTO_L2_V11038:
+	case ISDN_PROTO_L2_MODEM:
 	default:
 		return 0;
         case ISDN_PROTO_L2_FAX:
@@ -367,16 +398,16 @@ static inline __u32 b3prot(int l2, int l3)
 	}
 }
 
-static _cstruct b1config_sync_v110(__u16 rate)
+static _cstruct b1config_async_v110(__u16 rate)
 {
 	/* CAPI-Spec "B1 Configuration" */
 	static unsigned char buf[9];
 	buf[0] = 8; /* len */
 	/* maximum bitrate */
 	buf[1] = rate & 0xff; buf[2] = (rate >> 8) & 0xff;
-	buf[3] = buf[4] = 0; /* reserved, bits per character */
-	buf[5] = buf[6] = 0; /* reserved, parity */
-	buf[7] = buf[9] = 0; /* reserved, stop bits */
+	buf[3] = 8; buf[4] = 0; /* 8 bits per character */
+	buf[5] = 0; buf[6] = 0; /* parity none */
+	buf[7] = 0; buf[8] = 0; /* 1 stop bit */
 	return buf;
 }
 
@@ -391,11 +422,11 @@ static _cstruct b1config(int l2, int l3)
 	default:
 		return 0;
         case ISDN_PROTO_L2_V11096:
-	    return b1config_sync_v110(9600);
+	    return b1config_async_v110(9600);
         case ISDN_PROTO_L2_V11019:
-	    return b1config_sync_v110(19200);
+	    return b1config_async_v110(19200);
         case ISDN_PROTO_L2_V11038:
-	    return b1config_sync_v110(38400);
+	    return b1config_async_v110(38400);
 	}
 }
 
@@ -2165,50 +2196,6 @@ static void enable_dchannel_trace(capidrv_contr *card)
 	send_message(card, &cmdcmsg);
 }
 
-static void disable_dchannel_trace(capidrv_contr *card)
-{
-        __u8 manufacturer[CAPI_MANUFACTURER_LEN];
-        capi_version version;
-	__u16 contr = card->contrnr;
-	__u16 errcode;
-	__u16 avmversion[3];
-
-        errcode = (*capifuncs->capi_get_manufacturer)(contr, manufacturer);
-        if (errcode != CAPI_NOERROR) {
-	   printk(KERN_ERR "%s: can't get manufacturer (0x%x)\n",
-			card->name, errcode);
-	   return;
-	}
-	if (strstr(manufacturer, "AVM") == 0) {
-	   printk(KERN_ERR "%s: not from AVM, no d-channel trace possible (%s)\n",
-			card->name, manufacturer);
-	   return;
-	}
-        errcode = (*capifuncs->capi_get_version)(contr, &version);
-        if (errcode != CAPI_NOERROR) {
-	   printk(KERN_ERR "%s: can't get version (0x%x)\n",
-			card->name, errcode);
-	   return;
-	}
-	avmversion[0] = (version.majormanuversion >> 4) & 0x0f;
-	avmversion[1] = (version.majormanuversion << 4) & 0xf0;
-	avmversion[1] |= (version.minormanuversion >> 4) & 0x0f;
-	avmversion[2] |= version.minormanuversion & 0x0f;
-
-        if (avmversion[0] > 3 || (avmversion[0] == 3 && avmversion[1] > 5)) {
-		printk(KERN_INFO "%s: D2 trace disabled\n", card->name);
-	} else {
-		printk(KERN_INFO "%s: D3 trace disabled\n", card->name);
-	}
-	capi_fill_MANUFACTURER_REQ(&cmdcmsg, global.appid,
-				   card->msgid++,
-				   contr,
-				   0x214D5641,  /* ManuID */
-				   0,           /* Class */
-				   1,           /* Function */
-				   (_cstruct)"\004\000\000\000\000");
-	send_message(card, &cmdcmsg);
-}
 
 static void send_listen(capidrv_contr *card)
 {
@@ -2269,16 +2256,19 @@ static int capidrv_addcontr(__u16 contr, struct capi_profile *profp)
 	card->interface.writebuf_skb = if_sendbuf;
 	card->interface.writecmd = 0;
 	card->interface.readstat = if_readstat;
-	card->interface.features = ISDN_FEATURE_L2_X75I |
-	    ISDN_FEATURE_L2_X75UI |
-	    ISDN_FEATURE_L2_X75BUI |
-	    ISDN_FEATURE_L2_HDLC |
-	    ISDN_FEATURE_L2_TRANS |
-	    ISDN_FEATURE_L3_TRANS |
-	    ISDN_FEATURE_L2_V11096 |
-	    ISDN_FEATURE_L2_V11019 |
-	    ISDN_FEATURE_L2_V11038 |
-	    ISDN_FEATURE_P_UNKNOWN;
+	card->interface.features = ISDN_FEATURE_L2_HDLC |
+	    			   ISDN_FEATURE_L2_TRANS |
+	    			   ISDN_FEATURE_L3_TRANS |
+				   ISDN_FEATURE_P_UNKNOWN |
+				   ISDN_FEATURE_L2_X75I |
+				   ISDN_FEATURE_L2_X75UI |
+				   ISDN_FEATURE_L2_X75BUI;
+	if (profp->support1 & (1<<2))
+		card->interface.features |= ISDN_FEATURE_L2_V11096 |
+	    				    ISDN_FEATURE_L2_V11019 |
+	    				    ISDN_FEATURE_L2_V11038;
+	if (profp->support1 & (1<<8))
+		card->interface.features |= ISDN_FEATURE_L2_MODEM;
 	card->interface.hl_hdrlen = 22; /* len of DATA_B3_REQ */
 	strncpy(card->interface.id, id, sizeof(card->interface.id) - 1);
 
@@ -2401,9 +2391,9 @@ static int capidrv_delcontr(__u16 contr)
 	}
 	spin_unlock_irqrestore(&global_lock, flags);
 
-	kfree(card);
-
 	printk(KERN_INFO "%s: now down.\n", card->name);
+
+	kfree(card);
 
 	MOD_DEC_USE_COUNT;
 
@@ -2459,7 +2449,7 @@ static struct procfsentries {
    { "capi/capidrv", 	  0	 , proc_capidrv_read_proc },
 };
 
-static void proc_init(void)
+static void __init proc_init(void)
 {
     int nelem = sizeof(procfsentries)/sizeof(procfsentries[0]);
     int i;
@@ -2471,7 +2461,7 @@ static void proc_init(void)
     }
 }
 
-static void proc_exit(void)
+static void __exit proc_exit(void)
 {
     int nelem = sizeof(procfsentries)/sizeof(procfsentries[0]);
     int i;
@@ -2486,15 +2476,11 @@ static void proc_exit(void)
 }
 
 static struct capi_interface_user cuser = {
-	"capidrv",
-	lower_callback
+	name: "capidrv",
+	callback: lower_callback
 };
 
-#ifdef MODULE
-#define capidrv_init init_module
-#endif
-
-int capidrv_init(void)
+static int __init capidrv_init(void)
 {
 	struct capi_register_params rparam;
 	capi_profile profile;
@@ -2554,8 +2540,7 @@ int capidrv_init(void)
 	return 0;
 }
 
-#ifdef MODULE
-void cleanup_module(void)
+static void __exit capidrv_exit(void)
 {
 	char rev[10];
 	char *p;
@@ -2577,4 +2562,5 @@ void cleanup_module(void)
 	printk(KERN_NOTICE "capidrv: Rev%s: unloaded\n", rev);
 }
 
-#endif
+module_init(capidrv_init);
+module_exit(capidrv_exit);

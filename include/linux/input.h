@@ -2,9 +2,9 @@
 #define _INPUT_H
 
 /*
- *  input.h  Version 0.1
+ * $Id: input.h,v 1.18 2000/07/25 21:36:56 vojtech Exp $
  *
- *  Copyright (c) 1999 Vojtech Pavlik
+ *  Copyright (c) 1999-2000 Vojtech Pavlik
  *
  *  Sponsored by SuSE
  */
@@ -33,6 +33,7 @@
 #include <linux/time.h>
 #else
 #include <sys/time.h>
+#include <sys/ioctl.h>
 #endif
 
 /*
@@ -47,16 +48,6 @@ struct input_event {
 };
 
 /*
- * The device ID structure;
- */
-
-struct input_id {
-	__u16 bus;
-	__u16 vendor;
-	__u16 product;
-};
-
-/*
  * Protocol version.
  */
 
@@ -66,14 +57,17 @@ struct input_id {
  * IOCTLs (0x00 - 0x7f)
  */
 
-#define EVIOCGVERSION		_IOR('E', 0x01, __u32)                  /* get driver version */
-#define EVIOCGID		_IOR('E', 0x02, struct input_id)	/* get device ID */
+#define EVIOCGVERSION		_IOR('E', 0x01, int)                    /* get driver version */
+#define EVIOCGID		_IOR('E', 0x02, short[4])		/* get device ID */
 #define EVIOCGREP		_IOR('E', 0x03, int[2])			/* get repeat settings */
 #define EVIOCSREP		_IOW('E', 0x03, int[2])			/* get repeat settings */
-#define EVIOCGNAME(len)		_IOC(_IOC_READ, 'E', 0x03, len)		/* get device name */
+#define EVIOCGKEYCODE		_IOR('E', 0x04, int[2])			/* get keycode */
+#define EVIOCSKEYCODE		_IOW('E', 0x04, int[2])			/* set keycode */
+#define EVIOCGKEY		_IOR('E', 0x05, int[2])			/* get key value */
+#define EVIOCGNAME(len)		_IOC(_IOC_READ, 'E', 0x06, len)		/* get device name */
+
 #define EVIOCGBIT(ev,len)	_IOC(_IOC_READ, 'E', 0x20 + ev, len)	/* get event bits */
-#define EVIOCGABSLIM(num)	_IOR('E', 0x40 + num, int[4])		/* get abs event limits */ 
-#define EVIOCGABS(num)		_IOR('E', 0x80 + num, int)		/* get abs value */
+#define EVIOCGABS(abs)		_IOR('E', 0x40 + abs, int[5])		/* get abs value/limits */ 
 
 /*
  * Event types
@@ -216,7 +210,7 @@ struct input_id {
 #define KEY_F22			121		
 #define KEY_F23			122		
 #define KEY_F24			123		
-#define KEY_JPN			124		
+#define KEY_KPCOMMA		124
 #define KEY_LEFTMETA		125		
 #define KEY_RIGHTMETA		126		
 #define KEY_COMPOSE		127		
@@ -272,8 +266,29 @@ struct input_id {
 #define KEY_EDIT		176
 #define KEY_SCROLLUP		177
 #define KEY_SCROLLDOWN		178
+#define KEY_KPLEFTPAREN		179
+#define KEY_KPRIGHTPAREN	180
 
-#define KEY_UNKNOWN		180
+#define KEY_INTL1		181
+#define KEY_INTL2		182
+#define KEY_INTL3		183
+#define KEY_INTL4		184
+#define KEY_INTL5		185
+#define KEY_INTL6		186
+#define KEY_INTL7		187
+#define KEY_INTL8		188
+#define KEY_INTL9		189
+#define KEY_LANG1		190
+#define KEY_LANG2		191
+#define KEY_LANG3		192
+#define KEY_LANG4		193
+#define KEY_LANG5		194
+#define KEY_LANG6		195
+#define KEY_LANG7		196
+#define KEY_LANG8		197
+#define KEY_LANG9		198
+
+#define KEY_UNKNOWN		200
 
 #define BTN_MISC		0x100
 #define BTN_0			0x100
@@ -308,6 +323,7 @@ struct input_id {
 #define BTN_BASE3		0x128
 #define BTN_BASE4		0x129
 #define BTN_BASE5		0x12a
+#define BTN_BASE6		0x12b
 
 #define BTN_GAMEPAD		0x130
 #define BTN_A			0x130
@@ -364,6 +380,9 @@ struct input_id {
 #define ABS_RZ			0x05
 #define ABS_THROTTLE		0x06
 #define ABS_RUDDER		0x07
+#define ABS_WHEEL		0x08
+#define ABS_GAS			0x09
+#define ABS_BRAKE		0x0a
 #define ABS_HAT0X		0x10
 #define ABS_HAT0Y		0x11
 #define ABS_HAT1X		0x12
@@ -406,6 +425,29 @@ struct input_id {
 #define SND_BELL		0x01
 #define SND_MAX			0x07
 
+/*
+ * IDs.
+ */
+
+#define ID_BUS			0
+#define ID_VENDOR		1
+#define ID_PRODUCT		2
+#define ID_VERSION		3
+
+#define BUS_PCI			0x01
+#define BUS_ISAPNP		0x02
+#define BUS_USB			0x03
+
+#define BUS_ISA			0x10
+#define BUS_I8042		0x11
+#define BUS_XTKBD		0x12
+#define BUS_RS232		0x13
+#define BUS_GAMEPORT		0x14
+#define BUS_PARPORT		0x15
+#define BUS_AMIGA		0x16
+#define BUS_ADB			0x17
+#define BUS_I2C			0x18
+
 #ifdef __KERNEL__
 
 /*
@@ -425,7 +467,10 @@ struct input_dev {
 
 	int number;
 	char *name;
-	struct input_id id;
+	unsigned short idbus;
+	unsigned short idvendor;
+	unsigned short idproduct;
+	unsigned short idversion;
 
 	unsigned long evbit[NBITS(EV_MAX)];
 	unsigned long keybit[NBITS(KEY_MAX)];
@@ -434,7 +479,10 @@ struct input_dev {
 	unsigned long ledbit[NBITS(LED_MAX)];
 	unsigned long sndbit[NBITS(SND_MAX)];
 
-	unsigned char *keycode;
+	unsigned int keycodemax;
+	unsigned int keycodesize;
+	void *keycode;
+
 	unsigned int repeat_key;
 	struct timer_list timer;
 
@@ -500,8 +548,7 @@ void input_unregister_minor(devfs_handle_t handle);
 
 void input_event(struct input_dev *dev, unsigned int type, unsigned int code, int value);
 
-#define input_report_key(a,b,c) input_event(a, EV_KEY, b, c)
-#define input_report_btn(a,b,c) input_event(a, EV_KEY, b, !!(c))
+#define input_report_key(a,b,c) input_event(a, EV_KEY, b, !!(c))
 #define input_report_rel(a,b,c) input_event(a, EV_REL, b, c)
 #define input_report_abs(a,b,c) input_event(a, EV_ABS, b, c)
 

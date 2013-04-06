@@ -1,4 +1,4 @@
-/*  $Id: init.c,v 1.152 2000/05/09 17:40:14 davem Exp $
+/*  $Id: init.c,v 1.161 2000/12/09 20:16:58 davem Exp $
  *  arch/sparc64/mm/init.c
  *
  *  Copyright (C) 1996-1999 David S. Miller (davem@caip.rutgers.edu)
@@ -29,6 +29,7 @@
 #include <asm/mmu_context.h>
 #include <asm/vaddrs.h>
 #include <asm/dma.h>
+#include <asm/starfire.h>
 
 extern void device_scan(void);
 
@@ -96,6 +97,31 @@ int do_check_pgt_cache(int low, int high)
         }
 #endif
         return freed;
+}
+
+extern void __update_mmu_cache(struct vm_area_struct *, unsigned long, pte_t);
+
+void update_mmu_cache(struct vm_area_struct *vma, unsigned long address, pte_t pte)
+{
+	struct page *page = pte_page(pte);
+
+	if (VALID_PAGE(page) && page->mapping &&
+	    test_bit(PG_dcache_dirty, &page->flags)) {
+		__flush_dcache_page(page->virtual, 1);
+		clear_bit(PG_dcache_dirty, &page->flags);
+	}
+	__update_mmu_cache(vma, address, pte);
+}
+
+/* In arch/sparc64/mm/ultra.S */
+extern void __flush_icache_page(unsigned long);
+
+void flush_icache_range(unsigned long start, unsigned long end)
+{
+	unsigned long kaddr;
+
+	for (kaddr = start; kaddr < end; kaddr += PAGE_SIZE)
+		__flush_icache_page(__get_phys(kaddr));
 }
 
 /*
@@ -200,7 +226,7 @@ static void inherit_prom_mappings(void)
 
 	for (i = 0; i < n; i++) {
 		unsigned long vaddr;
-		
+
 		if (trans[i].virt >= 0xf0000000 && trans[i].virt < 0x100000000) {
 			for (vaddr = trans[i].virt;
 			     vaddr < trans[i].virt + trans[i].size;
@@ -746,7 +772,7 @@ pte_t *get_pte_slow(pmd_t *pmd, unsigned long offset, unsigned long color)
 		pte_t *pte;
 
 		set_page_count((page + 1), 1);
-		paddr = page_address(page);
+		paddr = (unsigned long) page_address(page);
 		memset((char *)paddr, 0, (PAGE_SIZE << 1));
 
 		if (!color) {
@@ -807,7 +833,6 @@ unsigned long __init bootmem_init(unsigned long *pages_avail)
 	unsigned long end_of_phys_memory = 0UL;
 	unsigned long bootmap_pfn, bytes_avail, size;
 	int i;
-
 
 	bytes_avail = 0UL;
 	for (i = 0; sp_banks[i].num_bytes != 0; i++) {
@@ -873,7 +898,7 @@ unsigned long __init bootmem_init(unsigned long *pages_avail)
 	}
 #endif	
 	/* Initialize the boot-time allocator. */
-	bootmap_size = init_bootmem_node(0, bootmap_pfn, phys_base>>PAGE_SHIFT, end_pfn);
+	bootmap_size = init_bootmem_node(NODE_DATA(0), bootmap_pfn, phys_base>>PAGE_SHIFT, end_pfn);
 
 	/* Now register the available physical memory with the
 	 * allocator.
@@ -999,12 +1024,7 @@ void __init paging_init(void)
 	 */
 	{
 		extern void setup_tba(int);
-		int is_starfire = prom_finddevice("/ssp-serial");
-		if (is_starfire != 0 && is_starfire != -1)
-			is_starfire = 1;
-		else
-			is_starfire = 0;
-		setup_tba(is_starfire);
+		setup_tba(this_is_starfire);
 	}
 
 	inherit_locked_prom_mappings(1);
@@ -1029,7 +1049,7 @@ void __init paging_init(void)
 		zones_size[ZONE_DMA] = npages;
 		zholes_size[ZONE_DMA] = npages - pages_avail;
 
-		free_area_init_node(0, NULL, zones_size,
+		free_area_init_node(0, NULL, NULL, zones_size,
 				    phys_base, zholes_size);
 	}
 
@@ -1242,7 +1262,7 @@ void free_initmem (void)
 		page = (addr +
 			((unsigned long) __va(phys_base)) -
 			((unsigned long) &empty_zero_page));
-		p = mem_map + MAP_NR(page);
+		p = virt_to_page(page);
 
 		ClearPageReserved(p);
 		set_page_count(p, 1);
@@ -1257,7 +1277,7 @@ void free_initrd_mem(unsigned long start, unsigned long end)
 	if (start < end)
 		printk ("Freeing initrd memory: %ldk freed\n", (end - start) >> 10);
 	for (; start < end; start += PAGE_SIZE) {
-		struct page *p = mem_map + MAP_NR(start);
+		struct page *p = virt_to_page(start);
 
 		ClearPageReserved(p);
 		set_page_count(p, 1);

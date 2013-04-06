@@ -7,6 +7,7 @@
 /* (c) 1999 Paul `Rusty' Russell.  Licenced under the GNU General
    Public Licence. */
 
+#include <linux/config.h>
 #include <linux/types.h>
 #include <linux/ip.h>
 #include <linux/netfilter.h>
@@ -60,8 +61,7 @@ ip_nat_fn(unsigned int hooknum,
 	IP_NF_ASSERT(!((*pskb)->nh.iph->frag_off
 		       & __constant_htons(IP_MF|IP_OFFSET)));
 
-	/* FIXME: One day, fill in properly. --RR */
-	(*pskb)->nfcache |= NFC_UNKNOWN | NFC_ALTERED;
+	(*pskb)->nfcache |= NFC_UNKNOWN;
 
 	/* If we had a hardware checksum before, it's now invalid */
 	if ((*pskb)->pkt_type != PACKET_LOOPBACK)
@@ -70,16 +70,23 @@ ip_nat_fn(unsigned int hooknum,
 	ct = ip_conntrack_get(*pskb, &ctinfo);
 	/* Can't track?  Maybe out of memory: this would make NAT
            unreliable. */
-	if (!ct)
+	if (!ct) {
+		if (net_ratelimit())
+			printk(KERN_DEBUG "NAT: %u dropping untracked packet %p %u %u.%u.%u.%u -> %u.%u.%u.%u\n",
+			       hooknum,
+			       *pskb,
+			       (*pskb)->nh.iph->protocol,
+			       NIPQUAD((*pskb)->nh.iph->saddr),
+			       NIPQUAD((*pskb)->nh.iph->daddr));
 		return NF_DROP;
+	}
 
 	switch (ctinfo) {
 	case IP_CT_RELATED:
 	case IP_CT_RELATED+IP_CT_IS_REPLY:
 		if ((*pskb)->nh.iph->protocol == IPPROTO_ICMP) {
-			icmp_reply_translation(*pskb, ct, hooknum,
-					       CTINFO2DIR(ctinfo));
-			return NF_ACCEPT;
+			return icmp_reply_translation(*pskb, ct, hooknum,
+						      CTINFO2DIR(ctinfo));
 		}
 		/* Fall thru... (Only ICMPs can be IP_CT_IS_REPLY) */
 	case IP_CT_NEW:
@@ -155,6 +162,34 @@ ip_nat_out(unsigned int hooknum,
 	return ip_nat_fn(hooknum, pskb, in, out, okfn);
 }
 
+/* FIXME: change in oif may mean change in hh_len.  Check and realloc
+   --RR */
+static int
+route_me_harder(struct sk_buff *skb)
+{
+	struct iphdr *iph = skb->nh.iph;
+	struct rtable *rt;
+	struct rt_key key = { dst:iph->daddr,
+			      src:iph->saddr,
+			      oif:skb->sk ? skb->sk->bound_dev_if : 0,
+			      tos:RT_TOS(iph->tos)|RTO_CONN,
+#ifdef CONFIG_IP_ROUTE_FWMARK
+			      fwmark:skb->nfmark
+#endif
+			    };
+
+	if (ip_route_output_key(&rt, &key) != 0) {
+		printk("route_me_harder: No more route.\n");
+		return -EINVAL;
+	}
+
+	/* Drop old route. */
+	dst_release(skb->dst);
+
+	skb->dst = &rt->u.dst;
+	return 0;
+}
+
 static unsigned int
 ip_nat_local_fn(unsigned int hooknum,
 		struct sk_buff **pskb,
@@ -162,12 +197,23 @@ ip_nat_local_fn(unsigned int hooknum,
 		const struct net_device *out,
 		int (*okfn)(struct sk_buff *))
 {
+	u_int32_t saddr, daddr;
+	unsigned int ret;
+
 	/* root is playing with raw sockets. */
 	if ((*pskb)->len < sizeof(struct iphdr)
 	    || (*pskb)->nh.iph->ihl * 4 < sizeof(struct iphdr))
 		return NF_ACCEPT;
 
-	return ip_nat_fn(hooknum, pskb, in, out, okfn);
+	saddr = (*pskb)->nh.iph->saddr;
+	daddr = (*pskb)->nh.iph->daddr;
+
+	ret = ip_nat_fn(hooknum, pskb, in, out, okfn);
+	if (ret != NF_DROP && ret != NF_STOLEN
+	    && ((*pskb)->nh.iph->saddr != saddr
+		|| (*pskb)->nh.iph->daddr != daddr))
+		return route_me_harder(*pskb) == 0 ? ret : NF_DROP;
+	return ret;
 }
 
 /* We must be after connection tracking and before packet filtering. */

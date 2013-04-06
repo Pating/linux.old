@@ -51,8 +51,8 @@
 extern int con3215_activate(void);
 #endif
 
-#ifdef CONFIG_MAC
-extern void nubus_init(void);
+#ifdef CONFIG_NUBUS
+#include <linux/nubus.h>
 #endif
 
 #ifdef CONFIG_ISAPNP
@@ -73,14 +73,12 @@ extern void nubus_init(void);
  * To avoid associated bogus bug reports, we flatly refuse to compile
  * with a gcc that is known to be too old from the very beginning.
  */
-#if __GNUC__ < 2 || (__GNUC__ == 2 && __GNUC_MINOR__ < 7)
-#error sorry, your GCC is too old. It builds incorrect kernels.
+#if __GNUC__ < 2 || (__GNUC__ == 2 && __GNUC_MINOR__ < 91)
+#error Sorry, your GCC is too old. It builds incorrect kernels.
 #endif
 
 extern char _stext, _etext;
 extern char *linux_banner;
-
-extern int console_loglevel;
 
 static int init(void *);
 
@@ -92,14 +90,17 @@ extern void mca_init(void);
 extern void sbus_init(void);
 extern void ppc_init(void);
 extern void sysctl_init(void);
-extern void filescache_init(void);
 extern void signals_init(void);
 extern void bdev_init(void);
 extern int init_pcmcia_ds(void);
-extern int usb_init(void);
+extern void net_notifier_init(void);
 
 extern void free_initmem(void);
 extern void filesystem_setup(void);
+
+#ifdef CONFIG_TC
+extern void tc_init(void);
+#endif
 
 extern void ecard_init(void);
 
@@ -132,44 +133,6 @@ char root_device_name[64];
 
 static char * argv_init[MAX_INIT_ARGS+2] = { "init", NULL, };
 static char * envp_init[MAX_INIT_ENVS+2] = { "HOME=/", "TERM=linux", NULL, };
-
-/*
- * Read an int from an option string; if available accept a subsequent
- * comma as well.
- *
- * Return values:
- * 0 : no int in string
- * 1 : int found, no subsequent comma
- * 2 : int found including a subsequent comma
- */
-int get_option(char **str, int *pint)
-{
-    char *cur = *str;
-
-    if (!cur || !(*cur)) return 0;
-    *pint = simple_strtol(cur,str,0);
-    if (cur==*str) return 0;
-    if (**str==',') {
-        (*str)++;
-        return 2;
-    }
-
-    return 1;
-}
-
-char *get_options(char *str, int nints, int *ints)
-{
-	int res,i=1;
-
-    while (i<nints) {
-        res = get_option(&str, ints+i);
-        if (res==0) break;
-        i++;
-        if (res==1) break;
-    }
-	ints[0] = i-1;
-	return(str);
-}
 
 static int __init profile_setup(char *str)
 {
@@ -271,6 +234,45 @@ static struct dev_name_struct {
 	{ "dasdg", (DASD_MAJOR << MINORBITS) + (6 << 2) },
 	{ "dasdh", (DASD_MAJOR << MINORBITS) + (7 << 2) },
 #endif
+#if defined(CONFIG_BLK_CPQ_DA) || defined(CONFIG_BLK_CPQ_DA_MODULE)
+	{ "ida/c0d0p",0x4800 },
+	{ "ida/c0d1p",0x4810 },
+	{ "ida/c0d2p",0x4820 },
+	{ "ida/c0d3p",0x4830 },
+	{ "ida/c0d4p",0x4840 },
+	{ "ida/c0d5p",0x4850 },
+	{ "ida/c0d6p",0x4860 },
+	{ "ida/c0d7p",0x4870 },
+	{ "ida/c0d8p",0x4880 },
+	{ "ida/c0d9p",0x4890 },
+	{ "ida/c0d10p",0x48A0 },
+	{ "ida/c0d11p",0x48B0 },
+	{ "ida/c0d12p",0x48C0 },
+	{ "ida/c0d13p",0x48D0 },
+	{ "ida/c0d14p",0x48E0 },
+	{ "ida/c0d15p",0x48F0 },
+#endif
+#if defined(CONFIG_BLK_CPQ_CISS_DA) || defined(CONFIG_BLK_CPQ_CISS_DA_MODULE)
+	{ "cciss/c0d0p",0x6800 },
+	{ "cciss/c0d1p",0x6810 },
+	{ "cciss/c0d2p",0x6820 },
+	{ "cciss/c0d3p",0x6830 },
+	{ "cciss/c0d4p",0x6840 },
+	{ "cciss/c0d5p",0x6850 },
+	{ "cciss/c0d6p",0x6860 },
+	{ "cciss/c0d7p",0x6870 },
+	{ "cciss/c0d8p",0x6880 },
+	{ "cciss/c0d9p",0x6890 },
+	{ "cciss/c0d10p",0x68A0 },
+	{ "cciss/c0d11p",0x68B0 },
+	{ "cciss/c0d12p",0x68C0 },
+	{ "cciss/c0d13p",0x68D0 },
+	{ "cciss/c0d14p",0x68E0 },
+	{ "cciss/c0d15p",0x68F0 },
+#endif
+#ifdef CONFIG_NFTL
+	{ "nftla", 0x5d00 },
+#endif
 	{ NULL, 0 }
 };
 
@@ -331,9 +333,9 @@ static int __init checksetup(char *line)
 
 /* this should be approx 2 Bo*oMips to start (note initial shift), and will
    still work even if initially too large, it will just take slightly longer */
-unsigned long loops_per_sec = (1<<12);
+unsigned long loops_per_jiffy = (1<<12);
 
-/* This is the number of bits of precision for the loops_per_second.  Each
+/* This is the number of bits of precision for the loops_per_jiffy.  Each
    bit takes on average 1.5/HZ seconds.  This (like the original) is a little
    better than 1% */
 #define LPS_PREC 8
@@ -343,42 +345,40 @@ void __init calibrate_delay(void)
 	unsigned long ticks, loopbit;
 	int lps_precision = LPS_PREC;
 
-	loops_per_sec = (1<<12);
+	loops_per_jiffy = (1<<12);
 
 	printk("Calibrating delay loop... ");
-	while (loops_per_sec <<= 1) {
+	while (loops_per_jiffy <<= 1) {
 		/* wait for "start of" clock tick */
 		ticks = jiffies;
 		while (ticks == jiffies)
 			/* nothing */;
 		/* Go .. */
 		ticks = jiffies;
-		__delay(loops_per_sec);
+		__delay(loops_per_jiffy);
 		ticks = jiffies - ticks;
 		if (ticks)
 			break;
 	}
 
-/* Do a binary approximation to get loops_per_second set to equal one clock
+/* Do a binary approximation to get loops_per_jiffy set to equal one clock
    (up to lps_precision bits) */
-	loops_per_sec >>= 1;
-	loopbit = loops_per_sec;
+	loops_per_jiffy >>= 1;
+	loopbit = loops_per_jiffy;
 	while ( lps_precision-- && (loopbit >>= 1) ) {
-		loops_per_sec |= loopbit;
+		loops_per_jiffy |= loopbit;
 		ticks = jiffies;
 		while (ticks == jiffies);
 		ticks = jiffies;
-		__delay(loops_per_sec);
+		__delay(loops_per_jiffy);
 		if (jiffies != ticks)	/* longer than 1 tick */
-			loops_per_sec &= ~loopbit;
+			loops_per_jiffy &= ~loopbit;
 	}
 
-/* finally, adjust loops per second in terms of seconds instead of clocks */	
-	loops_per_sec *= HZ;
 /* Round the value and print it */	
 	printk("%lu.%02lu BogoMIPS\n",
-		(loops_per_sec+2500)/500000,
-		((loops_per_sec+2500)/5000) % 100);
+		loops_per_jiffy/(500000/HZ),
+		(loops_per_jiffy/(5000/HZ)) % 100);
 }
 
 static int __init readonly(char *str)
@@ -477,8 +477,8 @@ static void __init parse_options(char *line)
 		} else {
 			if (args >= MAX_INIT_ARGS)
 				break;
-                        if(*line)
-			argv_init[++args] = line;
+			if (*line)
+				argv_init[++args] = line;
 		}
 	}
 	argv_init[args+1] = NULL;
@@ -521,6 +521,7 @@ asmlinkage void __init start_kernel(void)
 {
 	char * command_line;
 	unsigned long mempages;
+	extern char saved_command_line[];
 /*
  * Interrupts are still disabled. Do necessary setups, then
  * enable them
@@ -528,12 +529,13 @@ asmlinkage void __init start_kernel(void)
 	lock_kernel();
 	printk(linux_banner);
 	setup_arch(&command_line);
+	printk("Kernel command line: %s\n", saved_command_line);
+	parse_options(command_line);
 	trap_init();
 	init_IRQ();
 	sched_init();
 	time_init();
 	softirq_init();
-	parse_options(command_line);
 
 	/*
 	 * HACK ALERT! This is early. We're enabling the console before
@@ -576,16 +578,14 @@ asmlinkage void __init start_kernel(void)
 	mempages = num_physpages;
 
 	fork_init(mempages);
-	filescache_init();
-	dcache_init(mempages);
-	vma_init();
+	proc_caches_init();
+	vfs_caches_init(mempages);
 	buffer_init(mempages);
 	page_cache_init(mempages);
 	kiobuf_setup();
 	signals_init();
 	bdev_init();
 	inode_init(mempages);
-	file_table_init();
 #if defined(CONFIG_SYSVIPC)
 	ipc_init();
 #endif
@@ -601,7 +601,7 @@ asmlinkage void __init start_kernel(void)
 	 *	make syscalls (and thus be locked).
 	 */
 	smp_init();
-	kernel_thread(init, NULL, CLONE_FS | CLONE_FILES | CLONE_SIGHAND);
+	kernel_thread(init, NULL, CLONE_FS | CLONE_FILES | CLONE_SIGNAL);
 	unlock_kernel();
 	current->need_resched = 1;
  	cpu_idle();
@@ -633,6 +633,9 @@ static void __init do_initcalls(void)
 		(*call)();
 		call++;
 	} while (call < &__initcall_end);
+
+	/* Make sure there is no pending stuff from the initcall sequence */
+	flush_scheduled_tasks();
 }
 
 /*
@@ -696,15 +699,14 @@ static void __init do_basic_setup(void)
 #ifdef CONFIG_DIO
 	dio_init();
 #endif
-#ifdef CONFIG_MAC
+#ifdef CONFIG_NUBUS
 	nubus_init();
 #endif
 #ifdef CONFIG_ISAPNP
 	isapnp_init();
 #endif
-#ifdef CONFIG_USB
-	usb_init();	/* Do this before doing initcalls, so that we can make
-			usbcore initialize here, and all drivers initialize later */
+#ifdef CONFIG_TC
+	tc_init();
 #endif
 
 	/* Networking initialization needs a process context */ 
@@ -717,6 +719,7 @@ static void __init do_basic_setup(void)
 	else mount_initrd =0;
 #endif
 
+	start_context_thread();
 	do_initcalls();
 
 	/* .. filesystems .. */
@@ -728,6 +731,7 @@ static void __init do_basic_setup(void)
 #ifdef CONFIG_PCMCIA
 	init_pcmcia_ds();		/* Do this last */
 #endif
+
 	/* Mount the root filesystem.. */
 	mount_root();
 
@@ -735,7 +739,8 @@ static void __init do_basic_setup(void)
 
 #ifdef CONFIG_BLK_DEV_INITRD
 	root_mountflags = real_root_mountflags;
-	if (mount_initrd && MAJOR(ROOT_DEV) == RAMDISK_MAJOR && MINOR(ROOT_DEV) == 0) {
+	if (mount_initrd && ROOT_DEV != real_root_dev
+	    && MAJOR(ROOT_DEV) == RAMDISK_MAJOR && MINOR(ROOT_DEV) == 0) {
 		int error;
 		int i, pid;
 
@@ -744,9 +749,6 @@ static void __init do_basic_setup(void)
 			while (pid != wait(&i));
 		if (MAJOR(real_root_dev) != RAMDISK_MAJOR
 		     || MINOR(real_root_dev) != 0) {
-#ifdef CONFIG_BLK_DEV_MD
-			autodetect_raid();
-#endif
 			error = change_root(real_root_dev,"/initrd");
 			if (error)
 				printk(KERN_ERR "Change root to /initrd: "

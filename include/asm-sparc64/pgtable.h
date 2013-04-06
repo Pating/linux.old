@@ -1,4 +1,4 @@
-/* $Id: pgtable.h,v 1.126 2000/05/05 21:57:03 davem Exp $
+/* $Id: pgtable.h,v 1.135 2000/11/08 04:49:24 davem Exp $
  * pgtable.h: SpitFire page table operations.
  *
  * Copyright 1996,1997 David S. Miller (davem@caip.rutgers.edu)
@@ -18,6 +18,8 @@
 #include <asm/system.h>
 
 #ifndef __ASSEMBLY__
+
+#define PG_dcache_dirty		PG_arch_1
 
 /* Certain architectures need to do special things when pte's
  * within a page table are directly modified.  Thus, the following
@@ -56,9 +58,6 @@
 #define PTE_TABLE_SIZE	0x2000	/* 1024 entries 8 bytes each */
 #define PMD_TABLE_SIZE	0x2000	/* 2048 entries 4 bytes each */
 #define PGD_TABLE_SIZE	0x1000	/* 1024 entries 4 bytes each */
-
-/* the no. of pointers that fit on a page */
-#define PTRS_PER_PAGE	(1UL << (PAGE_SHIFT-3))
 
 /* NOTE: TLB miss handlers depend heavily upon where this is. */
 #define VMALLOC_START		0x0000000140000000UL
@@ -177,7 +176,6 @@ extern inline pte_t pte_modify(pte_t orig_pte, pgprot_t new_prot)
 	(pmd_val(*(pmdp)) = (__pa((unsigned long) (ptep)) >> 11UL))
 #define pgd_set(pgdp, pmdp)	\
 	(pgd_val(*(pgdp)) = (__pa((unsigned long) (pmdp)) >> 11UL))
-#define pte_pagenr(pte)   (((unsigned long) ((pte_val(pte)&~PAGE_OFFSET)-phys_base)>>PAGE_SHIFT))
 #define pmd_page(pmd)			((unsigned long) __va((pmd_val(pmd)<<11UL)))
 #define pgd_page(pgd)			((unsigned long) __va((pgd_val(pgd)<<11UL)))
 #define pte_none(pte) 			(!pte_val(pte))
@@ -209,7 +207,7 @@ extern inline pte_t pte_modify(pte_t orig_pte, pgprot_t new_prot)
 #define __page_address(page)	((page)->virtual)
 #define page_address(page)	({ __page_address(page); })
 
-#define pte_page(x) (mem_map+pte_pagenr(x))
+#define pte_page(x) (mem_map+(((pte_val(x)&_PAGE_PADDR)-phys_base)>>PAGE_SHIFT))
 
 /* Be very careful when you change these three, they are delicate. */
 #define pte_mkyoung(pte)	(__pte(pte_val(pte) | _PAGE_ACCESSED | _PAGE_R))
@@ -237,7 +235,7 @@ extern pgd_t swapper_pg_dir[1];
 #define mmu_lockarea(vaddr, len)		(vaddr)
 #define mmu_unlockarea(vaddr, len)		do { } while(0)
 
-extern void update_mmu_cache(struct vm_area_struct *vma, unsigned long address, pte_t pte);
+extern void update_mmu_cache(struct vm_area_struct *, unsigned long, pte_t);
 
 #define flush_icache_page(vma, pg)	do { } while(0)
 
@@ -288,8 +286,6 @@ __get_iospace (unsigned long addr)
 	return ((sun4u_get_pte (addr) & 0xf0000000) >> 28);
 }
 
-extern void * module_map (unsigned long size);
-extern void module_unmap (void *addr);
 extern unsigned long *sparc64_valid_addr_bitmap;
 
 /* Needs to be defined here and not in linux/mm.h, as it is arch dependent */
@@ -298,6 +294,8 @@ extern unsigned long *sparc64_valid_addr_bitmap;
 
 extern int io_remap_page_range(unsigned long from, unsigned long offset,
 			       unsigned long size, pgprot_t prot, int space);
+
+#include <asm-generic/pgtable.h>
 
 #endif /* !(__ASSEMBLY__) */
 

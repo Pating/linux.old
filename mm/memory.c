@@ -67,7 +67,7 @@ static inline void copy_cow_page(struct page * from, struct page * to, unsigned 
 	copy_user_highpage(to, from, address);
 }
 
-mem_map_t * mem_map = NULL;
+mem_map_t * mem_map;
 
 /*
  * Note: this doesn't free the actual pages themselves. That
@@ -210,35 +210,35 @@ skip_copy_pte_range:		address = (address + PMD_SIZE) & PMD_MASK;
 			
 			do {
 				pte_t pte = *src_pte;
-				unsigned long page_nr;
+				struct page *ptepage;
 				
 				/* copy_one_pte */
 
 				if (pte_none(pte))
-					goto cont_copy_pte_range;
+					goto cont_copy_pte_range_noset;
 				if (!pte_present(pte)) {
 					swap_duplicate(pte_to_swp_entry(pte));
-					set_pte(dst_pte, pte);
 					goto cont_copy_pte_range;
 				}
-				page_nr = pte_pagenr(pte);
-				if (page_nr >= max_mapnr || 
-				    PageReserved(mem_map+page_nr)) {
-					set_pte(dst_pte, pte);
+				ptepage = pte_page(pte);
+				if ((!VALID_PAGE(ptepage)) || 
+				    PageReserved(ptepage))
 					goto cont_copy_pte_range;
-				}
+
 				/* If it's a COW mapping, write protect it both in the parent and the child */
 				if (cow) {
-					pte = pte_wrprotect(pte);
-					set_pte(src_pte, pte);
+					ptep_set_wrprotect(src_pte);
+					pte = *src_pte;
 				}
+
 				/* If it's a shared mapping, mark it clean in the child */
 				if (vma->vm_flags & VM_SHARED)
 					pte = pte_mkclean(pte);
-				set_pte(dst_pte, pte_mkold(pte));
-				get_page(mem_map + page_nr);
-			
-cont_copy_pte_range:		address += PAGE_SIZE;
+				pte = pte_mkold(pte);
+				get_page(ptepage);
+
+cont_copy_pte_range:		set_pte(dst_pte, pte);
+cont_copy_pte_range_noset:	address += PAGE_SIZE;
 				if (address >= end)
 					goto out;
 				src_pte++;
@@ -259,20 +259,22 @@ nomem:
 /*
  * Return indicates whether a page was freed so caller can adjust rss
  */
-static inline int free_pte(pte_t page)
+static inline int free_pte(pte_t pte)
 {
-	if (pte_present(page)) {
-		unsigned long nr = pte_pagenr(page);
-		if (nr >= max_mapnr || PageReserved(mem_map+nr))
+	if (pte_present(pte)) {
+		struct page *page = pte_page(pte);
+		if ((!VALID_PAGE(page)) || PageReserved(page))
 			return 0;
 		/* 
 		 * free_page() used to be able to clear swap cache
 		 * entries.  We may now have to do it manually.  
 		 */
-		free_page_and_swap_cache(mem_map+nr);
+		if (pte_dirty(pte) && page->mapping)
+			set_page_dirty(page);
+		free_page_and_swap_cache(page);
 		return 1;
 	}
-	swap_free(pte_to_swp_entry(page));
+	swap_free(pte_to_swp_entry(pte));
 	return 0;
 }
 
@@ -306,10 +308,9 @@ static inline int zap_pte_range(struct mm_struct *mm, pmd_t * pmd, unsigned long
 		pte_t page;
 		if (!size)
 			break;
-		page = *pte;
+		page = ptep_get_and_clear(pte);
 		pte++;
 		size--;
-		pte_clear(pte-1);
 		if (pte_none(page))
 			continue;
 		freed += free_pte(page);
@@ -373,12 +374,12 @@ void zap_page_range(struct mm_struct *mm, unsigned long address, unsigned long s
 	spin_unlock(&mm->page_table_lock);
 	/*
 	 * Update rss for the mm_struct (not necessarily current->mm)
+	 * Notice that rss is an unsigned long.
 	 */
-	if (mm->rss > 0) {
+	if (mm->rss > freed)
 		mm->rss -= freed;
-		if (mm->rss < 0)
-			mm->rss = 0;
-	}
+	else
+		mm->rss = 0;
 }
 
 
@@ -409,7 +410,7 @@ static struct page * follow_page(unsigned long address)
 
 static inline struct page * get_page_map(struct page *page)
 {
-	if (page > (mem_map + max_mapnr))
+	if (!VALID_PAGE(page))
 		return 0;
 	return page;
 }
@@ -482,9 +483,10 @@ int map_user_kiobuf(int rw, struct kiobuf *iobuf, unsigned long va, size_t len)
 			goto out_unlock;
 		}
 		map = get_page_map(map);
-		if (map)
+		if (map) {
+			flush_dcache_page(map);
 			atomic_inc(&map->count);
-		else
+		} else
 			printk (KERN_INFO "Mapped page missing [%d]\n", i);
 		spin_unlock(&mm->page_table_lock);
 		iobuf->maplist[i] = map;
@@ -642,7 +644,7 @@ static inline void zeromap_pte_range(pte_t * pte, unsigned long address,
 		end = PMD_SIZE;
 	do {
 		pte_t zero_pte = pte_wrprotect(mk_pte(ZERO_PAGE(address), prot));
-		pte_t oldpage = *pte;
+		pte_t oldpage = ptep_get_and_clear(pte);
 		set_pte(pte, zero_pte);
 		forget_pte(oldpage);
 		address += PAGE_SIZE;
@@ -711,12 +713,12 @@ static inline void remap_pte_range(pte_t * pte, unsigned long address, unsigned 
 	if (end > PMD_SIZE)
 		end = PMD_SIZE;
 	do {
-		unsigned long mapnr;
-		pte_t oldpage = *pte;
-		pte_clear(pte);
+		struct page *page;
+		pte_t oldpage;
+		oldpage = ptep_get_and_clear(pte);
 
-		mapnr = MAP_NR(__va(phys_addr));
-		if (mapnr >= max_mapnr || PageReserved(mem_map+mapnr))
+		page = virt_to_page(__va(phys_addr));
+		if ((!VALID_PAGE(page)) || PageReserved(page))
  			set_pte(pte, mk_pte_phys(phys_addr, prot));
 		forget_pte(oldpage);
 		address += PAGE_SIZE;
@@ -746,6 +748,7 @@ static inline int remap_pmd_range(pmd_t * pmd, unsigned long address, unsigned l
 	return 0;
 }
 
+/*  Note: this is only safe if the mm semaphore is held when called. */
 int remap_page_range(unsigned long from, unsigned long phys_addr, unsigned long size, pgprot_t prot)
 {
 	int error = 0;
@@ -781,8 +784,8 @@ int remap_page_range(unsigned long from, unsigned long phys_addr, unsigned long 
  */
 static inline void establish_pte(struct vm_area_struct * vma, unsigned long address, pte_t *page_table, pte_t entry)
 {
-	flush_tlb_page(vma, address);
 	set_pte(page_table, entry);
+	flush_tlb_page(vma, address);
 	update_mmu_cache(vma, address, entry);
 }
 
@@ -818,21 +821,20 @@ static inline void break_cow(struct vm_area_struct * vma, struct page *	old_page
 static int do_wp_page(struct mm_struct *mm, struct vm_area_struct * vma,
 	unsigned long address, pte_t *page_table, pte_t pte)
 {
-	unsigned long map_nr;
 	struct page *old_page, *new_page;
 
-	map_nr = pte_pagenr(pte);
-	if (map_nr >= max_mapnr)
+	old_page = pte_page(pte);
+	if (!VALID_PAGE(old_page))
 		goto bad_wp_page;
-	old_page = mem_map + map_nr;
 	
 	/*
 	 * We can avoid the copy if:
 	 * - we're the only user (count == 1)
 	 * - the only other user is the swap cache,
 	 *   and the only swap cache user is itself,
-	 *   in which case we can remove the page
-	 *   from the swap cache.
+	 *   in which case we can just continue to
+	 *   use the same swap cache (it will be
+	 *   marked dirty).
 	 */
 	switch (page_count(old_page)) {
 	case 2:
@@ -847,7 +849,6 @@ static int do_wp_page(struct mm_struct *mm, struct vm_area_struct * vma,
 			UnlockPage(old_page);
 			break;
 		}
-		delete_from_swap_cache_nolock(old_page);
 		UnlockPage(old_page);
 		/* FallThrough */
 	case 1:
@@ -869,7 +870,7 @@ static int do_wp_page(struct mm_struct *mm, struct vm_area_struct * vma,
 	/*
 	 * Re-check the pte - we dropped the lock
 	 */
-	if (pte_val(*page_table) == pte_val(pte)) {
+	if (pte_same(*page_table, pte)) {
 		if (PageReserved(old_page))
 			++mm->rss;
 		break_cow(vma, old_page, new_page, address, page_table);
@@ -883,75 +884,13 @@ static int do_wp_page(struct mm_struct *mm, struct vm_area_struct * vma,
 
 bad_wp_page:
 	spin_unlock(&mm->page_table_lock);
-	printk("do_wp_page: bogus page at address %08lx (nr %ld)\n",address,map_nr);
+	printk("do_wp_page: bogus page at address %08lx (page 0x%lx)\n",address,(unsigned long)old_page);
 	return -1;
 }
 
-/*
- * This function zeroes out partial mmap'ed pages at truncation time..
- */
-static void partial_clear(struct vm_area_struct *vma, unsigned long address)
+static void vmtruncate_list(struct vm_area_struct *mpnt,
+			    unsigned long pgoff, unsigned long partial)
 {
-	unsigned int offset;
-	struct page *page;
-	pgd_t *page_dir;
-	pmd_t *page_middle;
-	pte_t *page_table, pte;
-
-	page_dir = pgd_offset(vma->vm_mm, address);
-	if (pgd_none(*page_dir))
-		return;
-	if (pgd_bad(*page_dir)) {
-		pgd_ERROR(*page_dir);
-		pgd_clear(page_dir);
-		return;
-	}
-	page_middle = pmd_offset(page_dir, address);
-	if (pmd_none(*page_middle))
-		return;
-	if (pmd_bad(*page_middle)) {
-		pmd_ERROR(*page_middle);
-		pmd_clear(page_middle);
-		return;
-	}
-	page_table = pte_offset(page_middle, address);
-	pte = *page_table;
-	if (!pte_present(pte))
-		return;
-	flush_cache_page(vma, address);
-	page = pte_page(pte);
-	if ((page-mem_map >= max_mapnr) || PageReserved(page))
-		return;
-	offset = address & ~PAGE_MASK;
-	memclear_highpage_flush(page, offset, PAGE_SIZE - offset);
-}
-
-/*
- * Handle all mappings that got truncated by a "truncate()"
- * system call.
- *
- * NOTE! We have to be ready to update the memory sharing
- * between the file and the memory map for a potential last
- * incomplete page.  Ugly, but necessary.
- */
-void vmtruncate(struct inode * inode, loff_t offset)
-{
-	unsigned long partial, pgoff;
-	struct vm_area_struct * mpnt;
-	struct address_space *mapping = inode->i_mapping;
-
-	if (inode->i_size < offset)
-		goto out;
-	inode->i_size = offset;
-	truncate_inode_pages(mapping, offset);
-	spin_lock(&mapping->i_shared_lock);
-	if (!mapping->i_mmap)
-		goto out_unlock;
-
-	pgoff = (offset + PAGE_CACHE_SIZE - 1) >> PAGE_CACHE_SHIFT;
-	partial = (unsigned long)offset & (PAGE_CACHE_SIZE - 1);
-
-	mpnt = mapping->i_mmap;
 	do {
 		struct mm_struct *mm = mpnt->vm_mm;
 		unsigned long start = mpnt->vm_start;
@@ -976,21 +915,68 @@ void vmtruncate(struct inode * inode, loff_t offset)
 		/* Ok, partially affected.. */
 		start += diff << PAGE_SHIFT;
 		len = (len - diff) << PAGE_SHIFT;
-		if (start & ~PAGE_MASK) {
-			partial_clear(mpnt, start);
-			start = (start + ~PAGE_MASK) & PAGE_MASK;
-		}
 		flush_cache_range(mm, start, end);
 		zap_page_range(mm, start, len);
 		flush_tlb_range(mm, start, end);
 	} while ((mpnt = mpnt->vm_next_share) != NULL);
+}
+			      
+
+/*
+ * Handle all mappings that got truncated by a "truncate()"
+ * system call.
+ *
+ * NOTE! We have to be ready to update the memory sharing
+ * between the file and the memory map for a potential last
+ * incomplete page.  Ugly, but necessary.
+ */
+void vmtruncate(struct inode * inode, loff_t offset)
+{
+	unsigned long partial, pgoff;
+	struct address_space *mapping = inode->i_mapping;
+	unsigned long limit;
+
+	if (inode->i_size < offset)
+		goto do_expand;
+	inode->i_size = offset;
+	truncate_inode_pages(mapping, offset);
+	spin_lock(&mapping->i_shared_lock);
+	if (!mapping->i_mmap && !mapping->i_mmap_shared)
+		goto out_unlock;
+
+	pgoff = (offset + PAGE_CACHE_SIZE - 1) >> PAGE_CACHE_SHIFT;
+	partial = (unsigned long)offset & (PAGE_CACHE_SIZE - 1);
+
+	if (mapping->i_mmap != NULL)
+		vmtruncate_list(mapping->i_mmap, pgoff, partial);
+	if (mapping->i_mmap_shared != NULL)
+		vmtruncate_list(mapping->i_mmap_shared, pgoff, partial);
+
 out_unlock:
 	spin_unlock(&mapping->i_shared_lock);
-out:
 	/* this should go into ->truncate */
 	inode->i_size = offset;
 	if (inode->i_op && inode->i_op->truncate)
 		inode->i_op->truncate(inode);
+	return;
+
+do_expand:
+	limit = current->rlim[RLIMIT_FSIZE].rlim_cur;
+	if (limit != RLIM_INFINITY) {
+		if (inode->i_size >= limit) {
+			send_sig(SIGXFSZ, current, 0);
+			goto out;
+		}
+		if (offset > limit) {
+			send_sig(SIGXFSZ, current, 0);
+			offset = limit;
+		}
+	}
+	inode->i_size = offset;
+	if (inode->i_op && inode->i_op->truncate)
+		inode->i_op->truncate(inode);
+out:
+	return;
 }
 
 
@@ -1014,7 +1000,8 @@ void swapin_readahead(swp_entry_t entry)
 	num = valid_swaphandles(entry, &offset);
 	for (i = 0; i < num; offset++, i++) {
 		/* Don't block on I/O for read-ahead */
-		if (atomic_read(&nr_async_pages) >= pager_daemon.swap_cluster) {
+		if (atomic_read(&nr_async_pages) >= pager_daemon.swap_cluster
+				* (1 << page_cluster)) {
 			while (i++ < num)
 				swap_free(SWP_ENTRY(SWP_TYPE(entry), offset++));
 			break;
@@ -1058,14 +1045,9 @@ static int do_swap_page(struct mm_struct * mm,
 	 */
 	lock_page(page);
 	swap_free(entry);
-	if (write_access && !is_page_shared(page)) {
-		delete_from_swap_cache_nolock(page);
-		UnlockPage(page);
-		page = replace_with_highmem(page);
-		pte = mk_pte(page, vma->vm_page_prot);
+	if (write_access && !is_page_shared(page))
 		pte = pte_mkwrite(pte_mkdirty(pte));
-	} else
-		UnlockPage(page);
+	UnlockPage(page);
 
 	set_pte(page_table, pte);
 	/* No need to invalidate - it was non-present before */
@@ -1078,15 +1060,12 @@ static int do_swap_page(struct mm_struct * mm,
  */
 static int do_anonymous_page(struct mm_struct * mm, struct vm_area_struct * vma, pte_t *page_table, int write_access, unsigned long addr)
 {
-	int high = 0;
 	struct page *page = NULL;
 	pte_t entry = pte_wrprotect(mk_pte(ZERO_PAGE(addr), vma->vm_page_prot));
 	if (write_access) {
 		page = alloc_page(GFP_HIGHUSER);
 		if (!page)
 			return -1;
-		if (PageHighMem(page))
-			high = 1;
 		clear_user_highpage(page, addr);
 		entry = pte_mkwrite(pte_mkdirty(mk_pte(page, vma->vm_page_prot)));
 		mm->rss++;
@@ -1177,29 +1156,32 @@ static inline int handle_pte_fault(struct mm_struct *mm,
 {
 	pte_t entry;
 
+	/*
+	 * We need the page table lock to synchronize with kswapd
+	 * and the SMP-safe atomic PTE updates.
+	 */
+	spin_lock(&mm->page_table_lock);
 	entry = *pte;
 	if (!pte_present(entry)) {
+		/*
+		 * If it truly wasn't present, we know that kswapd
+		 * and the PTE updates will not touch it later. So
+		 * drop the lock.
+		 */
+		spin_unlock(&mm->page_table_lock);
 		if (pte_none(entry))
 			return do_no_page(mm, vma, address, write_access, pte);
 		return do_swap_page(mm, vma, address, pte, pte_to_swp_entry(entry), write_access);
 	}
 
-	/*
-	 * Ok, the entry was present, we need to get the page table
-	 * lock to synchronize with kswapd, and verify that the entry
-	 * didn't change from under us..
-	 */
-	spin_lock(&mm->page_table_lock);
-	if (pte_val(entry) == pte_val(*pte)) {
-		if (write_access) {
-			if (!pte_write(entry))
-				return do_wp_page(mm, vma, address, pte, entry);
+	if (write_access) {
+		if (!pte_write(entry))
+			return do_wp_page(mm, vma, address, pte, entry);
 
-			entry = pte_mkdirty(entry);
-		}
-		entry = pte_mkyoung(entry);
-		establish_pte(vma, address, pte, entry);
+		entry = pte_mkdirty(entry);
 	}
+	entry = pte_mkyoung(entry);
+	establish_pte(vma, address, pte, entry);
 	spin_unlock(&mm->page_table_lock);
 	return 1;
 }
@@ -1216,7 +1198,7 @@ int handle_mm_fault(struct mm_struct *mm, struct vm_area_struct * vma,
 
 	pgd = pgd_offset(mm, address);
 	pmd = pmd_alloc(pgd, address);
-	
+
 	if (pmd) {
 		pte_t * pte = pte_alloc(pmd, address);
 		if (pte)

@@ -496,8 +496,9 @@ static _INLINE_ void check_modem_status(struct async_struct *info)
 #ifdef SERIAL_DEBUG_OPEN
 			printk("scheduling hangup...");
 #endif
-			queue_task(&info->tqueue_hangup,
-					   &tq_scheduler);
+			MOD_INC_USE_COUNT;
+			if (schedule_task(&info->tqueue_hangup) == 0)
+				MOD_DEC_USE_COUNT;
 		}
 	}
 	if (info->flags & ASYNC_CTS_FLOW) {
@@ -624,10 +625,9 @@ static void do_serial_hangup(void *private_)
 	struct tty_struct	*tty;
 	
 	tty = info->tty;
-	if (!tty)
-		return;
-
-	tty_hangup(tty);
+	if (tty)
+		tty_hangup(tty);
+	MOD_DEC_USE_COUNT;
 }
 
 /*static void rs_8xx_timer(void)
@@ -977,8 +977,7 @@ static int rs_8xx_write(struct tty_struct * tty, int from_user,
 		}
 
 		if (from_user) {
-			if (c !=
-			    copy_from_user(__va(bdp->cbd_bufaddr), buf, c)) {
+			if (copy_from_user(__va(bdp->cbd_bufaddr), buf, c)) {
 				if (!ret)
 					ret = -EFAULT;
 				break;
@@ -2269,17 +2268,13 @@ static kdev_t serial_console_device(struct console *c)
 
 
 static struct console sercons = {
-	"ttyS",
-	serial_console_write,
-	NULL,
-	serial_console_device,
-	serial_console_wait_key,
-	NULL,
-	serial_console_setup,
-	CON_PRINTBUFFER,
-	CONFIG_SERIAL_CONSOLE_PORT,
-	0,
-	NULL
+	name:		"ttyS",
+	write:		serial_console_write,
+	device:		serial_console_device,
+	wait_key:	serial_console_wait_key,
+	setup:		serial_console_setup,
+	flags:		CON_PRINTBUFFER,
+	index:		CONFIG_SERIAL_CONSOLE_PORT,
 };
 
 /*
@@ -2318,10 +2313,6 @@ int __init rs_8xx_init(void)
 	volatile	iop8260_t	*io;
 	
 	init_bh(SERIAL_BH, do_serial_bh);
-#if 0
-	timer_table[RS_TIMER].fn = rs_8xx_timer;
-	timer_table[RS_TIMER].expires = 0;
-#endif
 
 	show_serial_version();
 
@@ -2400,10 +2391,10 @@ int __init rs_8xx_init(void)
 	io->iop_pdird &= ~0x00800000;
 	io->iop_psord &= ~0x00c00000;
 #if USE_SMC2
-	io->iop_ppara |= 0x01800000;
-	io->iop_pdira |= 0x00800000;
-	io->iop_pdira &= ~0x01000000;
-	io->iop_psora &= ~0x01800000;
+	io->iop_ppara |= 0x00c00000;
+	io->iop_pdira |= 0x00400000;
+	io->iop_pdira &= ~0x00800000;
+	io->iop_psora &= ~0x00c00000;
 #endif
 
 	/* Configure SCC2 and SCC3.  Be careful about the fine print.
@@ -2461,6 +2452,8 @@ int __init rs_8xx_init(void)
 		if (info) {
 			/*memset(info, 0, sizeof(ser_info_t));*/
 			__clear_user(info,sizeof(ser_info_t));
+			init_waitqueue_head(&info->open_wait);
+			init_waitqueue_head(&info->close_wait);
 			info->magic = SERIAL_MAGIC;
 			info->flags = state->flags;
 			info->tqueue.routine = do_softint;
@@ -2475,11 +2468,11 @@ int __init rs_8xx_init(void)
 			 * descriptors from dual port ram, and a character
 			 * buffer area from host mem.
 			 */
-			dp_addr = m8260_cpm_dpalloc(sizeof(cbd_t) * RX_NUM_FIFO);
+			dp_addr = m8260_cpm_dpalloc(sizeof(cbd_t) * RX_NUM_FIFO, 8);
 
 			/* Allocate space for FIFOs in the host memory.
 			*/
-			mem_addr = m8260_cpm_hostalloc(RX_NUM_FIFO * RX_BUF_SIZE);
+			mem_addr = m8260_cpm_hostalloc(RX_NUM_FIFO * RX_BUF_SIZE, 1);
 
 			/* Set the physical address of the host memory
 			 * buffers in the buffer descriptors, and the
@@ -2508,11 +2501,11 @@ int __init rs_8xx_init(void)
 				sup->scc_genscc.scc_rbase = dp_addr;
 			}
 
-			dp_addr = m8260_cpm_dpalloc(sizeof(cbd_t) * TX_NUM_FIFO);
+			dp_addr = m8260_cpm_dpalloc(sizeof(cbd_t) * TX_NUM_FIFO, 8);
 
 			/* Allocate space for FIFOs in the host memory.
 			*/
-			mem_addr = m8260_cpm_hostalloc(TX_NUM_FIFO * TX_BUF_SIZE);
+			mem_addr = m8260_cpm_hostalloc(TX_NUM_FIFO * TX_BUF_SIZE, 1);
 
 			/* Set the physical address of the host memory
 			 * buffers in the buffer descriptors, and the
@@ -2718,11 +2711,11 @@ static int __init serial_console_setup(struct console *co, char *options)
 
 	/* Allocate space for two buffer descriptors in the DP ram.
 	*/
-	dp_addr = m8260_cpm_dpalloc(sizeof(cbd_t) * 2);
+	dp_addr = m8260_cpm_dpalloc(sizeof(cbd_t) * 2, 8);
 
 	/* Allocate space for two 2 byte FIFOs in the host memory.
 	*/
-	mem_addr = m8260_cpm_hostalloc(4);
+	mem_addr = m8260_cpm_hostalloc(4, 1);
 
 	/* Set the physical address of the host memory buffers in
 	 * the buffer descriptors.

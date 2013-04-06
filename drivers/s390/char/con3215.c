@@ -696,6 +696,7 @@ static void raw3215_shutdown(raw3215_info *raw)
                 s390irq_spin_unlock_irqrestore(raw->irq, flags);
 		schedule();
 		s390irq_spin_lock_irqsave(raw->irq, flags);
+		remove_wait_queue(&raw->empty_wait, &wait);
                 current->state = TASK_RUNNING;
 		raw->flags &= ~(RAW3215_ACTIVE | RAW3215_CLOSING);
 	}
@@ -795,17 +796,12 @@ static int __init con3215_consetup(struct console *co, char *options)
  *  The console structure for the 3215 console
  */
 static struct console con3215 = {
-	"tty3215",
-	con3215_write,
-	NULL,
-	con3215_device,
-	NULL,
-	con3215_unblank,
-	con3215_consetup,
-	CON_PRINTBUFFER,
-	0,
-	0,
-	NULL
+	name:		"tty3215",
+	write:		con3215_write,
+	device:		con3215_device,
+	unblank:	con3215_unblank,
+	setup:		con3215_consetup,
+	flags:		CON_PRINTBUFFER,
 };
 
 #endif
@@ -839,7 +835,7 @@ static int tty3215_open(struct tty_struct *tty, struct file * filp)
 		memset(raw, 0, sizeof(raw3215_info));
 		raw->buffer = (char *) kmalloc(RAW3215_BUFFER_SIZE, GFP_KERNEL);
 		if (raw->buffer == NULL) {
-			kfree_s(raw, sizeof(raw3215_info));
+			kfree(raw);
 			return -ENOMEM;
 		}
 		raw->tqueue.routine = raw3215_softint;

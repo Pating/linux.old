@@ -19,6 +19,8 @@
 
 #include <asm/uaccess.h>
 #include <asm/irq.h>
+#include <asm/mach-types.h>
+
 #define __NWBUTTON_C		/* Tell the header file who we are */
 #include "nwbutton.h"
 
@@ -172,34 +174,6 @@ static int button_read (struct file *filp, char *buffer,
 		 ? -EFAULT : bcount;
 }
 
-/*
- * This function is called when a user space process attempts to open the
- * device. If the driver is compiled into the kernel it does nothing but
- * succeed, but if it is compiled in as a module it also increments the
- * module usage count to prevent the module from being removed whilst a
- * process has the device open.
- */
-
-static int button_open (struct inode *inode, struct file *filp)
-{
-	MOD_INC_USE_COUNT;
-	return 0;
-}
-
-/*
- * This function is called when a user space process attempts to close the
- * device. If the driver is compiled into the kernel it does nothing at all,
- * but if it is compiled in as a module it also decrements the module usage
- * count so that it will be possible to unload the module again once all the
- * user processes have closed the device.
- */
-
-static int button_release (struct inode *inode, struct file *filp)
-{
-	MOD_DEC_USE_COUNT;
-	return 0;
-}
-
 /* 
  * This structure is the file operations structure, which specifies what
  * callbacks functions the kernel should call when a user mode process
@@ -207,9 +181,8 @@ static int button_release (struct inode *inode, struct file *filp)
  */
 
 static struct file_operations button_fops = {
+	owner:		THIS_MODULE,
 	read:		button_read,
-	open:		button_open,
-	release:	button_release,
 };
 
 /* 

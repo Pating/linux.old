@@ -65,7 +65,9 @@ static struct dentry * ramfs_lookup(struct inode *dir, struct dentry *dentry)
 static int ramfs_readpage(struct file *file, struct page * page)
 {
 	if (!Page_Uptodate(page)) {
-		memset((void *) page_address(page), 0, PAGE_CACHE_SIZE);
+		memset(kmap(page), 0, PAGE_CACHE_SIZE);
+		kunmap(page);
+		flush_dcache_page(page);
 		SetPageUptodate(page);
 	}
 	UnlockPage(page);
@@ -76,7 +78,7 @@ static int ramfs_readpage(struct file *file, struct page * page)
  * Writing: just make sure the page gets marked dirty, so that
  * the page stealer won't grab it.
  */
-static int ramfs_writepage(struct file *file, struct page *page)
+static int ramfs_writepage(struct page *page)
 {
 	SetPageDirty(page);
 	return 0;
@@ -84,11 +86,10 @@ static int ramfs_writepage(struct file *file, struct page *page)
 
 static int ramfs_prepare_write(struct file *file, struct page *page, unsigned offset, unsigned to)
 {
-	void *addr;
-
-	addr = (void *) kmap(page);
+	void *addr = kmap(page);
 	if (!Page_Uptodate(page)) {
 		memset(addr, 0, PAGE_CACHE_SIZE);
+		flush_dcache_page(page);
 		SetPageUptodate(page);
 	}
 	SetPageDirty(page);
@@ -97,7 +98,7 @@ static int ramfs_prepare_write(struct file *file, struct page *page, unsigned of
 
 static int ramfs_commit_write(struct file *file, struct page *page, unsigned offset, unsigned to)
 {
-	struct inode *inode = (struct inode*)page->mapping->host;
+	struct inode *inode = page->mapping->host;
 	loff_t pos = ((loff_t)page->index << PAGE_CACHE_SHIFT) + to;
 
 	kunmap(page);
@@ -108,21 +109,15 @@ static int ramfs_commit_write(struct file *file, struct page *page, unsigned off
 
 struct inode *ramfs_get_inode(struct super_block *sb, int mode, int dev)
 {
-	struct inode * inode = get_empty_inode();
+	struct inode * inode = new_inode(sb);
 
 	if (inode) {
-		inode->i_sb = sb;
-		inode->i_dev = sb->s_dev;
 		inode->i_mode = mode;
 		inode->i_uid = current->fsuid;
 		inode->i_gid = current->fsgid;
-		inode->i_size = 0;
 		inode->i_blksize = PAGE_CACHE_SIZE;
 		inode->i_blocks = 0;
-		inode->i_rdev = dev;
-		inode->i_nlink = 1;
-		inode->i_op = NULL;
-		inode->i_fop = NULL;
+		inode->i_rdev = to_kdev_t(dev);
 		inode->i_mapping->a_ops = &ramfs_aops;
 		inode->i_atime = inode->i_mtime = inode->i_ctime = CURRENT_TIME;
 		switch (mode & S_IFMT) {
@@ -181,7 +176,7 @@ static int ramfs_link(struct dentry *old_dentry, struct inode * dir, struct dent
 		return -EPERM;
 
 	inode->i_nlink++;
-	inode->i_count++;	/* New dentry reference */
+	atomic_inc(&inode->i_count);	/* New dentry reference */
 	dget(dentry);		/* Extra pinning count for the created dentry */
 	d_instantiate(dentry, inode);
 	return 0;
@@ -202,15 +197,21 @@ static inline int ramfs_positive(struct dentry *dentry)
  */
 static int ramfs_empty(struct dentry *dentry)
 {
-	struct list_head *list = dentry->d_subdirs.next;
+	struct list_head *list;
+
+	spin_lock(&dcache_lock);
+	list = dentry->d_subdirs.next;
 
 	while (list != &dentry->d_subdirs) {
 		struct dentry *de = list_entry(list, struct dentry, d_child);
 
-		if (ramfs_positive(de))
+		if (ramfs_positive(de)) {
+			spin_unlock(&dcache_lock);
 			return 0;
+		}
 		list = list->next;
 	}
+	spin_unlock(&dcache_lock);
 	return 1;
 }
 
@@ -268,6 +269,11 @@ static int ramfs_symlink(struct inode * dir, struct dentry *dentry, const char *
 	return error;
 }
 
+static int ramfs_sync_file(struct file * file, struct dentry *dentry, int datasync)
+{
+	return 0;
+}
+
 static struct address_space_operations ramfs_aops = {
 	readpage:	ramfs_readpage,
 	writepage:	ramfs_writepage,
@@ -278,12 +284,14 @@ static struct address_space_operations ramfs_aops = {
 static struct file_operations ramfs_file_operations = {
 	read:		generic_file_read,
 	write:		generic_file_write,
-	mmap:		generic_file_mmap
+	mmap:		generic_file_mmap,
+	fsync:		ramfs_sync_file,
 };
 
 static struct file_operations ramfs_dir_operations = {
 	read:		generic_read_dir,
 	readdir:	dcache_readdir,
+	fsync:		ramfs_sync_file,
 };
 
 static struct inode_operations ramfs_dir_inode_operations = {
@@ -298,15 +306,9 @@ static struct inode_operations ramfs_dir_inode_operations = {
 	rename:		ramfs_rename,
 };
 
-static void ramfs_put_super(struct super_block *sb)
-{
-	d_genocide(sb->s_root);
-	shrink_dcache_parent(sb->s_root);
-}
-
 static struct super_operations ramfs_ops = {
-	put_super:	ramfs_put_super,
 	statfs:		ramfs_statfs,
+	put_inode:	force_delete,
 };
 
 static struct super_block *ramfs_read_super(struct super_block * sb, void * data, int silent)
@@ -331,7 +333,7 @@ static struct super_block *ramfs_read_super(struct super_block * sb, void * data
 	return sb;
 }
 
-static DECLARE_FSTYPE(ramfs_fs_type, "ramfs", ramfs_read_super, 0);
+static DECLARE_FSTYPE(ramfs_fs_type, "ramfs", ramfs_read_super, FS_LITTER);
 
 static int __init init_ramfs_fs(void)
 {

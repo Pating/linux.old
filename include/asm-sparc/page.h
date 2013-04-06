@@ -1,4 +1,4 @@
-/* $Id: page.h,v 1.52 2000/03/28 06:07:25 anton Exp $
+/* $Id: page.h,v 1.55 2000/10/30 21:01:41 davem Exp $
  * page.h:  Various defines and such for MMU operations on the Sparc for
  *          the Linux kernel.
  *
@@ -32,7 +32,12 @@
 
 #ifndef __ASSEMBLY__
 
-#if (__GNUC__ > 2) || (__GNUC__ == 2 && __GNUC_MINOR__ >= 8)
+/*
+ * XXX I am hitting compiler bugs with __builtin_trap. This has
+ * hit me before and rusty was blaming his netfilter bugs on
+ * this so lets disable it. - Anton
+ */
+#if 0
 /* We need the mb()'s so we don't trigger a compiler bug - Anton */
 #define BUG() do { \
 	mb(); \
@@ -171,7 +176,8 @@ extern __inline__ int get_order(unsigned long size)
 #define PAGE_OFFSET	0xf0000000
 #define __pa(x)                 ((unsigned long)(x) - PAGE_OFFSET)
 #define __va(x)                 ((void *)((unsigned long) (x) + PAGE_OFFSET))
-#define MAP_NR(addr)            (__pa(addr) >> PAGE_SHIFT)
+#define virt_to_page(kaddr)	(mem_map + (__pa(kaddr) >> PAGE_SHIFT))
+#define VALID_PAGE(page)	((page - mem_map) < max_mapnr)
 
 #endif /* __KERNEL__ */
 

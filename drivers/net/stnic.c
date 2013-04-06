@@ -20,6 +20,7 @@
 #include <asm/system.h>
 #include <asm/io.h>
 #include <asm/hitachi_se.h>
+#include <asm/machvec.h>
 
 #include "8390.h"
 
@@ -94,17 +95,18 @@ STNIC_WRITE (int reg, byte val)
 
 int __init stnic_probe(void)
 {
-  struct net_device tmp, *dev = NULL;
+  struct net_device *dev;
   int i;
 
-  tmp.base_addr = 0x1000;
-  dev = &tmp;
-
-  if (load_8390_module ("stnic.c"))
-    return -ENOSYS;
+  /* If we are not running on a SolutionEngine, give up now */
+  if (! MACH_SE)
+    return -ENODEV;
 
   /* New style probing API */
-  dev = init_etherdev (0, 0);
+  dev = init_etherdev (NULL, 0);
+  if (!dev)
+  	return -ENOMEM;
+  SET_MODULE_OWNER(dev);
   stnic_dev = dev;
 
   /* Allocate dev->priv and fill in 8390 specific dev fields. */
@@ -125,15 +127,16 @@ int __init stnic_probe(void)
 
   /* Snarf the interrupt now.  There's no point in waiting since we cannot
      share and the board will usually be enabled. */
-  if (request_irq (dev->irq, ei_interrupt, 0, "DP83902A", dev))
-    {
+  i = request_irq (dev->irq, ei_interrupt, 0, dev->name, dev);
+  if (i)  {
       printk (" unable to get IRQ %d.\n", dev->irq);
+      unregister_netdev(dev);
       kfree(dev->priv);
-      dev->priv = NULL;
-      return EAGAIN;
+      kfree(dev);
+      return i;
     }
 
-  ei_status.name = "eth0";
+  ei_status.name = dev->name;
   ei_status.word16 = 1;
   ei_status.tx_start_page = START_PG;
   ei_status.rx_start_page = START_PG + TX_PAGES;
@@ -157,7 +160,6 @@ stnic_open (struct net_device *dev)
   printk ("stnic open\n");
 #endif
   ei_open (dev);
-  MOD_INC_USE_COUNT;
   return 0;
 }
 
@@ -165,7 +167,6 @@ static int
 stnic_close (struct net_device *dev)
 {
   ei_close (dev);
-  MOD_DEC_USE_COUNT;
   return 0;
 }
 
@@ -175,7 +176,7 @@ stnic_reset (struct net_device *dev)
   *(vhalf *) PA_83902_RST = 0;
   udelay (5);
   if (ei_debug > 1)
-    printk("8390 reset done (%ld).", jiffies);
+    printk("8390 reset done (%ld).\n", jiffies);
   *(vhalf *) PA_83902_RST = ~0;
   udelay (5);
 }
@@ -253,9 +254,17 @@ static void
 stnic_block_output (struct net_device *dev, int length,
 		    const unsigned char *buf, int output_page)
 {
-
+#if 0
   STNIC_WRITE (PG0_RBCR0, 1);
   STNIC_WRITE (STNIC_CR, CR_RRD | CR_PG0 | CR_STA);
+#else  /* XXX: I don't know why but this works.  -- gniibe  */
+  STNIC_WRITE (PG0_RBCR0, 0x42);
+  STNIC_WRITE (PG0_RBCR1, 0x00);
+  STNIC_WRITE (PG0_RBCR0, 0x42);
+  STNIC_WRITE (PG0_RBCR1, 0x00);
+  STNIC_WRITE (STNIC_CR, CR_RRD | CR_PG0 | CR_STA);
+  STNIC_DELAY ();
+#endif
 
   STNIC_WRITE (PG0_RSAR0, 0);
   STNIC_WRITE (PG0_RSAR1, output_page);
@@ -300,3 +309,4 @@ do_stnic_intr (int irq, void *dev_id, struct pt_regs *regs)
 }
 
 module_init(stnic_probe);
+/* No cleanup routine. */

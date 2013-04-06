@@ -1,6 +1,7 @@
 /*
  * include/asm-ppc/cache.h
  */
+#ifdef __KERNEL__
 #ifndef __ARCH_PPC_CACHE_H
 #define __ARCH_PPC_CACHE_H
 
@@ -9,7 +10,11 @@
 
 /* bytes per L1 cache line */
 #if !defined(CONFIG_8xx) || defined(CONFIG_8260)
+#if defined(CONFIG_PPC64BRIDGE)
+#define L1_CACHE_BYTES	128
+#else
 #define	L1_CACHE_BYTES  32
+#endif /* PPC64 */
 #else
 #define	L1_CACHE_BYTES	16
 #endif /* !8xx || 8260 */
@@ -79,3 +84,4 @@ extern void flush_dcache_range(unsigned long start, unsigned long stop);
 #endif /* CONFIG_8xx */
 
 #endif
+#endif /* __KERNEL__ */

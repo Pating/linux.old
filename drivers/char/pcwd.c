@@ -63,6 +63,7 @@
 #include <linux/init.h>
 #include <linux/proc_fs.h>
 #include <linux/spinlock.h>
+#include <linux/smp_lock.h>
 
 #include <asm/uaccess.h>
 #include <asm/io.h>
@@ -414,7 +415,6 @@ static int pcwd_open(struct inode *ino, struct file *filep)
                     is_open = 1;
                     return(0);
                 case TEMP_MINOR:
-                    MOD_INC_USE_COUNT;
                     return(0);
                 default:
                     return (-ENODEV);
@@ -450,9 +450,9 @@ static ssize_t pcwd_read(struct file *file, char *buf, size_t count,
 
 static int pcwd_close(struct inode *ino, struct file *filep)
 {
-	MOD_DEC_USE_COUNT;
 	if (MINOR(ino->i_rdev)==WATCHDOG_MINOR)
 	{
+		lock_kernel();
 	        is_open = 0;
 #ifndef CONFIG_WATCHDOG_NOWAYOUT
 		/*  Disable the board  */
@@ -462,6 +462,7 @@ static int pcwd_close(struct inode *ino, struct file *filep)
 			outb_p(0xA5, current_readport + 3);
 			spin_unlock(&io_lock);
 		}
+		unlock_kernel();
 #endif
 	}
 	return 0;
@@ -543,6 +544,7 @@ static void debug_off(void)
 }
 
 static struct file_operations pcwd_fops = {
+	owner:		THIS_MODULE,
 	read:		pcwd_read,
 	write:		pcwd_write,
 	ioctl:		pcwd_ioctl,
@@ -562,11 +564,7 @@ static struct miscdevice temp_miscdev = {
 	&pcwd_fops
 };
  
-#ifdef	MODULE
-int init_module(void)
-#else
-int __init pcwatchdog_init(void)
-#endif
+static int __init pcwatchdog_init(void)
 {
 	int i, found = 0;
 	spin_lock_init(&io_lock);
@@ -642,8 +640,7 @@ int __init pcwatchdog_init(void)
 	return 0;
 }
 
-#ifdef	MODULE
-void cleanup_module(void)
+static void __exit pcwatchdog_exit(void)
 {
 	/*  Disable the board  */
 	if (revision == PCWD_REVISION_C) {
@@ -656,4 +653,6 @@ void cleanup_module(void)
 
 	release_region(current_readport, (revision == PCWD_REVISION_A) ? 2 : 4);
 }
-#endif
+
+module_init(pcwatchdog_init);
+module_exit(pcwatchdog_exit);
