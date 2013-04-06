@@ -1,4 +1,4 @@
-/* $Id: irq.h,v 1.15 1997/04/14 05:39:28 davem Exp $
+/* $Id: irq.h,v 1.17 1997/04/18 05:44:52 davem Exp $
  * irq.h: IRQ registers on the Sparc.
  *
  * Copyright (C) 1995 David S. Miller (davem@caip.rutgers.edu)
@@ -13,6 +13,38 @@
 
 #define NR_IRQS    15
 
+/* IRQ handler dispatch entry and exit. */
+#ifdef __SMP__
+extern __inline__ void irq_enter(int cpu, int irq)
+{
+	register int proc asm("g1");
+	proc = cpu;
+	__asm__ __volatile__("
+	mov	%%o7, %%g4
+	call	___irq_enter
+	 add	%%o7, 8, %%o7
+"	: "=&r" (proc)
+	: "0" (proc)
+	: "g2", "g3", "g4", "g5", "memory", "cc");
+}
+
+extern __inline__ void irq_exit(int cpu, int irq)
+{
+	register int proc asm("g7");
+	proc = cpu;
+	__asm__ __volatile__("
+	mov	%%o7, %%g4
+	call	___irq_exit
+	 add	%%o7, 8, %%o7
+"	: "=&r" (proc)
+	: "0" (proc)
+	: "g1", "g2", "g3", "g4", "g5", "memory", "cc");
+}
+#else
+#define irq_enter(cpu, irq)	(local_irq_count[cpu]++)
+#define irq_exit(cpu, irq)	(local_irq_count[cpu]--)
+#endif
+
 /* Dave Redman (djhr@tadpole.co.uk)
  * changed these to function pointers.. it saves cycles and will allow
  * the irq dependencies to be split into different files at a later date
@@ -22,9 +54,9 @@ extern void (*disable_irq)(unsigned int);
 extern void (*enable_irq)(unsigned int);
 extern void (*disable_pil_irq)(unsigned int);
 extern void (*enable_pil_irq)(unsigned int);
-extern void (*clear_clock_irq)( void );
-extern void (*clear_profile_irq)( void );
-extern void (*load_profile_irq)( unsigned int timeout );
+extern void (*clear_clock_irq)(void);
+extern void (*clear_profile_irq)(int);
+extern void (*load_profile_irq)(int cpu, unsigned int timeout);
 extern void (*init_timers)(void (*lvl10_irq)(int, void *, struct pt_regs *));
 extern void claim_ticker14(void (*irq_handler)(int, void *, struct pt_regs *),
 			   int irq,

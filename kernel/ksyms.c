@@ -20,6 +20,7 @@
 #include <linux/kernel_stat.h>
 #include <linux/mm.h>
 #include <linux/malloc.h>
+#include <linux/slab.h>
 #include <linux/vmalloc.h>
 #include <linux/ptrace.h>
 #include <linux/sys.h>
@@ -76,6 +77,9 @@ extern char *get_options(char *str, int *ints);
 extern void set_device_ro(int dev,int flag);
 extern struct file_operations * get_blkfops(unsigned int);
 extern int blkdev_release(struct inode * inode);
+#if !defined(CONFIG_NFSD) && defined(CONFIG_NFSD_MODULE)
+extern int (*do_nfsservctl)(int, void *, void *);
+#endif
 
 extern void *sys_call_table;
 
@@ -130,6 +134,10 @@ EXPORT_SYMBOL(max_mapnr);
 EXPORT_SYMBOL(num_physpages);
 EXPORT_SYMBOL(high_memory);
 EXPORT_SYMBOL(update_vm_cache);
+EXPORT_SYMBOL(kmem_cache_create);
+EXPORT_SYMBOL(kmem_cache_destroy);
+EXPORT_SYMBOL(kmem_cache_alloc);
+EXPORT_SYMBOL(kmem_cache_free);
 
 /* filesystem internal functions */
 EXPORT_SYMBOL(getname);
@@ -173,6 +181,10 @@ EXPORT_SYMBOL(posix_lock_file);
 EXPORT_SYMBOL(posix_test_lock);
 EXPORT_SYMBOL(posix_block_lock);
 EXPORT_SYMBOL(posix_unblock_lock);
+
+#if !defined(CONFIG_NFSD) && defined(CONFIG_NFSD_MODULE)
+EXPORT_SYMBOL(do_nfsservctl);
+#endif
 
 /* device registration */
 EXPORT_SYMBOL(register_chrdev);
@@ -258,7 +270,10 @@ EXPORT_SYMBOL(tq_immediate);
 EXPORT_SYMBOL(tq_scheduler);
 EXPORT_SYMBOL(timer_active);
 EXPORT_SYMBOL(timer_table);
+
 #ifdef __SMP__
+/* Various random spinlocks we want to export */
+EXPORT_SYMBOL(tqueue_lock);
 EXPORT_SYMBOL(waitqueue_lock);
 #endif
 

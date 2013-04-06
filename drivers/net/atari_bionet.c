@@ -80,12 +80,7 @@
 static char *version =
 	"bionet.c:v1.0 06-feb-96 (c) Hartmut Laue.\n";
 
-#ifdef MODULE
 #include <linux/module.h>
-#else
-#define MOD_INC_USE_COUNT
-#define MOD_DEC_USE_COUNT
-#endif
 
 #include <linux/errno.h>
 #include <linux/kernel.h>
@@ -100,6 +95,7 @@ static char *version =
 #include <linux/string.h>
 #include <linux/delay.h>
 #include <linux/timer.h>
+#include <linux/init.h>
 
 #include <linux/netdevice.h>
 #include <linux/etherdevice.h>
@@ -326,8 +322,8 @@ end:
 
 /* Check for a network adaptor of this type, and return '0' if one exists.
  */
-int
-bionet_probe(struct device *dev) {
+__initfunc(int
+bionet_probe(struct device *dev)) {
 	unsigned char station_addr[6];
 	static unsigned version_printed = 0;
 	static int no_more_found = 0; /* avoid "Probing for..." printed 4 times */
@@ -596,22 +592,13 @@ static struct net_device_stats *net_get_stats(struct device *dev)
 
 #ifdef MODULE
 
-#include <linux/version.h>
-
-/* We should include the kernel identification string in the module.
- */
-static char kernel_version[] = UTS_RELEASE;
-
-#undef	NEXT_DEV
-#define NEXT_DEV	(&bio_dev)
-
 static char bio_name[16];
 static struct device bio_dev =
 	{
 		bio_name,	/* filled in by register_netdev() */
 		0, 0, 0, 0,	/* memory */
 		0, 0,		/* base, irq */
-		0, 0, 0, NEXT_DEV, bionet_probe,
+		0, 0, 0, NULL, bionet_probe,
 	};
 
 int

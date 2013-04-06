@@ -79,6 +79,7 @@
 #include <linux/stat.h>
 #include <net/br.h>
 #include <linux/net_alias.h>
+#include <linux/init.h>
 #ifdef CONFIG_KERNELD
 #include <linux/kerneld.h>
 #endif
@@ -122,7 +123,7 @@ struct packet_type *ptype_all = NULL;		/* Taps */
  *	Device list lock
  */
  
-atomic_t dev_lockct = ATOMIC_INIT;
+atomic_t dev_lockct = ATOMIC_INIT(0);
  
 /*
  *	Our notifier list
@@ -479,10 +480,6 @@ static void do_dev_queue_xmit(struct sk_buff *skb, struct device *dev, int pri)
 				/* at the front or the back of the	*/
 				/* queue - front is a retransmit try	*/
 
-#if CONFIG_SKB_CHECK 
-	IS_SKB(skb);
-#endif    
-
 	/*
 	 *	Negative priority is used to flag a frame that is being pulled from the
 	 *	queue front as a retransmit attempt. It therefore goes back on the queue
@@ -575,10 +572,6 @@ int dev_queue_xmit(struct sk_buff *skb)
 	struct device *dev = skb->dev;
 
 	start_bh_atomic();
-
-#if CONFIG_SKB_CHECK 
-	IS_SKB(skb);
-#endif    
 
 	/*
 	 *	If the address has not been resolved. Call the device header rebuilder.
@@ -676,9 +669,7 @@ void netif_rx(struct sk_buff *skb)
 	/*
 	 *	Add it to the "backlog" queue. 
 	 */
-#if CONFIG_SKB_CHECK
-	IS_SKB(skb);
-#endif	
+
 	skb_queue_tail(&backlog,skb);
 	backlog_size++;
   
@@ -1578,7 +1569,7 @@ static struct proc_dir_entry proc_net_wireless = {
 #endif	/* CONFIG_PROC_FS */
 #endif	/* CONFIG_NET_RADIO */
 
-int net_dev_init(void)
+__initfunc(int net_dev_init(void))
 {
 	struct device *dev, **dp;
 

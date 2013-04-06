@@ -1,4 +1,4 @@
-/* $Id: time.c,v 1.27 1997/04/14 05:38:31 davem Exp $
+/* $Id: time.c,v 1.29 1997/04/18 09:48:44 davem Exp $
  * linux/arch/sparc/kernel/time.c
  *
  * Copyright (C) 1995 David S. Miller (davem@caip.rutgers.edu)
@@ -54,11 +54,6 @@ void timer_interrupt(int irq, void *dev_id, struct pt_regs * regs)
 	    last_rtc_update = xtime.tv_sec;
 	  else
 	    last_rtc_update = xtime.tv_sec - 600; /* do it again in 60 s */
-
-#ifdef __SMP__
-	/* I really think it should not be done this way... -DaveM */
-	smp_message_pass(MSG_ALL_BUT_SELF, MSG_RESCHEDULE, 0L, 0);
-#endif
 }
 
 /* Converts Gregorian date to seconds since 1970-01-01 00:00:00.
@@ -313,11 +308,11 @@ void do_gettimeofday(struct timeval *tv)
 	xor	%o5, %o3, %o3
 	orcc	%o2, %o3, %g0
 	bne	1b
-	 subcc	%o1, 0x0, %g0
-	bpos	1f
+	 cmp	%o1, 0
+	bge	1f
 	 srl	%o1, 0xa, %o1
-	sethi	%hi(0x2710), %o3
-	or	%o3, %lo(0x2710), %o3
+	sethi	%hi(tick), %o3
+	ld	[%o3 + %lo(tick)], %o3
 	sethi	%hi(0x1fffff), %o2
 	or	%o2, %lo(0x1fffff), %o2
 	add	%o5, %o3, %o5

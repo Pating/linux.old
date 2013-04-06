@@ -27,6 +27,7 @@
 #include <linux/netdevice.h>
 #include <linux/etherdevice.h>
 #include <linux/skbuff.h>
+#include <linux/init.h>
 
 #include <asm/bitops.h>
 #include <asm/io.h>
@@ -34,7 +35,7 @@
 
 #include <asm/amigaints.h>
 #include <asm/amigahw.h>
-#include <asm/zorro.h>
+#include <linux/zorro.h>
 
 #include "hydra.h"
 
@@ -156,7 +157,7 @@ static void memcpyw(u16 *dest, u16 *src, int len)
 
 #endif
 
-int hydra_probe(struct device *dev)
+__initfunc(int hydra_probe(struct device *dev))
 {
 	struct hydra_private *priv;
 	u32 board;
@@ -193,7 +194,9 @@ int hydra_probe(struct device *dev)
 			dev->stop = &hydra_close;
 			dev->hard_start_xmit = &hydra_start_xmit;
 			dev->get_stats = &hydra_get_stats;
-	 		dev->set_multicast_list = &hydra_set_multicast_list;
+#ifdef HAVE_MULTICAST
+	 		dev->set_multicast_list = &set_multicast_list;
+#endif
 	 		
 	 		/*
 	 		 *	Cannot yet do multicast
@@ -643,6 +646,7 @@ static struct net_device_stats *hydra_get_stats(struct device *dev)
 	return(&priv->stats);
 }
 
+#ifdef HAVE_MULTICAST
 static void set_multicast_list(struct device *dev, int num_addrs, void *addrs)
 {
 	struct hydra_private *priv = (struct hydra_private *)dev->priv;
@@ -652,6 +656,7 @@ static void set_multicast_list(struct device *dev, int num_addrs, void *addrs)
 	/* (personally i don't care about multicasts at all :) */
 	return;
 }
+#endif
 
 
 #ifdef MODULE

@@ -20,6 +20,7 @@
 #include <linux/mm.h>
 #include <linux/random.h>
 #include <linux/poll.h>
+#include <linux/init.h>
 
 #include <asm/setup.h>
 #include <asm/atarikb.h>
@@ -27,7 +28,8 @@
 #include <asm/uaccess.h>
 
 static struct mouse_status mouse;
-static int atari_mouse_x_threshold = 2, atari_mouse_y_threshold = 2;
+static int mouse_threshold[2] = {2,2};
+MODULE_PARM(mouse_threshold, "2i");
 extern int atari_mouse_buttons;
 
 static void atari_mouse_interrupt(char *buf)
@@ -82,7 +84,7 @@ static int open_mouse(struct inode *inode, struct file *file)
     mouse.dx = mouse.dy = 0;
     atari_mouse_buttons = 0;
     ikbd_mouse_y0_top ();
-    ikbd_mouse_thresh (atari_mouse_x_threshold, atari_mouse_y_threshold);
+    ikbd_mouse_thresh (mouse_threshold[0], mouse_threshold[1]);
     ikbd_mouse_rel_pos();
     MOD_INC_USE_COUNT;
     atari_mouse_interrupt_hook = atari_mouse_interrupt;
@@ -99,12 +101,9 @@ static long read_mouse(struct inode *inode, struct file *file,
 		       char *buffer, unsigned long count)
 {
     int dx, dy, buttons;
-    int r;
 
     if (count < 3)
 	return -EINVAL;
-    if ((r = verify_area(VERIFY_WRITE, buffer, count)))
-	return r;
     if (!mouse.ready)
 	return -EAGAIN;
     /* ikbd_mouse_disable */
@@ -124,12 +123,14 @@ static long read_mouse(struct inode *inode, struct file *file,
     if (mouse.dx == 0 && mouse.dy == 0)
       mouse.ready = 0;
     /* ikbd_mouse_rel_pos(); */
-    put_user(buttons | 0x80, buffer);
-    put_user((char) dx, buffer + 1);
-    put_user((char) dy, buffer + 2);
-    for (r = 3; r < count; r++)
-      put_user (0, buffer + r);
-    return r;
+    if (put_user(buttons | 0x80, buffer++) ||
+	put_user((char) dx, buffer++) ||
+	put_user((char) dy, buffer++))
+	return -EFAULT;
+    if (count > 3)
+	if (clear_user(buffer, count - 3))
+	    return -EFAULT;
+    return count;
 }
 
 static unsigned int mouse_poll(struct file *file, poll_table *wait)
@@ -158,7 +159,7 @@ static struct miscdevice atari_mouse = {
     ATARIMOUSE_MINOR, "atarimouse", &atari_mouse_fops
 };
 
-int atari_mouse_init(void)
+__initfunc(int atari_mouse_init(void))
 {
     mouse.active = 0;
     mouse.ready = 0;
@@ -188,13 +189,13 @@ void atari_mouse_setup( char *str, int *ints )
     if (ints[1] < MIN_THRESHOLD || ints[1] > MAX_THRESHOLD)
 	printk( "atari_mouse_setup: bad threshold value (ignored)\n" );
     else {
-	atari_mouse_x_threshold = ints[1];
-	atari_mouse_y_threshold = ints[1];
+	mouse_threshold[0] = ints[1];
+	mouse_threshold[1] = ints[1];
 	if (ints[0] > 1) {
 	    if (ints[2] < MIN_THRESHOLD || ints[2] > MAX_THRESHOLD)
 		printk("atari_mouse_setup: bad threshold value (ignored)\n" );
 	    else
-		atari_mouse_y_threshold = ints[2];
+		mouse_threshold[1] = ints[2];
 	}
     }
 	

@@ -1,4 +1,4 @@
-/* $Id: plip.c,v 1.1.1.1.2.6 1997/03/26 17:52:20 phil Exp $ */
+/* $Id: plip.c,v 1.3.6.2 1997/04/16 15:07:56 phil Exp $ */
 /* PLIP: A parallel port "network" driver for Linux. */
 /* This driver is for parallel port with 5-bit cable (LapLink (R) cable). */
 /*
@@ -95,6 +95,7 @@ static const char *version = "NET3 PLIP version 2.2-parport gniibe@mri.co.jp\n";
 #include <linux/errno.h>
 #include <linux/delay.h>
 #include <linux/lp.h>
+#include <linux/init.h>
 
 #include <linux/netdevice.h>
 #include <linux/etherdevice.h>
@@ -223,8 +224,8 @@ struct net_local {
    then calls us here.
 
    */
-int
-plip_init_dev(struct device *dev, struct parport *pb)
+__initfunc(int
+plip_init_dev(struct device *dev, struct parport *pb))
 {
 	struct net_local *nl;
 	struct ppd *pardev;
@@ -1190,8 +1191,8 @@ plip_searchfor(int list[], int a)
 	return 0;
 }
 
-int
-plip_init(void)
+__initfunc(int
+plip_init(void))
 {
 	struct parport *pb = parport_enumerate();
 	int devices=0;

@@ -46,7 +46,7 @@
 
 static struct ipq *ipqueue = NULL;		/* IP fragment queue	*/
 
-atomic_t ip_frag_mem = ATOMIC_INIT;		/* Memory used for fragments */
+atomic_t ip_frag_mem = ATOMIC_INIT(0);		/* Memory used for fragments */
 
 char *in_ntoa(unsigned long in);
 
@@ -177,7 +177,6 @@ static void ip_free(struct ipq *qp)
 	while (fp != NULL)
 	{
 		xp = fp->next;
-		IS_SKB(fp->skb);
 		frag_kfree_skb(fp->skb,FREE_READ);
 		frag_kfree_s(fp, sizeof(struct ipfrag));
 		fp = xp;
