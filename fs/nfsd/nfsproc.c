@@ -264,7 +264,7 @@ nfsd_proc_create(struct svc_rqst *rqstp, struct nfsd_createargs *argp,
 		goto out_unlock;
 
 	attr->ia_valid |= ATTR_MODE;
-	attr->ia_mode = type | mode;
+	attr->ia_mode = mode;
 
 	/* Special treatment for non-regular files according to the
 	 * gospel of sun micro
@@ -278,7 +278,6 @@ nfsd_proc_create(struct svc_rqst *rqstp, struct nfsd_createargs *argp,
 			rdev = 0;
 		} else if (type == S_IFCHR && !(attr->ia_valid & ATTR_SIZE)) {
 			/* If you think you've seen the worst, grok this. */
-			attr->ia_mode = S_IFIFO | mode;
 			type = S_IFIFO;
 		} else if (size != rdev) {
 			/* dev got truncated because of 16bit Linux dev_t */
@@ -390,7 +389,8 @@ nfsd_proc_symlink(struct svc_rqst *rqstp, struct nfsd_symlinkargs *argp,
 	 */
 	nfserr = nfsd_symlink(rqstp, &argp->ffh, argp->fname, argp->flen,
 						 argp->tname, argp->tlen,
-						 &newfh);
+				 		 &newfh, &argp->attrs);
+
 	if (!nfserr) {
 		argp->attrs.ia_valid &= ~ATTR_SIZE;
 		nfserr = nfsd_setattr(rqstp, &newfh, &argp->attrs);
@@ -469,7 +469,8 @@ nfsd_proc_readdir(struct svc_rqst *rqstp, struct nfsd_readdirargs *argp,
 
 	/* Read directory and encode entries on the fly */
 	nfserr = nfsd_readdir(rqstp, &argp->fh, (loff_t) argp->cookie, 
-				nfssvc_encode_entry, buffer, &count);
+			      nfssvc_encode_entry,
+			      buffer, &count, NULL);
 	resp->count = count;
 
 	fh_put(&argp->fh);
@@ -549,6 +550,8 @@ nfserrno (int errno)
 		{ NFSERR_NXIO, ENXIO },
 		{ NFSERR_ACCES, EACCES },
 		{ NFSERR_EXIST, EEXIST },
+		{ NFSERR_XDEV, EXDEV },
+		{ NFSERR_MLINK, EMLINK },
 		{ NFSERR_NODEV, ENODEV },
 		{ NFSERR_NOTDIR, ENOTDIR },
 		{ NFSERR_ISDIR, EISDIR },
@@ -556,6 +559,7 @@ nfserrno (int errno)
 		{ NFSERR_FBIG, EFBIG },
 		{ NFSERR_NOSPC, ENOSPC },
 		{ NFSERR_ROFS, EROFS },
+		{ NFSERR_MLINK, EMLINK },
 		{ NFSERR_NAMETOOLONG, ENAMETOOLONG },
 		{ NFSERR_NOTEMPTY, ENOTEMPTY },
 #ifdef EDQUOT

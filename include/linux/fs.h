@@ -62,6 +62,7 @@ extern int max_super_blocks, nr_super_blocks;
 #define READ 0
 #define WRITE 1
 #define READA 2		/* read-ahead  - don't block if no resources */
+#define SPECIAL 4	/* For non-blockdevice requests in request queue */
 
 #define WRITERAW 5	/* raw write - don't play with buffer lists */
 
@@ -946,12 +947,24 @@ extern int block_read_full_page(struct dentry *, struct page *);
 extern int block_write_full_page (struct dentry *, struct page *);
 extern int block_write_partial_page (struct file *, struct page *, unsigned long, unsigned long, const char *);
 extern int block_write_cont_page (struct file *, struct page *, unsigned long, unsigned long, const char *);
+extern int block_write_zero_range(struct inode *, struct page *, unsigned, unsigned, unsigned, const char *);
+extern inline int block_write_range(struct inode *inode, struct page *page,
+				unsigned from, unsigned len,const char *buf) 
+{
+	return block_write_zero_range(inode, page, from, from, from+len, buf);
+}
 extern int block_flushpage(struct page *, unsigned long);
+extern int block_symlink(struct inode *, const char *, int);
 
 extern int generic_file_mmap(struct file *, struct vm_area_struct *);
 extern ssize_t generic_file_read(struct file *, char *, size_t, loff_t *);
 extern ssize_t generic_file_write(struct file *, const char *, size_t, loff_t *, writepage_t);
-extern void do_generic_file_read(struct file * filp, loff_t *ppos, read_descriptor_t * desc, read_actor_t actor);
+extern void do_generic_file_read(struct file *, loff_t *, read_descriptor_t *, read_actor_t);
+
+extern int vfs_readlink(struct dentry *, char *, int, char *);
+extern struct dentry *vfs_follow_link(struct dentry *, struct dentry *, unsigned, char *);
+extern int page_readlink(struct dentry *, char *, int);
+extern struct dentry *page_follow_link(struct dentry *, struct dentry *, unsigned);
 
 extern struct super_block *get_super(kdev_t);
 struct super_block *get_empty_super(void);
