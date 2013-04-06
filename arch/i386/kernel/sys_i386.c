@@ -24,7 +24,7 @@
 
 /*
  * sys_pipe() is the normal C calling standard for creating
- * a pipe. It's not the way unix traditionally does this, though.
+ * a pipe. It's not the way Unix traditionally does this, though.
  */
 asmlinkage int sys_pipe(unsigned long * fildes)
 {
@@ -63,10 +63,11 @@ asmlinkage int old_mmap(struct mmap_arg_struct *arg)
 	struct file * file = NULL;
 	struct mmap_arg_struct a;
 
+	if (copy_from_user(&a, arg, sizeof(a)))
+		return -EFAULT;
+
 	down(&current->mm->mmap_sem);
 	lock_kernel();
-	if (copy_from_user(&a, arg, sizeof(a)))
-		goto out;
 	if (!(a.flags & MAP_ANONYMOUS)) {
 		error = -EBADF;
 		file = fget(a.fd);

@@ -101,7 +101,7 @@ static inline void remove_mem_queue(struct page * entry)
 spinlock_t page_alloc_lock = SPIN_LOCK_UNLOCKED;
 
 /*
- * This routine is used by the kernel swap deamon to determine
+ * This routine is used by the kernel swap daemon to determine
  * whether we have "enough" free pages. It is fairly arbitrary,
  * but this had better return false if any reasonable "get_free_page()"
  * allocation could currently fail..
@@ -182,9 +182,11 @@ void __free_page(struct page *page)
 		if (PageSwapCache(page))
 			panic ("Freeing swap cache page");
 		free_pages_ok(page->map_nr, 0);
+		return;
 	}
 	if (PageSwapCache(page) && atomic_read(&page->count) == 1)
-		panic ("Releasing swap cache page");
+		printk(KERN_WARNING "VM: Releasing swap cache page at %p",
+			__builtin_return_address(0));
 }
 
 void free_pages(unsigned long addr, unsigned long order)
@@ -202,8 +204,9 @@ void free_pages(unsigned long addr, unsigned long order)
 			return;
 		}
 		if (PageSwapCache(map) && atomic_read(&map->count) == 1)
-			panic ("Releasing swap cache pages at %p",
-			       __builtin_return_address(0));
+			printk(KERN_WARNING 
+				"VM: Releasing swap cache pages at %p",
+				__builtin_return_address(0));
 	}
 }
 

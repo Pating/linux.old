@@ -32,6 +32,7 @@ extern unsigned long event;
 #define CLONE_FILES	0x00000400	/* set if open files shared between processes */
 #define CLONE_SIGHAND	0x00000800	/* set if signal handlers shared */
 #define CLONE_PID	0x00001000	/* set if pid shared */
+#define CLONE_PTRACE	0x00002000	/* set if we want to let tracing continue on the child too */
 
 /*
  * These are the constant used to fake the fixed-point load-average
@@ -350,7 +351,7 @@ struct task_struct {
 /* timeout */	0,SCHED_OTHER,0,0,0,0,0,0,0, \
 /* timer */	{ NULL, NULL, 0, 0, it_real_fn }, \
 /* utime */	{0,0,0,0},0, \
-/* per cpu times */ {0, }, {0, }, \
+/* per CPU times */ {0, }, {0, }, \
 /* flt */	0,0,0,0,0,0, \
 /* swp */	0,0,0,0,0, \
 /* process credentials */					\

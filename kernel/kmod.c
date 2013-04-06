@@ -33,7 +33,8 @@ static char * envp[] = { "HOME=/", "TERM=linux", "PATH=/usr/bin:/bin", NULL };
 #define task_init task[smp_num_cpus]
 
 static inline void
-use_init_file_context(void) {
+use_init_file_context(void)
+{
 	lock_kernel();
 
 	/* don't use the user's root, use init's root instead */
@@ -63,7 +64,7 @@ static int exec_modprobe(void * module_name)
 	spin_unlock_irq(&current->sigmask_lock);
 
 	for (i = 0; i < current->files->max_fds; i++ ) {
-	    if (current->files->fd[i]) close(i);
+		if (current->files->fd[i]) close(i);
 	}
 
 	/* Give kmod all privileges.. */

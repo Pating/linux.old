@@ -5282,20 +5282,6 @@ CONFIG_ETH16I
   module, say M here and read Documentation/modules.txt as well as
   Documentation/networking/net-modules.txt.
 
-PCI NE2000 Support
-CONFIG_NE2K_PCI
-  This driver is for NE2000 compatible PCI cards.  It will not work
-  with ISA NE2000 cards.  If you have a network (Ethernet) card of
-  this type, say Y and read the Ethernet-HOWTO, available via FTP
-  (user: anonymous) in ftp://sunsite.unc.edu/pub/Linux/docs/HOWTO.
-
-  This driver is also available as a module ( = code which can be
-  inserted in and removed from the running kernel whenever you want).
-  The module will be called ne2k-pci.o. If you want to compile it as a
-  module, say M here and read Documentation/modules.txt as well as
-  Documentation/networking/net-modules.txt.
-
-
 TI ThunderLAN support (EXPERIMENTAL)
 CONFIG_TLAN
   If you have a TLAN based network card which is supported by this
@@ -5420,6 +5406,20 @@ CONFIG_IBMTR
   inserted in and removed from the running kernel whenever you want).
   The module will be called ibmtr.o. If you want to compile it as a
   module, say M here and read Documentation/modules.txt.
+
+SysKonnect adapter support
+CONFIG_SKTR
+  This is support for all SysKonnect Token Ring cards. Specificly
+  SysKonnect TR4/16(+) ISA (SK-4190), SysKonnect TR4/16(+) PCI
+  (SK-4590), SysKonnect TR4/16 PCI (SK-4591) adapters.
+
+  If you have such an adapter and would like to use it, say Y or M
+  and read the Token-Ring mini-HOWTO, available via ftp (user:anonymous)
+  from ftp://sunsite.unc.edu/pub/Linux/docs/HOWTO.
+
+  Also read the sktr.txt in linux/Documentation/networking or check
+  the Linux-SNA WWW site for the latest information at
+  http://samba.anu.edu.au/linux-sna/documents/drivers/SysKonnect/
 
 Traffic Shaper (EXPERIMENTAL)
 CONFIG_SHAPER
@@ -9182,6 +9182,34 @@ CONFIG_VIDEO_PMS
   module called pms.o ( = code which can be inserted in and removed
   from the running kernel whenever you want). If you want to compile
   it as a module, say M here and read Documentation/modules.txt.
+
+# drivers/video section
+Open Firmware frame buffer device support 
+CONFIG_FB_OF
+  Say Y if you want support with Open Firmware for your graphics board.
+
+S3 Trio frame buffer device support 
+CONFIG_FB_S3TRIO
+  If you have a S3 Trio say Y. Say N for S3 Virge. 
+
+ATI Mach64 display support
+CONFIG_FB_ATY
+  This driver supports graphics boards with the ATI Mach64 chips.
+
+MDA dual-headed support
+CONFIG_FB_MDA
+  Say Y here if you have an old MDA or monochrome Hercules graphics
+  adapter in your system acting as a second head ( = videocard).  Do 
+  not enable this driver if your MDA card is the primary card in your
+  system; the normal VGA driver will handle it.
+  
+  This driver is also available as a module ( = code which can be
+  inserted and removed from the running kernel whenever you want).
+  The module will be called mdafb.o.  If you want to compile it as
+  a module, say M here and read Documentation/modules.txt.
+  
+  If unsure, say N.
+
 
 CPU Optimisation
 CONFIG_CPU_ARM2
