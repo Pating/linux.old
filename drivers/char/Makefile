@@ -622,6 +622,7 @@ else
 endif
 
 ifeq ($(CONFIG_DRM),y)
+  SUB_DIRS += drm
   ALL_SUB_DIRS += drm
   MOD_SUB_DIRS += drm
 endif
@@ -633,6 +634,11 @@ else
   ifeq ($(CONFIG_PCMCIA),m)
     MOD_IN_SUB_DIRS += pcmcia
   endif
+endif
+
+ifeq ($(CONFIG_AGP), m)
+  ALL_SUB_DIRS += agp
+  MOD_SUB_DIRS += agp
 endif
 
 include $(TOPDIR)/Rules.make
