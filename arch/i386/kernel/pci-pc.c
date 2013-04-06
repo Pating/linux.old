@@ -1,119 +1,53 @@
 /*
- * bios32.c - Low-Level PCI Access
+ *	Low-Level PCI Support for PC
  *
- * $Id: bios32.c,v 1.48 1998/09/26 08:06:55 mj Exp $
- *
- * Copyright 1993, 1994 Drew Eckhardt
- *      Visionary Computing
- *      (Unix and Linux consulting and custom programming)
- *      Drew@Colorado.EDU
- *      +1 (303) 786-7975
- *
- * Drew's work was sponsored by:
- *	iX Multiuser Multitasking Magazine
- *	Hannover, Germany
- *	hm@ix.de
- *
- * Copyright 1997--1999 Martin Mares <mj@atrey.karlin.mff.cuni.cz>
- *
- * For more information, please consult the following manuals (look at
- * http://www.pcisig.com/ for how to get them):
- *
- * PCI BIOS Specification
- * PCI Local Bus Specification
- * PCI to PCI Bridge Specification
- * PCI System Design Guide
- *
- *
- * CHANGELOG :
- * Jun 17, 1994 : Modified to accommodate the broken pre-PCI BIOS SPECIFICATION
- *	Revision 2.0 present on <thys@dennis.ee.up.ac.za>'s ASUS mainboard.
- *
- * Jan 5,  1995 : Modified to probe PCI hardware at boot time by Frederic
- *     Potter, potter@cao-vlsi.ibp.fr
- *
- * Jan 10, 1995 : Modified to store the information about configured pci
- *      devices into a list, which can be accessed via /proc/pci by
- *      Curtis Varner, cvarner@cs.ucr.edu
- *
- * Jan 12, 1995 : CPU-PCI bridge optimization support by Frederic Potter.
- *	Alpha version. Intel & UMC chipset support only.
- *
- * Apr 16, 1995 : Source merge with the DEC Alpha PCI support. Most of the code
- *	moved to drivers/pci/pci.c.
- *
- * Dec 7, 1996  : Added support for direct configuration access of boards
- *      with Intel compatible access schemes (tsbogend@alpha.franken.de)
- *
- * Feb 3, 1997  : Set internal functions to static, save/restore flags
- *	avoid dead locks reading broken PCI BIOS, werner@suse.de 
- *
- * Apr 26, 1997 : Fixed case when there is BIOS32, but not PCI BIOS
- *	(mj@atrey.karlin.mff.cuni.cz)
- *
- * May 7,  1997 : Added some missing cli()'s. [mj]
- * 
- * Jun 20, 1997 : Corrected problems in "conf1" type accesses.
- *      (paubert@iram.es)
- *
- * Aug 2,  1997 : Split to PCI BIOS handling and direct PCI access parts
- *	and cleaned it up...     Martin Mares <mj@atrey.karlin.mff.cuni.cz>
- *
- * Feb 6,  1998 : No longer using BIOS to find devices and device classes. [mj]
- *
- * May 1,  1998 : Support for peer host bridges. [mj]
- *
- * Jun 19, 1998 : Changed to use spinlocks, so that PCI configuration space
- *	can be accessed from interrupts even on SMP systems. [mj]
- *
- * August  1998 : Better support for peer host bridges and more paranoid
- *	checks for direct hardware access. Ugh, this file starts to look as
- *	a large gallery of common hardware bug workarounds (watch the comments)
- *	-- the PCI specs themselves are sane, but most implementors should be
- *	hit hard with \hammer scaled \magstep5. [mj]
- *
- * Jan 23, 1999 : More improvements to peer host bridge logic. i450NX fixup. [mj]
- *
- * Feb 8,  1999 : Added UM8886BF I/O address fixup. [mj]
- *
- * August  1999 : New resource management and configuration access stuff. [mj]
+ *	(c) 1999 Martin Mares <mj@ucw.cz>
  */
 
 #include <linux/config.h>
 #include <linux/types.h>
 #include <linux/kernel.h>
+#include <linux/sched.h>
 #include <linux/pci.h>
 #include <linux/init.h>
-#include <linux/ioport.h>
 #include <linux/malloc.h>
-#include <linux/smp_lock.h>
+#include <linux/interrupt.h>
 #include <linux/irq.h>
-#include <linux/spinlock.h>
 
-#include <asm/page.h>
 #include <asm/segment.h>
-#include <asm/system.h>
 #include <asm/io.h>
 #include <asm/smp.h>
 
-#undef DEBUG
+#include "pci-i386.h"
 
-#ifdef DEBUG
-#define DBG(x...) printk(x)
-#else
-#define DBG(x...)
-#endif
+unsigned int pci_probe = PCI_PROBE_BIOS | PCI_PROBE_CONF1 | PCI_PROBE_CONF2;
 
-#define PCI_PROBE_BIOS 1
-#define PCI_PROBE_CONF1 2
-#define PCI_PROBE_CONF2 4
-#define PCI_NO_SORT 0x100
-#define PCI_BIOS_SORT 0x200
-#define PCI_NO_CHECKS 0x400
-#define PCI_NO_PEER_FIXUP 0x800
-#define PCI_ASSIGN_ROMS 0x1000
+/*
+ * IRQ routing table provided by the BIOS
+ */
 
-static unsigned int pci_probe = PCI_PROBE_BIOS | PCI_PROBE_CONF1 | PCI_PROBE_CONF2;
+struct irq_info {
+	u8 bus, devfn;			/* Bus, device and function */
+	struct {
+		u8 link;		/* IRQ line ID, chipset dependent, 0=not routed */
+		u16 bitmap;		/* Available IRQs */
+	} __attribute__((packed)) irq[4];
+	u8 slot;			/* Slot number, 0=onboard */
+	u8 rfu;
+} __attribute__((packed));
+
+struct irq_routing_table {
+	u32 signature;			/* PIRQ_SIGNATURE should be here */
+	u16 version;			/* PIRQ_VERSION */
+	u16 size;			/* Table size in bytes */
+	u8 rtr_bus, rtr_devfn;		/* Where the interrupt router lies */
+	u16 exclusive_irqs;		/* IRQs devoted exclusively to PCI usage */
+	u16 rtr_vendor, rtr_device;	/* Vendor and device ID of interrupt router */
+	u32 miniport_data;		/* Crap */
+	u8 rfu[11];
+	u8 checksum;			/* Modulo 256 checksum must give zero */
+	struct irq_info slots[0];
+} __attribute__((packed));
 
 /*
  * Direct access to PCI hardware...
@@ -129,55 +63,55 @@ static unsigned int pci_probe = PCI_PROBE_BIOS | PCI_PROBE_CONF1 | PCI_PROBE_CON
 
 static int pci_conf1_read_config_byte(struct pci_dev *dev, int where, u8 *value)
 {
-    outl(CONFIG_CMD(dev,where), 0xCF8);
-    *value = inb(0xCFC + (where&3));
-    return PCIBIOS_SUCCESSFUL;
+	outl(CONFIG_CMD(dev,where), 0xCF8);
+	*value = inb(0xCFC + (where&3));
+	return PCIBIOS_SUCCESSFUL;
 }
 
 static int pci_conf1_read_config_word(struct pci_dev *dev, int where, u16 *value)
 {
-    outl(CONFIG_CMD(dev,where), 0xCF8);    
-    *value = inw(0xCFC + (where&2));
-    return PCIBIOS_SUCCESSFUL;    
+	outl(CONFIG_CMD(dev,where), 0xCF8);    
+	*value = inw(0xCFC + (where&2));
+	return PCIBIOS_SUCCESSFUL;    
 }
 
 static int pci_conf1_read_config_dword(struct pci_dev *dev, int where, u32 *value)
 {
-    outl(CONFIG_CMD(dev,where), 0xCF8);
-    *value = inl(0xCFC);
-    return PCIBIOS_SUCCESSFUL;    
+	outl(CONFIG_CMD(dev,where), 0xCF8);
+	*value = inl(0xCFC);
+	return PCIBIOS_SUCCESSFUL;    
 }
 
 static int pci_conf1_write_config_byte(struct pci_dev *dev, int where, u8 value)
 {
-    outl(CONFIG_CMD(dev,where), 0xCF8);    
-    outb(value, 0xCFC + (where&3));
-    return PCIBIOS_SUCCESSFUL;
+	outl(CONFIG_CMD(dev,where), 0xCF8);    
+	outb(value, 0xCFC + (where&3));
+	return PCIBIOS_SUCCESSFUL;
 }
 
 static int pci_conf1_write_config_word(struct pci_dev *dev, int where, u16 value)
 {
-    outl(CONFIG_CMD(dev,where), 0xCF8);
-    outw(value, 0xCFC + (where&2));
-    return PCIBIOS_SUCCESSFUL;
+	outl(CONFIG_CMD(dev,where), 0xCF8);
+	outw(value, 0xCFC + (where&2));
+	return PCIBIOS_SUCCESSFUL;
 }
 
 static int pci_conf1_write_config_dword(struct pci_dev *dev, int where, u32 value)
 {
-    outl(CONFIG_CMD(dev,where), 0xCF8);
-    outl(value, 0xCFC);
-    return PCIBIOS_SUCCESSFUL;
+	outl(CONFIG_CMD(dev,where), 0xCF8);
+	outl(value, 0xCFC);
+	return PCIBIOS_SUCCESSFUL;
 }
 
 #undef CONFIG_CMD
 
 static struct pci_ops pci_direct_conf1 = {
-      pci_conf1_read_config_byte,
-      pci_conf1_read_config_word,
-      pci_conf1_read_config_dword,
-      pci_conf1_write_config_byte,
-      pci_conf1_write_config_word,
-      pci_conf1_write_config_dword
+	pci_conf1_read_config_byte,
+	pci_conf1_read_config_word,
+	pci_conf1_read_config_dword,
+	pci_conf1_write_config_byte,
+	pci_conf1_write_config_word,
+	pci_conf1_write_config_dword
 };
 
 /*
@@ -192,50 +126,50 @@ static struct pci_ops pci_direct_conf1 = {
 
 static int pci_conf2_read_config_byte(struct pci_dev *dev, int where, u8 *value)
 {
-    SET(dev);
-    *value = inb(IOADDR(dev->devfn,where));
-    outb (0, 0xCF8);
-    return PCIBIOS_SUCCESSFUL;
+	SET(dev);
+	*value = inb(IOADDR(dev->devfn,where));
+	outb (0, 0xCF8);
+	return PCIBIOS_SUCCESSFUL;
 }
 
 static int pci_conf2_read_config_word(struct pci_dev *dev, int where, u16 *value)
 {
-    SET(dev);
-    *value = inw(IOADDR(dev->devfn,where));
-    outb (0, 0xCF8);
-    return PCIBIOS_SUCCESSFUL;
+	SET(dev);
+	*value = inw(IOADDR(dev->devfn,where));
+	outb (0, 0xCF8);
+	return PCIBIOS_SUCCESSFUL;
 }
 
 static int pci_conf2_read_config_dword(struct pci_dev *dev, int where, u32 *value)
 {
-    SET(dev);
-    *value = inl (IOADDR(dev->devfn,where));    
-    outb (0, 0xCF8);    
-    return PCIBIOS_SUCCESSFUL;
+	SET(dev);
+	*value = inl (IOADDR(dev->devfn,where));    
+	outb (0, 0xCF8);    
+	return PCIBIOS_SUCCESSFUL;
 }
 
 static int pci_conf2_write_config_byte(struct pci_dev *dev, int where, u8 value)
 {
-    SET(dev);
-    outb (value, IOADDR(dev->devfn,where));
-    outb (0, 0xCF8);    
-    return PCIBIOS_SUCCESSFUL;
+	SET(dev);
+	outb (value, IOADDR(dev->devfn,where));
+	outb (0, 0xCF8);    
+	return PCIBIOS_SUCCESSFUL;
 }
 
 static int pci_conf2_write_config_word(struct pci_dev *dev, int where, u16 value)
 {
-    SET(dev);
-    outw (value, IOADDR(dev->devfn,where));
-    outb (0, 0xCF8);    
-    return PCIBIOS_SUCCESSFUL;
+	SET(dev);
+	outw (value, IOADDR(dev->devfn,where));
+	outb (0, 0xCF8);    
+	return PCIBIOS_SUCCESSFUL;
 }
 
 static int pci_conf2_write_config_dword(struct pci_dev *dev, int where, u32 value)
 {
-    SET(dev);
-    outl (value, IOADDR(dev->devfn,where));    
-    outb (0, 0xCF8);    
-    return PCIBIOS_SUCCESSFUL;
+	SET(dev);
+	outl (value, IOADDR(dev->devfn,where));    
+	outb (0, 0xCF8);    
+	return PCIBIOS_SUCCESSFUL;
 }
 
 #undef SET
@@ -243,12 +177,12 @@ static int pci_conf2_write_config_dword(struct pci_dev *dev, int where, u32 valu
 #undef FUNC
 
 static struct pci_ops pci_direct_conf2 = {
-      pci_conf2_read_config_byte,
-      pci_conf2_read_config_word,
-      pci_conf2_read_config_dword,
-      pci_conf2_write_config_byte,
-      pci_conf2_write_config_word,
-      pci_conf2_write_config_dword
+	pci_conf2_read_config_byte,
+	pci_conf2_read_config_word,
+	pci_conf2_read_config_dword,
+	pci_conf2_write_config_byte,
+	pci_conf2_write_config_word,
+	pci_conf2_write_config_dword
 };
 
 /*
@@ -266,10 +200,6 @@ static int __init pci_sanity_check(struct pci_ops *o)
 	u16 x;
 	struct pci_bus bus;		/* Fake bus and device */
 	struct pci_dev dev;
-
-#ifdef CONFIG_VISWS
-	return 1;       /* Lithium PCI Bridges are non-standard */
-#endif
 
 	if (pci_probe & PCI_NO_CHECKS)
 		return 1;
@@ -347,6 +277,8 @@ static struct pci_ops * __init pci_check_direct(void)
 #define PCIBIOS_WRITE_CONFIG_BYTE	0xb10b
 #define PCIBIOS_WRITE_CONFIG_WORD	0xb10c
 #define PCIBIOS_WRITE_CONFIG_DWORD	0xb10d
+#define PCIBIOS_GET_ROUTING_OPTIONS	0xb10e
+#define PCIBIOS_SET_PCI_HW_INT		0xb10f
 
 /* BIOS32 signature: "_32_" */
 #define BIOS32_SIGNATURE	(('_' << 0) + ('3' << 8) + ('2' << 16) + ('_' << 24))
@@ -427,7 +359,7 @@ static unsigned long bios32_service(unsigned long service)
 			printk("bios32_service(0x%lx): not present\n", service);
 			return 0;
 		default: /* Shouldn't happen */
-			printk("bios32_service(0x%lx): returned 0x%x, report to <mj@ucw.cz>.\n",
+			printk("bios32_service(0x%lx): returned 0x%x -- BIOS bug!\n",
 				service, return_code);
 			return 0;
 	}
@@ -488,31 +420,6 @@ static int __init check_pcibios(void)
 	}
 	return 0;
 }
-
-#if 0	/* Not used */
-
-static int pci_bios_find_class (unsigned int class_code, unsigned short index,
-	unsigned char *bus, unsigned char *device_fn)
-{
-	unsigned long bx;
-	unsigned long ret;
-
-	__asm__ ("lcall (%%edi)\n\t"
-		"jc 1f\n\t"
-		"xor %%ah, %%ah\n"
-		"1:"
-		: "=b" (bx),
-		  "=a" (ret)
-		: "1" (PCIBIOS_FIND_PCI_CLASS_CODE),
-		  "c" (class_code),
-		  "S" ((int) index),
-		  "D" (&pci_indirect));
-	*bus = (bx >> 8) & 0xff;
-	*device_fn = bx & 0xff;
-	return (int) (ret & 0xff00) >> 8;
-}
-
-#endif
 
 static int __init pci_bios_find_device (unsigned short vendor, unsigned short device_id,
 					unsigned short index, unsigned char *bus, unsigned char *device_fn)
@@ -757,85 +664,73 @@ static void __init pcibios_sort(void)
 	*last = NULL;
 }
 
+/*
+ *  Ask BIOS for IRQ Routing Table
+ */
+
+struct irq_routing_options {
+	u16 size;
+	struct irq_info *table;
+	u16 segment;
+} __attribute__((packed));
+
+static unsigned long pcibios_irq_page __initdata = 0;
+
+static inline void __init pcibios_free_irq_routing_table(void)
+{
+	if (pcibios_irq_page)
+		free_page(pcibios_irq_page);
+}
+
+static struct irq_routing_table * __init pcibios_get_irq_routing_table(void)
+{
+	struct irq_routing_options opt;
+	struct irq_routing_table *rt;
+	int ret, map;
+
+	if (pci_probe & PCI_NO_IRQ_SCAN)
+		return NULL;
+	pcibios_irq_page = __get_free_page(GFP_KERNEL);
+	if (!pcibios_irq_page)
+		return 0;
+	rt = (void *) pcibios_irq_page;
+	opt.table = rt->slots;
+	opt.size = PAGE_SIZE - sizeof(struct irq_routing_table);
+	opt.segment = __KERNEL_DS;
+
+	DBG("PCI: Fetching IRQ routing table... ");
+	__asm__("push %%es\n\t"
+		"push %%ds\n\t"
+		"pop  %%es\n\t"
+		"lcall (%%esi)\n\t"
+		"pop %%es\n\t"
+		"jc 1f\n\t"
+		"xor %%ah, %%ah\n"
+		"1:"
+		: "=a" (ret),
+		  "=b" (map)
+		: "0" (PCIBIOS_GET_ROUTING_OPTIONS),
+		  "1" (0),
+		  "D" ((long) &opt),
+		  "S" (&pci_indirect));
+	DBG("OK  ret=%d, size=%d, map=%x\n", ret, opt.size, map);
+	if (ret & 0xff00) {
+		printk(KERN_ERR "PCI: Error %02x when fetching IRQ routing table.\n", (ret >> 8) & 0xff);
+		return 0;
+	}
+
+	memset(rt, 0, sizeof(struct irq_routing_table));
+	rt->size = opt.size + sizeof(struct irq_routing_table);
+	printk("PCI: Using BIOS Interrupt Routing Table\n");
+	return rt;
+}
+
 #endif
-
-/*
- * Several BIOS'es forget to assign addresses to I/O ranges. Try to fix it.
- */
-
-static void __init pcibios_fixup_io_addr(struct pci_dev *dev, int idx)
-{
-	unsigned int reg = PCI_BASE_ADDRESS_0 + 4*idx;
-	struct resource *r = &dev->resource[idx];
-	unsigned int size = r->end - r->start + 1;
-
-	if (((dev->class >> 8) == PCI_CLASS_STORAGE_IDE && idx < 4) ||
-	     (dev->class >> 8) == PCI_CLASS_DISPLAY_VGA) {
-		/*
-		 * In case the BIOS didn't assign an address 0--3 to an IDE
-		 * controller, we don't try to fix it as it means "use default
-		 * addresses" at least with several broken chips and the IDE
-		 * driver needs the original settings to recognize which devices
-		 * correspond to the primary controller.
-		 *
-		 * We don't assign VGA I/O ranges as well.
-		 */
-		return;
-	}
-	/*
-	 * We need to avoid collisions with `mirrored' VGA ports and other strange
-	 * ISA hardware, so we always want the addresses kilobyte aligned.
-	 */
-	if (!size || size > 256) {
-		printk(KERN_ERR "PCI: Cannot assign I/O space to device %s, %d bytes are too much.\n", dev->name, size);
-		return;
-	} else {
-		u32 try;
-
-		r->start = 0;
-		r->end = size - 1;
-		if (pci_assign_resource(dev, idx)) {
-			printk(KERN_ERR "PCI: Unable to find free %d bytes of I/O space for device %s.\n", size, dev->name);
-			return;
-		}
-		printk("PCI: Assigned I/O space %04lx-%04lx to device %s\n", r->start, r->end, dev->name);
-		pci_read_config_dword(dev, reg, &try);
-		if ((try & PCI_BASE_ADDRESS_IO_MASK) != r->start) {
-			r->start = 0;
-			pci_write_config_dword(dev, reg, 0);
-			printk(KERN_ERR "PCI: I/O address setup failed, got %04x\n", try);
-		}
-	}
-}
-
-/*
- * Assign address to expansion ROM. This is a highly experimental feature
- * and you must enable it by "pci=rom". It's even not guaranteed to work
- * with all cards since the PCI specs allow address decoders to be shared
- * between the ROM space and one of the standard regions (sigh!).
- */
-static void __init pcibios_fixup_rom_addr(struct pci_dev *dev)
-{
-	int reg = (dev->hdr_type == 1) ? PCI_ROM_ADDRESS1 : PCI_ROM_ADDRESS;
-	struct resource *r = &dev->resource[PCI_ROM_RESOURCE];
-	unsigned long rom_size = r->end - r->start + 1;
-
-	r->start = 0;
-	r->end = rom_size - 1;
-	if (pci_assign_resource(dev, PCI_ROM_RESOURCE))
-		printk(KERN_ERR "PCI: Unable to find free space for expansion ROM of device %s (0x%lx bytes)\n",
-		       dev->name, rom_size);
-	else {
-		DBG("PCI: Assigned address %08lx to expansion ROM of %s (0x%lx bytes)\n", r->start, dev->name, rom_size);
-		pci_write_config_dword(dev, reg, r->start | PCI_ROM_ADDRESS_ENABLE);
-		r->flags |= PCI_ROM_ADDRESS_ENABLE;
-	}
-}
 
 /*
  * Several buggy motherboards address only 16 devices and mirror
  * them to next 16 IDs. We try to detect this `feature' on all
- * primary busses (those containing host bridges as they are
+ * primary buses (those containing host bridges as they are
  * expected to be unique) and remove the ghost devices.
  */
 
@@ -868,7 +763,7 @@ static void __init pcibios_fixup_ghosts(struct pci_bus *b)
 	}
 	if (!seen_host_bridge)
 		return;
-	printk("PCI: Ignoring ghost devices on bus %d\n", b->number);
+	printk("PCI: Ignoring ghost devices on bus %02x\n", b->number);
 	for(e=b->devices; e->sibling != d; e=e->sibling);
 	e->sibling = NULL;
 	for(z=&pci_devices; (d=*z);)
@@ -893,16 +788,11 @@ static void __init pcibios_fixup_peer_bridges(void)
 	struct pci_dev *d;
 	struct pci_ops *ops = pci_root->ops;
 
-#ifdef CONFIG_VISWS
-	pci_scan_bus(1, ops, NULL);
-	return;
-#endif
-
 #ifdef CONFIG_PCI_DIRECT
 	/*
 	 * Don't search for peer host bridges if we use config type 2
-	 * since it reads bogus values for non-existent busses and
-	 * chipsets supporting multiple primary busses use conf1 anyway.
+	 * since it reads bogus values for non-existent buses and
+	 * chipsets supporting multiple primary buses use conf1 anyway.
 	 */
 	if (ops == &pci_direct_conf2)
 		return;
@@ -966,7 +856,7 @@ static void __init pci_fixup_i450nx(struct pci_dev *d)
 	 */
 	int pxb, reg;
 	u8 busno, suba, subb;
-	printk("PCI: Searching for i450NX host bridges on %s\n", d->name);
+	printk("PCI: Searching for i450NX host bridges on %s\n", d->slot_name);
 	reg = 0xd0;
 	for(pxb=0; pxb<2; pxb++) {
 		pci_read_config_byte(d, reg++, &busno);
@@ -989,113 +879,214 @@ static void __init pci_fixup_umc_ide(struct pci_dev *d)
 	 */
 	int i;
 
-	printk("PCI: Fixing base address flags for device %s\n", d->name);
+	printk("PCI: Fixing base address flags for device %s\n", d->slot_name);
 	for(i=0; i<4; i++)
 		d->resource[i].flags |= PCI_BASE_ADDRESS_SPACE_IO;
+}
+
+static void __init pci_fixup_ide_bases(struct pci_dev *d)
+{
+	int i;
+
+	/*
+	 * PCI IDE controllers use non-standard I/O port decoding, respect it.
+	 */
+	if ((d->class >> 8) != PCI_CLASS_STORAGE_IDE)
+		return;
+	DBG("PCI: IDE base address fixup for %s\n", d->slot_name);
+	for(i=0; i<4; i++) {
+		struct resource *r = &d->resource[i];
+		if ((r->start & ~0x80) == 0x374) {
+			r->start |= 2;
+			r->end = r->start;
+		}
+	}
 }
 
 struct pci_fixup pcibios_fixups[] = {
 	{ PCI_FIXUP_HEADER,	PCI_VENDOR_ID_INTEL,	PCI_DEVICE_ID_INTEL_82451NX,	pci_fixup_i450nx },
 	{ PCI_FIXUP_HEADER,	PCI_VENDOR_ID_UMC,	PCI_DEVICE_ID_UMC_UM8886BF,	pci_fixup_umc_ide },
+	{ PCI_FIXUP_HEADER,	PCI_ANY_ID,		PCI_ANY_ID,			pci_fixup_ide_bases },
 	{ 0 }
 };
 
 /*
- * Allocate resources for all PCI devices. We need to do that before
- * we try to fix up anything.
- */
-
-static void __init pcibios_claim_resources(struct pci_bus *bus)
-{
-	struct pci_dev *dev;
-	int idx;
-
-	while (bus) {
-		for (dev=bus->devices; dev; dev=dev->sibling)
-			for (idx = 0; idx < PCI_NUM_RESOURCES; idx++) {
-				struct resource *r = &dev->resource[idx];
-				struct resource *pr;
-				if (!r->start)
-					continue;
-				pr = pci_find_parent_resource(dev, r);
-				if (!pr || request_resource(pr, r) < 0) {
-					printk(KERN_ERR "PCI: Address space collision on region %d of device %s\n", idx, dev->name);
-					/* We probably should disable the region, shouldn't we? */
-				}
-		}
-		if (bus->children)
-			pcibios_claim_resources(bus->children);
-		bus = bus->next;
-	}
-}
-
-/*
- * Fix base addresses, I/O and memory enables and IRQ's (mostly work-arounds
- * for buggy PCI BIOS'es :-[).
+ *  Fix up IRQs of all PCI devices.
  */
 
 extern int skip_ioapic_setup;
 
-static void __init pcibios_fixup_devices(void)
-{
-	struct pci_dev *dev;
-	int i, has_io, has_mem;
-	unsigned short cmd;
+#define PIRQ_SIGNATURE	(('$' << 0) + ('P' << 8) + ('I' << 16) + ('R' << 24))
+#define PIRQ_VERSION 0x0100
 
-	for(dev = pci_devices; dev; dev=dev->next) {
-		/*
-		 * There are buggy BIOSes that forget to enable I/O and memory
-		 * access to PCI devices. We try to fix this, but we need to
-		 * be sure that the BIOS didn't forget to assign an address
-		 * to the device. [mj]
-		 */
-		has_io = has_mem = 0;
-		for(i=0; i<6; i++) {
-			struct resource *r = &dev->resource[i];
-			if (r->flags & PCI_BASE_ADDRESS_SPACE_IO) {
-				has_io = 1;
-				if (!r->start || r->start == PCI_BASE_ADDRESS_IO_MASK)
-					pcibios_fixup_io_addr(dev, i);
-			} else if (r->start)
-				has_mem = 1;
+/*
+ *  Search 0xf0000 -- 0xfffff for the PCI IRQ Routing Table.
+ */
+
+static struct irq_routing_table * __init pcibios_find_irq_routing_table(void)
+{
+	u8 *addr;
+	struct irq_routing_table *rt;
+	int i;
+	u8 sum;
+
+	for(addr = (u8 *) __va(0xf0000); addr < (u8 *) __va(0x100000); addr += 16) {
+		rt = (struct irq_routing_table *) addr;
+		if (rt->signature != PIRQ_SIGNATURE ||
+		    rt->version != PIRQ_VERSION ||
+		    rt->size % 16 ||
+		    rt->size < sizeof(struct irq_routing_table))
+			continue;
+		sum = 0;
+		for(i=0; i<rt->size; i++)
+			sum += addr[i];
+		if (!sum) {
+			printk("PCI: Interrupt Routing Table found at 0x%p [router type %04x/%04x]\n",
+			       rt, rt->rtr_vendor, rt->rtr_device);
+			return rt;
 		}
+	}
+	return NULL;
+}
+
+/*
+ *  If we have a IRQ routing table, use it to search for peer host
+ *  bridges.  It's a gross hack, but since there are no other known
+ *  ways how to get a list of buses, we have to go this way.
+ */
+
+static void __init pcibios_irq_peer_trick(struct irq_routing_table *rt)
+{
+	u8 busmap[256];
+	int i;
+	struct irq_info *e;
+
+	memset(busmap, 0, sizeof(busmap));
+	for(i=0; i < (rt->size - sizeof(struct irq_routing_table)) / sizeof(struct irq_info); i++) {
+		e = &rt->slots[i];
+		DBG("b=%02x d=%02x s=%02x\n", e->bus, e->devfn, e->slot);
+		busmap[e->bus] = 1;
+	}
+	for(i=1; i<256; i++)
 		/*
-		 * Don't enable VGA-compatible cards since they have
-		 * fixed I/O and memory space.
-		 * 
-		 * Don't enabled disabled IDE interfaces either because
-		 * some BIOSes may reallocate the same address when they
-		 * find that no devices are attached. 
+		 *  It might be a secondary bus, but in this case its parent is already
+		 *  known (ascending bus order) and therefore pci_scan_bus returns immediately.
 		 */
-		if (((dev->class >> 8) != PCI_CLASS_DISPLAY_VGA) &&
-		    ((dev->class >> 8) != PCI_CLASS_STORAGE_IDE)) {
-			pci_read_config_word(dev, PCI_COMMAND, &cmd);
-			if (has_io && !(cmd & PCI_COMMAND_IO)) {
-				printk("PCI: Enabling I/O for device %s\n", dev->name);
-				cmd |= PCI_COMMAND_IO;
-				pci_write_config_word(dev, PCI_COMMAND, cmd);
-			}
-			if (has_mem && !(cmd & PCI_COMMAND_MEMORY)) {
-				printk("PCI: Enabling memory for device %s\n", dev->name);
-				cmd |= PCI_COMMAND_MEMORY;
-				pci_write_config_word(dev, PCI_COMMAND, cmd);
-			}
+		if (busmap[i] && pci_scan_bus(i, pci_root->ops, NULL))
+			printk("PCI: Discovered primary peer bus %02x [IRQ]\n", i);
+	pci_probe |= PCI_NO_PEER_FIXUP;
+}
+
+/*
+ *  In case BIOS forgets to tell us about IRQ, we try to look it up in the routing
+ *  table, but unfortunately we have to know the interrupt router chip.
+ */
+
+static char * __init pcibios_lookup_irq(struct pci_dev *dev, struct irq_routing_table *rt, int pin)
+{
+	struct irq_info *q;
+	struct pci_dev *router;
+	int i, pirq, newirq;
+	u32 rtrid, mask;
+	u8 x;
+
+	pin--;
+	DBG("IRQ for %s(%d)", dev->slot_name, pin);
+	while (dev->bus->self) {
+		pin = (pin + PCI_SLOT(dev->devfn)) % 4;
+		dev = dev->bus->self;
+		DBG(" -> %s(%d)", dev->slot_name, pin);
+	}
+	for(q = rt->slots, i = rt->size - sizeof(struct irq_routing_table);
+	    i && (q->bus != dev->bus->number || PCI_SLOT(q->devfn) != PCI_SLOT(dev->devfn));
+	    i -= sizeof(struct irq_info), q++)
+		;
+	if (!i) {
+		DBG(" -> not found in routing table\n");
+		return NULL;
+	}
+	pirq = q->irq[pin].link;
+	mask = q->irq[pin].bitmap;
+	if (!pirq) {
+		DBG(" -> not routed\n");
+		return NULL;
+	}
+	DBG(" -> PIRQ %02x, mask %04x", pirq, mask);
+	if ((dev->class >> 8) == PCI_CLASS_DISPLAY_VGA)
+		newirq = 0;
+	else for(newirq = 15; newirq && !(mask & (1 << newirq)); newirq--)
+		;
+	if (!(router = pci_find_slot(rt->rtr_bus, rt->rtr_devfn))) {
+		DBG(" -> router not found\n");
+		return NULL;
+	}
+#define ID(x,y) ((x << 16) | y)
+	rtrid = ID(rt->rtr_vendor, rt->rtr_device);
+	if (!rtrid) {
+		/*
+		 * Several BIOSes forget to set the router type. In such cases, we
+		 * use chip vendor/device. This doesn't guarantee us semantics of
+		 * PIRQ values, but was found to work in practice and it's still
+		 * better than not trying.
+		 */
+		DBG(" [%s]", router->slot_name);
+		rtrid = ID(router->vendor, router->device);
+	}
+	switch (rtrid) {
+	case ID(PCI_VENDOR_ID_INTEL, PCI_DEVICE_ID_INTEL_82371FB_0):
+	case ID(PCI_VENDOR_ID_INTEL, PCI_DEVICE_ID_INTEL_82371SB_0):
+	case ID(PCI_VENDOR_ID_INTEL, PCI_DEVICE_ID_INTEL_82371AB_0):
+		/* Intel PIIX: PIRQ holds configuration register address */
+		pci_read_config_byte(router, pirq, &x);
+		if (x < 16) {
+			DBG(" -> [PIIX] %02x\n", x);
+			dev->irq = x;
+			return "PIIX";
+		} else if (newirq) {
+			DBG(" -> [PIIX] set to %02x\n", newirq);
+			pci_write_config_byte(router, pirq, newirq);
+			dev->irq = newirq;
+			return "PIIX-NEW";
 		}
-		/*
-		 * Assign address to expansion ROM if requested.
-		 */
-		if ((pci_probe & PCI_ASSIGN_ROMS) && dev->resource[PCI_ROM_RESOURCE].end)
-			pcibios_fixup_rom_addr(dev);
+		DBG(" -> [PIIX] sink\n");
+		return NULL;
+	default:
+		DBG(" -> unknown router %04x/%04x\n", rt->rtr_vendor, rt->rtr_device);
+		if (newirq && mask == (1 << newirq)) {
+			/* Only one IRQ available -> use it */
+			dev->irq = newirq;
+			return "guess";
+		}
+		return NULL;
+	}
+#undef ID
+}
+
+static void __init pcibios_fixup_irqs(void)
+{
+	struct irq_routing_table *rtable;
+	struct pci_dev *dev;
+	u8 pin;
+
+	rtable = pcibios_find_irq_routing_table();
+#ifdef CONFIG_PCI_BIOS
+	if (!rtable && pci_bios_present)
+		rtable = pcibios_get_irq_routing_table();
+#endif
+
+	if (rtable)
+		pcibios_irq_peer_trick(rtable);
+
+	for(dev=pci_devices; dev; dev=dev->next) {
+		pci_read_config_byte(dev, PCI_INTERRUPT_PIN, &pin);
 #if defined(CONFIG_X86_IO_APIC)
 		/*
-		 * Recalculate IRQ numbers if we use the I/O APIC
+		 * Recalculate IRQ numbers if we use the I/O APIC.
 		 */
 		if(!skip_ioapic_setup)
 		{
 			int irq;
-			unsigned char pin;
 
-			pci_read_config_byte(dev, PCI_INTERRUPT_PIN, &pin);
 			if (pin) {
 				pin--;		/* interrupt pins are numbered starting from 1 */
 				irq = IO_APIC_get_PCI_irq_vector(dev->bus->number, PCI_SLOT(dev->devfn), pin);
@@ -1115,14 +1106,24 @@ static void __init pcibios_fixup_devices(void)
 					dev->irq = irq;
 				}
 			}
+			rtable = NULL;	/* Avoid IRQ assignment below */
 		}
 #endif
 		/*
-		 * Fix out-of-range IRQ numbers
+		 * Fix out-of-range IRQ numbers and missing IRQs.
 		 */
 		if (dev->irq >= NR_IRQS)
 			dev->irq = 0;
+		if (pin && !dev->irq && rtable && rtable->version) {
+			char *msg = pcibios_lookup_irq(dev, rtable, pin);
+			if (msg)
+				printk("PCI: Assigned IRQ %d to device %s [%s]\n", dev->irq, dev->slot_name, msg);
+		}
 	}
+
+#ifdef CONFIG_PCI_BIOS
+	pcibios_free_irq_routing_table();
+#endif
 }
 
 /*
@@ -1133,6 +1134,7 @@ static void __init pcibios_fixup_devices(void)
 void __init pcibios_fixup_bus(struct pci_bus *b)
 {
 	pcibios_fixup_ghosts(b);
+	pci_read_bridge_bases(b);
 }
 
 /*
@@ -1170,10 +1172,10 @@ void __init pcibios_init(void)
 	printk("PCI: Probing PCI hardware\n");
 	pci_scan_bus(0, ops, NULL);
 
+	pcibios_fixup_irqs();
 	if (!(pci_probe & PCI_NO_PEER_FIXUP))
 		pcibios_fixup_peer_bridges();
-	pcibios_claim_resources(pci_root);
-	pcibios_fixup_devices();
+	pcibios_resource_survey();
 
 #ifdef CONFIG_PCI_BIOS
 	if ((pci_probe & PCI_BIOS_SORT) && !(pci_probe & PCI_NO_SORT))
@@ -1196,6 +1198,9 @@ char * __init pcibios_setup(char *str)
 		return NULL;
 	} else if (!strcmp(str, "nosort")) {
 		pci_probe |= PCI_NO_SORT;
+		return NULL;
+	} else if (!strcmp(str, "noirq")) {
+		pci_probe |= PCI_NO_IRQ_SCAN;
 		return NULL;
 	}
 #endif
