@@ -5,17 +5,10 @@
  */
 
 #include <linux/config.h>
-#include <linux/wait.h>
-#include <linux/errno.h>
-#include <linux/sched.h>
-#include <linux/resource.h>
-#include <linux/mm.h>
 #include <linux/malloc.h>
-#include <linux/slab.h>
 #include <linux/interrupt.h>
 #include <linux/smp_lock.h>
 #include <linux/module.h>
-#include <linux/slab.h>
 #ifdef CONFIG_BSD_PROCESS_ACCT
 #include <linux/acct.h>
 #endif
@@ -358,7 +351,9 @@ NORET_TYPE void do_exit(long code)
 	if (!tsk->pid)
 		panic("Attempted to kill the idle task!");
 	tsk->flags |= PF_EXITING;
+	start_bh_atomic();
 	del_timer(&tsk->real_timer);
+	end_bh_atomic();
 
 	lock_kernel();
 fake_volatile:

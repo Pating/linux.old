@@ -10,22 +10,14 @@
  *  Version: $Id: vmscan.c,v 1.5 1998/02/23 22:14:28 sct Exp $
  */
 
-#include <linux/mm.h>
-#include <linux/sched.h>
-#include <linux/kernel.h>
+#include <linux/slab.h>
 #include <linux/kernel_stat.h>
-#include <linux/errno.h>
-#include <linux/string.h>
 #include <linux/swap.h>
 #include <linux/swapctl.h>
 #include <linux/smp_lock.h>
-#include <linux/slab.h>
-#include <linux/dcache.h>
-#include <linux/fs.h>
 #include <linux/pagemap.h>
 #include <linux/init.h>
 
-#include <asm/bitops.h>
 #include <asm/pgtable.h>
 
 /* 
@@ -170,7 +162,7 @@ static inline int try_to_swap_out(struct task_struct * tsk, struct vm_area_struc
 			 * copy in memory, so we add it to the swap
 			 * cache. */
 			if (PageSwapCache(page_map)) {
-				free_page_and_swap_cache(page);
+				free_page(page);
 				return (atomic_read(&page_map->count) == 0);
 			}
 			add_to_swap_cache(page_map, entry);
@@ -188,7 +180,7 @@ static inline int try_to_swap_out(struct task_struct * tsk, struct vm_area_struc
 		 * asynchronously.  That's no problem, shrink_mmap() can
 		 * correctly clean up the occassional unshared page
 		 * which gets left behind in the swap cache. */
-		free_page_and_swap_cache(page);
+		free_page(page);
 		return 1;	/* we slept: the process may not exist any more */
 	}
 
@@ -202,7 +194,7 @@ static inline int try_to_swap_out(struct task_struct * tsk, struct vm_area_struc
 		set_pte(page_table, __pte(entry));
 		flush_tlb_page(vma, address);
 		swap_duplicate(entry);
-		free_page_and_swap_cache(page);
+		free_page(page);
 		return (atomic_read(&page_map->count) == 0);
 	} 
 	/* 
@@ -218,7 +210,7 @@ static inline int try_to_swap_out(struct task_struct * tsk, struct vm_area_struc
 	flush_cache_page(vma, address);
 	pte_clear(page_table);
 	flush_tlb_page(vma, address);
-	entry = page_unuse(page_map);
+	entry = (atomic_read(&page_map->count) == 1);
 	__free_page(page_map);
 	return entry;
 }

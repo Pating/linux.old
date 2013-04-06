@@ -12,20 +12,16 @@
  */
 
 #include <linux/config.h>
-#include <linux/sched.h>
-#include <linux/mm.h>
+#include <linux/malloc.h>
 #include <linux/sysctl.h>
 #include <linux/swapctl.h>
 #include <linux/proc_fs.h>
-#include <linux/malloc.h>
-#include <linux/stat.h>
 #include <linux/ctype.h>
 #include <linux/utsname.h>
 #include <linux/swapctl.h>
 #include <linux/smp_lock.h>
 #include <linux/init.h>
 
-#include <asm/bitops.h>
 #include <asm/uaccess.h>
 
 #ifdef CONFIG_ROOT_NFS
