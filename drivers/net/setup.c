@@ -8,11 +8,13 @@
 #include <linux/init.h>
 #include <linux/netlink.h>
 
+extern int plip_init(void);
 extern int mkiss_init_ctrl_dev(void);
 extern int ppp_init(void);
 extern int slip_init_ctrl_dev(void);
 extern int strip_init_ctrl_dev(void);
 extern int x25_asy_init_ctrl_dev(void);
+extern int slhc_install(void);
   
 extern int bpq_init(void);
 extern int dmascc_init(void);
@@ -42,6 +44,7 @@ extern int rr_hippi_probe(void);
 extern int rtl8139_probe(void); 
 extern int sdla_setup(void); 
 extern int sis900_probe(void); 
+extern int skge_probe(void); 
 extern int sparc_lance_probe(void); 
 extern int starfire_probe(void); 
 extern int tc59x_probe(void); 
@@ -181,9 +184,6 @@ struct net_probe pci_probes[] __initdata = {
 #ifdef CONFIG_DEC_ELCP 
 	{tulip_probe, 0},
 #endif
-#ifdef CONFIG_DE4X5             /* DEC DE425, DE434, DE435 adapters */
-	{de4x5_probe, 0},
-#endif
 #ifdef CONFIG_EPIC100
 	{epic100_probe, 0},
 #endif
@@ -203,6 +203,9 @@ struct net_probe pci_probes[] __initdata = {
 #endif
 #ifdef CONFIG_ACENIC
 	{acenic_probe, 0},
+#endif
+#ifdef CONFIG_SK98LIN
+	{skge_probe, 0},
 #endif
 #ifdef CONFIG_VIA_RHINE
 	{via_rhine_probe, 0},
@@ -367,5 +370,3 @@ void __init net_device_init(void)
 	special_device_init();
 	/* That kicks off the legacy init functions */
 }
-
-	 

@@ -498,6 +498,7 @@ extern unsigned long prof_shift;
 #define CURRENT_TIME (xtime.tv_sec)
 
 extern void FASTCALL(__wake_up(wait_queue_head_t *q, unsigned int mode));
+extern void FASTCALL(__wake_up_sync(wait_queue_head_t *q, unsigned int mode));
 extern void FASTCALL(sleep_on(wait_queue_head_t *q));
 extern long FASTCALL(sleep_on_timeout(wait_queue_head_t *q,
 				      signed long timeout));
@@ -507,7 +508,9 @@ extern long FASTCALL(interruptible_sleep_on_timeout(wait_queue_head_t *q,
 extern void FASTCALL(wake_up_process(struct task_struct * tsk));
 
 #define wake_up(x)			__wake_up((x),TASK_UNINTERRUPTIBLE | TASK_INTERRUPTIBLE)
+#define wake_up_sync(x)			__wake_up_sync((x),TASK_UNINTERRUPTIBLE | TASK_INTERRUPTIBLE)
 #define wake_up_interruptible(x)	__wake_up((x),TASK_INTERRUPTIBLE)
+#define wake_up_interruptible_sync(x)	__wake_up_sync((x),TASK_INTERRUPTIBLE)
 
 extern int in_group_p(gid_t);
 
@@ -845,7 +848,7 @@ static inline int task_lock(struct task_struct *p)
 	down(&p->exit_sem);
 	if (p->p_pptr)
 		return 1;
-	/* He's dead, Jim. You take his wallet, I'll take tricoder... */
+	/* He's dead, Jim. You take his wallet, I'll take the tricorder... */
 	up(&p->exit_sem);
 	return 0;
 }

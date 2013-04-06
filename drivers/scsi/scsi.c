@@ -59,6 +59,7 @@
 #include <asm/system.h>
 #include <asm/irq.h>
 #include <asm/dma.h>
+#include <asm/uaccess.h>
 
 #include "scsi.h"
 #include "hosts.h"
@@ -73,8 +74,7 @@
 struct proc_dir_entry *proc_scsi = NULL;
 
 #ifdef CONFIG_PROC_FS
-static int scsi_proc_info(char *buffer, char **start, off_t offset,
-			  int length, int inout);
+static int scsi_proc_info(char *buffer, char **start, off_t offset, int length);
 static void scsi_dump_status(int level);
 #endif
 
@@ -112,14 +112,19 @@ typedef unsigned int FreeSectorBitmap;
  * lock up.
  */
 
-#define BLIST_NOLUN     0x01
-#define BLIST_FORCELUN  0x02
-#define BLIST_BORKEN    0x04
-#define BLIST_KEY       0x08
-#define BLIST_SINGLELUN 0x10
-#define BLIST_NOTQ	0x20
-#define BLIST_SPARSELUN 0x40
-#define BLIST_MAX5LUN	0x80
+#define BLIST_NOLUN     	0x001
+#define BLIST_FORCELUN  	0x002
+#define BLIST_BORKEN    	0x004
+#define BLIST_KEY       	0x008
+#define BLIST_SINGLELUN 	0x010
+#define BLIST_NOTQ		0x020
+#define BLIST_SPARSELUN 	0x040
+#define BLIST_MAX5LUN		0x080
+#define BLIST_ISDISK    	0x100
+#define BLIST_ISROM     	0x200
+#define BLIST_GHOST     	0x400   
+
+
 
 /*
  * Data declarations.
@@ -187,11 +192,11 @@ static int scsi_unregister_device(struct Scsi_Device_Template *tpnt);
 extern void scsi_old_done(Scsi_Cmnd * SCpnt);
 extern void scsi_old_times_out(Scsi_Cmnd * SCpnt);
 
-#define SCSI_BLOCK(DEVICE, HOST)                                                \
-                ((HOST->block && host_active && HOST != host_active)            \
-		  || ((HOST)->can_queue && HOST->host_busy >= HOST->can_queue)    \
-                  || ((HOST)->host_blocked)                                       \
-                  || ((DEVICE) != NULL && (DEVICE)->device_blocked) )
+#define SCSI_BLOCK(DEVICE, HOST)                                         \
+	        ((HOST->block && host_active && HOST != host_active)          \
+  		|| ((HOST)->can_queue && HOST->host_busy >= HOST->can_queue)  \
+	        || ((HOST)->host_blocked)                                     \
+	        || ((DEVICE) != NULL && (DEVICE)->device_blocked) )
 
 
 
@@ -243,6 +248,7 @@ static struct dev_info device_list[] =
 	{"TEAC", "CD-ROM", "1.06", BLIST_NOLUN},		/* causes failed REQUEST SENSE on lun 1
 								 * for seagate controller, which causes
 								 * SCSI code to reset bus.*/
+	{"TEAC", "MT-2ST/45S2-27", "RV M", BLIST_NOLUN},	/* Responds to all lun */
 	{"TEXEL", "CD-ROM", "1.06", BLIST_NOLUN},		/* causes failed REQUEST SENSE on lun 1
 								 * for seagate controller, which causes
 								 * SCSI code to reset bus.*/
@@ -254,7 +260,9 @@ static struct dev_info device_list[] =
 	{"HP", "C1750A", "3226", BLIST_NOLUN},			/* scanjet iic */
 	{"HP", "C1790A", "", BLIST_NOLUN},			/* scanjet iip */
 	{"HP", "C2500A", "", BLIST_NOLUN},			/* scanjet iicx */
-	{"YAMAHA", "CDR102", "1.00", BLIST_NOLUN},		/* extra reset */
+	{"YAMAHA", "CDR100", "1.00", BLIST_NOLUN},		/* Locks up if polled for lun != 0 */
+	{"YAMAHA", "CDR102", "1.00", BLIST_NOLUN},		/* Locks up if polled for lun != 0  
+								 * extra reset */
 	{"RELISYS", "Scorpio", "*", BLIST_NOLUN},		/* responds to all LUN */
 
 /*
@@ -277,10 +285,12 @@ static struct dev_info device_list[] =
 	{"CANON", "IPUBJD", "*", BLIST_SPARSELUN},
 	{"nCipher", "Fastness Crypto", "*", BLIST_FORCELUN},
 	{"NEC", "PD-1 ODX654P", "*", BLIST_FORCELUN | BLIST_SINGLELUN},
-	{"MATSHITA", "PD", "*", BLIST_FORCELUN | BLIST_SINGLELUN},
-	{"YAMAHA", "CDR100", "1.00", BLIST_NOLUN},	/* Locks up if polled for lun != 0 */
-	{"YAMAHA", "CDR102", "1.00", BLIST_NOLUN},	/* Locks up if polled for lun != 0 */
+	{"MATSHITA", "PD-1", "*", BLIST_FORCELUN | BLIST_SINGLELUN},
 	{"iomega", "jaz 1GB", "J.86", BLIST_NOTQ | BLIST_NOLUN},
+ 	{"CREATIVE","DVD-RAM RAM","*", BLIST_GHOST},
+ 	{"MATSHITA","PD-2 LF-D100","*", BLIST_GHOST},
+ 	{"HITACHI", "GF-1050","*", BLIST_GHOST},  /* Hitachi SCSI DVD-RAM */
+ 	{"TOSHIBA","CDROM","*", BLIST_ISROM},
 
 	/*
 	 * Must be at end of list...
@@ -471,7 +481,7 @@ void scsi_wait_cmd (Scsi_Cmnd * SCpnt, const void *cmnd ,
 	SCpnt->request.rq_status = RQ_SCSI_BUSY;
 	spin_lock_irqsave(&io_request_lock, flags);
 	scsi_do_cmd (SCpnt, (void *) cmnd,
-        	buffer, bufflen, done, timeout, retries);
+		buffer, bufflen, done, timeout, retries);
 	spin_unlock_irqrestore(&io_request_lock, flags);
 	down (&sem);
 	SCpnt->request.sem = NULL;
@@ -690,12 +700,22 @@ int scan_scsis_single(int channel, int dev, int lun, int *max_dev_lun,
 	struct Scsi_Device_Template *sdtpnt;
 	Scsi_Device *SDtail, *SDpnt = *SDpnt2;
 	int bflags, type = -1;
+	static int ghost_channel=-1, ghost_dev=-1;
+	int org_lun = lun;
 
 	SDpnt->host = shpnt;
 	SDpnt->id = dev;
 	SDpnt->lun = lun;
 	SDpnt->channel = channel;
 	SDpnt->online = TRUE;
+
+ 
+	if ((channel == ghost_channel) && (dev == ghost_dev) && (lun == 1)) {
+		SDpnt->lun = 0;
+	} else {
+		ghost_channel = ghost_dev = -1;
+	}
+	     
 
 	/* Some low level driver could use device->type (DB) */
 	SDpnt->type = -1;
@@ -719,8 +739,8 @@ int scan_scsis_single(int channel, int dev, int lun, int *max_dev_lun,
 	SCpnt->channel = SDpnt->channel;
 
 	scsi_wait_cmd (SCpnt, (void *) scsi_cmd,
-                  (void *) NULL,
-                  0, scan_scsis_done, SCSI_TIMEOUT + 4 * HZ, 5);
+	          (void *) NULL,
+	          0, scan_scsis_done, SCSI_TIMEOUT + 4 * HZ, 5);
 
 	SCSI_LOG_SCAN_BUS(3, printk("scsi: scan_scsis_single id %d lun %d. Return code 0x%08x\n",
 				    dev, lun, SCpnt->result));
@@ -752,8 +772,8 @@ int scan_scsis_single(int channel, int dev, int lun, int *max_dev_lun,
 	SCpnt->cmd_len = 0;
 
 	scsi_wait_cmd (SCpnt, (void *) scsi_cmd,
-                  (void *) scsi_result,
-                  256, scan_scsis_done, SCSI_TIMEOUT, 3);
+	          (void *) scsi_result,
+	          256, scan_scsis_done, SCSI_TIMEOUT, 3);
 
 	SCSI_LOG_SCAN_BUS(3, printk("scsi: INQUIRY %s with code 0x%x\n",
 		SCpnt->result ? "failed" : "successful", SCpnt->result));
@@ -768,15 +788,41 @@ int scan_scsis_single(int channel, int dev, int lun, int *max_dev_lun,
 	if ((scsi_result[0] >> 5) == 3) {
 		return 0;	/* assume no peripheral if any sort of error */
 	}
+
 	/*
-	 * It would seem some TOSHIBA CDROM gets things wrong
+	 * Get any flags for this device.  
 	 */
-	if (!strncmp(scsi_result + 8, "TOSHIBA", 7) &&
-	    !strncmp(scsi_result + 16, "CD-ROM", 6) &&
-	    scsi_result[0] == TYPE_DISK) {
-		scsi_result[0] = TYPE_ROM;
-		scsi_result[1] |= 0x80;		/* removable */
+	bflags = get_device_flags (scsi_result);
+
+
+	 /*   The Toshiba ROM was "gender-changed" here as an inline hack.
+	      This is now much more generic.
+	      This is a mess: What we really want is to leave the scsi_result
+	      alone, and just change the SDpnt structure. And the SDpnt is what
+	      we want print_inquiry to print.  -- REW
+	 */
+	if (bflags & BLIST_ISDISK) {
+		scsi_result[0] = TYPE_DISK;                                                
+		scsi_result[1] |= 0x80;     /* removable */
 	}
+
+	if (bflags & BLIST_ISROM) {
+		scsi_result[0] = TYPE_ROM;
+		scsi_result[1] |= 0x80;     /* removable */
+	}
+    
+  	if (bflags & BLIST_GHOST) {
+		if ((ghost_channel == channel) && (ghost_dev == dev) && (org_lun == 1)) {
+			lun=1;
+		} else {
+			ghost_channel = channel;
+			ghost_dev = dev;
+			scsi_result[0] = TYPE_MOD;
+			scsi_result[1] |= 0x80;     /* removable */
+		}
+	}
+       
+
 	memcpy(SDpnt->vendor, scsi_result + 8, 8);
 	memcpy(SDpnt->model, scsi_result + 16, 16);
 	memcpy(SDpnt->rev, scsi_result + 32, 4);
@@ -839,10 +885,6 @@ int scan_scsis_single(int channel, int dev, int lun, int *max_dev_lun,
 	 */
 	SDpnt->disconnect = 0;
 
-	/*
-	 * Get any flags for this device.
-	 */
-	bflags = get_device_flags(scsi_result);
 
 	/*
 	 * Set the tagged_queue flag for SCSI-II devices that purport to support
@@ -885,8 +927,8 @@ int scan_scsis_single(int channel, int dev, int lun, int *max_dev_lun,
 		scsi_cmd[5] = 0;
 		SCpnt->cmd_len = 0;
 		scsi_wait_cmd (SCpnt, (void *) scsi_cmd,
-                	(void *) scsi_result, 0x2a,
-                	scan_scsis_done, SCSI_TIMEOUT, 3);
+	        	(void *) scsi_result, 0x2a,
+	        	scan_scsis_done, SCSI_TIMEOUT, 3);
 	}
 	/*
 	 * Detach the command from the device. It was just a temporary to be used while
@@ -961,6 +1003,17 @@ int scan_scsis_single(int channel, int dev, int lun, int *max_dev_lun,
 		*max_dev_lun = 5;
 		return 1;
 	}
+
+	/*
+	 * If this device is Ghosted, scan upto two luns. (It physically only
+	 * has one). -- REW
+	 */
+	if (bflags & BLIST_GHOST) {
+	        *max_dev_lun = 2;
+	        return 1;
+	}  
+
+
 	/*
 	 * We assume the device can't handle lun!=0 if: - it reports scsi-0 (ANSI
 	 * SCSI Revision 0) (old drives like MAXTOR XT-3280) or - it reports scsi-1
@@ -1201,9 +1254,14 @@ Scsi_Cmnd *scsi_allocate_device(struct request ** reqp, Scsi_Device * device,
 		}
 		if (!SCpnt || SCpnt->request.rq_status != RQ_INACTIVE) {	/* Might have changed */
 			if (wait && SCwait && SCwait->request.rq_status != RQ_INACTIVE) {
-				spin_unlock(&io_request_lock);	/* FIXME!!!! */
-				sleep_on(&device->device_wait);
-				spin_lock_irq(&io_request_lock);	/* FIXME!!!! */
+				DECLARE_WAITQUEUE(wait,current);
+				add_wait_queue(&device->device_wait,&wait);
+				current->state=TASK_UNINTERRUPTIBLE;
+				spin_unlock(&io_request_lock);
+				schedule();
+				current->state=TASK_RUNNING;
+				remove_wait_queue(&device->device_wait,&wait);
+				spin_lock_irq(&io_request_lock);
 			} else {
 				if (!wait)
 					return NULL;
@@ -1966,6 +2024,9 @@ void scsi_build_commandblocks(Scsi_Device * SDpnt)
 		SDpnt->has_cmdblocks = 1;
 }
 
+static ssize_t proc_scsi_gen_write(struct file * file, const char * buf,
+                              unsigned long length, void *data);
+
 #ifndef MODULE			/* { */
 /*
  * scsi_dev_init() is our initialization routine, which in turn calls host
@@ -1977,6 +2038,7 @@ int __init scsi_dev_init(void)
 	Scsi_Device *SDpnt;
 	struct Scsi_Host *shpnt;
 	struct Scsi_Device_Template *sdtpnt;
+	struct proc_dir_entry *generic;
 #ifdef FOO_ON_YOU
 	return;
 #endif
@@ -1993,7 +2055,13 @@ int __init scsi_dev_init(void)
 		return -ENOMEM;
 	}
 	
-	create_proc_info_entry ("scsi/scsi", 0, 0, scsi_proc_info);
+	generic = create_proc_info_entry ("scsi/scsi", 0, 0, scsi_proc_info);
+	if (!generic) {
+		printk (KERN_ERR "cannot init /proc/scsi/scsi\n");
+		remove_proc_entry("scsi", 0);
+		return -ENOMEM;
+	}
+	generic->write_proc = proc_scsi_gen_write;
 #endif
 
 	/* Init a few things so we can "malloc" memory. */
@@ -2102,10 +2170,57 @@ static void print_inquiry(unsigned char *data)
 		printk("\n");
 }
 
-
 #ifdef CONFIG_PROC_FS
-static int scsi_proc_info(char *buffer, char **start, off_t offset,
-			  int length, int inout)
+static int scsi_proc_info(char *buffer, char **start, off_t offset, int length)
+{
+	Scsi_Device *scd;
+	struct Scsi_Host *HBA_ptr;
+	int size, len = 0;
+	off_t begin = 0;
+	off_t pos = 0;
+
+	/*
+	 * First, see if there are any attached devices or not.
+	 */
+	for (HBA_ptr = scsi_hostlist; HBA_ptr; HBA_ptr = HBA_ptr->next) {
+		if (HBA_ptr->host_queue != NULL) {
+			break;
+		}
+	}
+	size = sprintf(buffer + len, "Attached devices: %s\n", (HBA_ptr) ? "" : "none");
+	len += size;
+	pos = begin + len;
+	for (HBA_ptr = scsi_hostlist; HBA_ptr; HBA_ptr = HBA_ptr->next) {
+#if 0
+		size += sprintf(buffer + len, "scsi%2d: %s\n", (int) HBA_ptr->host_no,
+				HBA_ptr->hostt->procname);
+		len += size;
+		pos = begin + len;
+#endif
+		for (scd = HBA_ptr->host_queue; scd; scd = scd->next) {
+			proc_print_scsidevice(scd, buffer, &size, len);
+			len += size;
+			pos = begin + len;
+
+			if (pos < offset) {
+				len = 0;
+				begin = pos;
+			}
+			if (pos > offset + length)
+				goto stop_output;
+		}
+	}
+
+stop_output:
+	*start = buffer + (offset - begin);	/* Start of wanted data */
+	len -= (offset - begin);	/* Start slop */
+	if (len > length)
+		len = length;	/* Ending slop */
+	return (len);
+}
+
+static ssize_t proc_scsi_gen_write(struct file * file, const char * buf,
+                              unsigned long length, void *data)
 {
 	Scsi_Cmnd *SCpnt;
 	struct Scsi_Device_Template *SDTpnt;
@@ -2113,52 +2228,19 @@ static int scsi_proc_info(char *buffer, char **start, off_t offset,
 	struct Scsi_Host *HBA_ptr;
 	char *p;
 	int host, channel, id, lun;
-	int size, len = 0;
-	off_t begin = 0;
-	off_t pos = 0;
+	char * buffer;
+	int err;
 
-	if (inout == 0) {
-		/*
-		 * First, see if there are any attached devices or not.
-		 */
-		for (HBA_ptr = scsi_hostlist; HBA_ptr; HBA_ptr = HBA_ptr->next) {
-			if (HBA_ptr->host_queue != NULL) {
-				break;
-			}
-		}
-		size = sprintf(buffer + len, "Attached devices: %s\n", (HBA_ptr) ? "" : "none");
-		len += size;
-		pos = begin + len;
-		for (HBA_ptr = scsi_hostlist; HBA_ptr; HBA_ptr = HBA_ptr->next) {
-#if 0
-			size += sprintf(buffer + len, "scsi%2d: %s\n", (int) HBA_ptr->host_no,
-					HBA_ptr->hostt->procname);
-			len += size;
-			pos = begin + len;
-#endif
-			for (scd = HBA_ptr->host_queue; scd; scd = scd->next) {
-				proc_print_scsidevice(scd, buffer, &size, len);
-				len += size;
-				pos = begin + len;
+	if (!buf || length>PAGE_SIZE)
+		return -EINVAL;
 
-				if (pos < offset) {
-					len = 0;
-					begin = pos;
-				}
-				if (pos > offset + length)
-					goto stop_output;
-			}
-		}
+	if (!(buffer = (char *) __get_free_page(GFP_KERNEL)))
+		return -ENOMEM;
+	copy_from_user(buffer, buf, length);
 
-	stop_output:
-		*start = buffer + (offset - begin);	/* Start of wanted data */
-		len -= (offset - begin);	/* Start slop */
-		if (len > length)
-			len = length;	/* Ending slop */
-		return (len);
-	}
-	if (!buffer || length < 11 || strncmp("scsi", buffer, 4))
-		return (-EINVAL);
+	err = -EINVAL;
+	if (length < 11 || strncmp("scsi", buffer, 4))
+		goto out;
 
 	/*
 	 * Usage: echo "scsi dump #N" > /proc/scsi/scsi
@@ -2171,7 +2253,7 @@ static int scsi_proc_info(char *buffer, char **start, off_t offset,
 		p = buffer + 10;
 
 		if (*p == '\0')
-			return (-EINVAL);
+			goto out;
 
 		level = simple_strtoul(p, NULL, 0);
 		scsi_dump_status(level);
@@ -2205,7 +2287,7 @@ static int scsi_proc_info(char *buffer, char **start, off_t offset,
 				 */
 				scsi_logging_level = 0;
 			} else {
-				return (-EINVAL);
+				goto out;
 			}
 		} else {
 			*p++ = '\0';
@@ -2236,7 +2318,7 @@ static int scsi_proc_info(char *buffer, char **start, off_t offset,
 			} else if (strcmp(token, "ioctl") == 0) {
 				SCSI_SET_IOCTL_LOGGING(level);
 			} else {
-				return (-EINVAL);
+				goto out;
 			}
 		}
 
@@ -2271,8 +2353,9 @@ static int scsi_proc_info(char *buffer, char **start, off_t offset,
 				break;
 			}
 		}
+		err = -ENXIO;
 		if (!HBA_ptr)
-			return (-ENXIO);
+			goto out;
 
 		for (scd = HBA_ptr->host_queue; scd; scd = scd->next) {
 			if ((scd->channel == channel
@@ -2282,8 +2365,9 @@ static int scsi_proc_info(char *buffer, char **start, off_t offset,
 			}
 		}
 
+		err = -ENOSYS;
 		if (scd)
-			return (-ENOSYS);	/* We do not yet support unplugging */
+			goto out;	/* We do not yet support unplugging */
 
 		scan_scsis(HBA_ptr, 1, channel, id, lun);
 
@@ -2293,8 +2377,8 @@ static int scsi_proc_info(char *buffer, char **start, off_t offset,
 		if (HBA_ptr->select_queue_depths != NULL)
 			(HBA_ptr->select_queue_depths) (HBA_ptr, HBA_ptr->host_queue);
 
-		return (length);
-
+		err = length;
+		goto out;
 	}
 	/*
 	 * Usage: echo "scsi remove-single-device 0 1 2 3" >/proc/scsi/scsi
@@ -2321,8 +2405,9 @@ static int scsi_proc_info(char *buffer, char **start, off_t offset,
 				break;
 			}
 		}
+		err = -ENODEV;
 		if (!HBA_ptr)
-			return (-ENODEV);
+			goto out;
 
 		for (scd = HBA_ptr->host_queue; scd; scd = scd->next) {
 			if ((scd->channel == channel
@@ -2333,10 +2418,11 @@ static int scsi_proc_info(char *buffer, char **start, off_t offset,
 		}
 
 		if (scd == NULL)
-			return (-ENODEV);	/* there is no such device attached */
+			goto out;	/* there is no such device attached */
 
+		err = -EBUSY;
 		if (scd->access_count)
-			return (-EBUSY);
+			goto out;
 
 		SDTpnt = scsi_devicelist;
 		while (SDTpnt != NULL) {
@@ -2366,11 +2452,14 @@ static int scsi_proc_info(char *buffer, char **start, off_t offset,
 			}
 			scsi_init_free((char *) scd, sizeof(Scsi_Device));
 		} else {
-			return (-EBUSY);
+			goto out;
 		}
-		return (0);
+		err = 0;
 	}
-	return (-EINVAL);
+out:
+	
+	free_page((unsigned long) buffer);
+	return err;
 }
 #endif
 
@@ -2746,6 +2835,7 @@ static void scsi_unregister_host(Scsi_Host_Template * tpnt)
 	struct Scsi_Host *shpnt;
 	Scsi_Host_Template *SHT;
 	Scsi_Host_Template *SHTp;
+	char name[10];	/* host_no>=10^9? I don't think so. */
 
 	/*
 	 * First verify that this host adapter is completely free with no pending
@@ -2887,7 +2977,8 @@ static void scsi_unregister_host(Scsi_Host_Template * tpnt)
 			continue;
 		pcount = next_scsi_host;
 		/* Remove the /proc/scsi directory entry */
-		remove_proc_entry(shpnt->proc_name, tpnt->proc_dir);
+		sprintf(name,"%d",shpnt->host_no);
+		remove_proc_entry(name, tpnt->proc_dir);
 		if (tpnt->release)
 			(*tpnt->release) (shpnt);
 		else {
@@ -3238,6 +3329,7 @@ int init_module(void)
 {
 	unsigned long size;
 	int has_space = 0;
+	struct proc_dir_entry *generic;
 
 	/*
 	 * This makes /proc/scsi and /proc/scsi/scsi visible.
@@ -3248,7 +3340,13 @@ int init_module(void)
 		printk (KERN_ERR "cannot init /proc/scsi\n");
 		return -ENOMEM;
 	}
-	create_proc_info_entry ("scsi/scsi", 0, 0, scsi_proc_info);
+	generic = create_proc_info_entry ("scsi/scsi", 0, 0, scsi_proc_info);
+	if (!generic) {
+		printk (KERN_ERR "cannot init /proc/scsi/scsi\n");
+		remove_proc_entry("scsi", 0);
+		return -ENOMEM;
+	}
+	generic->write_proc = proc_scsi_gen_write;
 #endif
 
 	scsi_loadable_module_flag = 1;

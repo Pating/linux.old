@@ -449,6 +449,9 @@ void __init setup_memory_region(void)
 			case E820_ACPI:
 					printk("(ACPI data)\n");
 					break;
+			case E820_NVS:
+					printk("(ACPI NVS)\n");
+					break;
 			default:	printk("type %lu\n", e820.map[i].type);
 					break;
 			}
@@ -634,7 +637,6 @@ void __init setup_arch(char **cmdline_p)
 	highstart_pfn = highend_pfn = max_pfn;
 	if (max_pfn > MAXMEM_PFN) {
 		highstart_pfn = MAXMEM_PFN;
-		highend_pfn = max_pfn;
 		printk(KERN_NOTICE "%ldMB HIGHMEM available.\n",
 			pages_to_mb(highend_pfn - highstart_pfn));
 	}

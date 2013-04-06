@@ -55,7 +55,7 @@ sio_init_irq(void)
 }
 
 static inline void __init
-xl_init_arch(unsigned long *mem_start, unsigned long *mem_end)
+xl_init_arch(void)
 {
 	struct pci_controler *hose;
 
@@ -93,7 +93,7 @@ xl_init_arch(unsigned long *mem_start, unsigned long *mem_end)
 	 * Create our single hose.
 	 */
 
-	hose = alloc_pci_controler(mem_start);
+	hose = alloc_pci_controler();
 	hose->io_space = &ioport_resource;
 	hose->mem_space = &iomem_resource;
 	hose->config_space = LCA_CONF;
@@ -101,7 +101,7 @@ xl_init_arch(unsigned long *mem_start, unsigned long *mem_end)
 }
 
 static inline void __init
-alphabook1_init_arch(unsigned long *mem_start, unsigned long *mem_end)
+alphabook1_init_arch(void)
 {
 	/* The AlphaBook1 has LCD video fixed at 800x600,
 	   37 rows and 100 cols. */
@@ -109,7 +109,7 @@ alphabook1_init_arch(unsigned long *mem_start, unsigned long *mem_end)
 	screen_info.orig_video_cols = 100;
 	screen_info.orig_video_lines = 37;
 
-	lca_init_arch(mem_start, mem_end);
+	lca_init_arch();
 }
 
 
@@ -238,8 +238,8 @@ p2k_map_irq(struct pci_dev *dev, u8 slot, u8 pin)
 static inline void __init
 noname_init_pci(void)
 {
-	sio_pci_route();
 	common_init_pci();
+	sio_pci_route();
 	sio_fixup_irq_levels(sio_collect_irq_levels());
 	ns87312_enable_ide(0x26e);
 }
@@ -250,8 +250,8 @@ alphabook1_init_pci(void)
 	struct pci_dev *dev;
 	unsigned char orig, config;
 
-	sio_pci_route();
 	common_init_pci();
+	sio_pci_route();
 
 	/*
 	 * On the AlphaBook1, the PCMCIA chip (Cirrus 6729)

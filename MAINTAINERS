@@ -110,7 +110,7 @@ S:	Maintained
 
 ADVANSYS SCSI DRIVER
 P:	Bob Frey
-M:	Bob Frey <bobf@advansys.com>
+M:	linux@advansys.com
 W:	http://www.advansys.com/linux.html
 L:	linux-scsi@vger.rutgers.edu
 S:	Maintained
@@ -799,6 +799,12 @@ M:	bh@sgi.com
 P:	Ingo Molnar
 M:	mingo@redhat.com
 S:	Maintained
+
+SIS 900/7016 FAST ETHERNET DRIVER
+P:	Ollie Lho
+M:	ollie@sis.com.tw
+L:	linux-net@vger.rutgers.edu
+S:	Supported
 
 SMB FILESYSTEM
 P:	Andrew Tridgell

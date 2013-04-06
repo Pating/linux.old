@@ -47,7 +47,6 @@
 static const char *version =
     "8390.c:v1.10cvs 9/23/94 Donald Becker (becker@cesdis.gsfc.nasa.gov)\n";
 
-#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/sched.h>
@@ -1090,10 +1089,7 @@ static void NS8390_trigger_send(struct net_device *dev, unsigned int length,
 								int start_page)
 {
 	long e8390_base = dev->base_addr;
-#if defined(CONFIG_MAC) || defined(CONFIG_AMIGA_PCMCIA) || \
-    defined(CONFIG_ARIADNE2) || defined(CONFIG_ARIADNE2_MODULE)
- 	struct ei_device *ei_local = (struct ei_device *) dev->priv;
-#endif
+ 	struct ei_device *ei_local __attribute((unused)) = (struct ei_device *) dev->priv;
    
 	outb_p(E8390_NODMA+E8390_PAGE0, e8390_base+E8390_CMD);
     

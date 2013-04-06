@@ -25,7 +25,6 @@
     $Header: /vger/u4/cvs/linux/drivers/scsi/hosts.h,v 1.6 1997/01/19 23:07:13 davem Exp $
 */
 
-#include <linux/config.h>
 #include <linux/proc_fs.h>
 
 /* It is senseless to set SG_ALL any higher than this - the performance
@@ -327,7 +326,6 @@ struct Scsi_Host
 /* public: */
     unsigned short extra_bytes;
     unsigned short host_no;  /* Used for IOCTL_GET_IDLUN, /proc/scsi et al. */
-    char proc_name[4];
     int resetting; /* if set, it means that last_reset is a valid value */
     unsigned long last_reset;
 
@@ -351,7 +349,7 @@ struct Scsi_Host
     unsigned wish_block:1;
 
     /* These parameters should be set by the detect routine */
-    unsigned char *base;
+    unsigned long base;
     unsigned long io_port;
     unsigned char n_io_port;
     unsigned char dma_channel;
@@ -487,11 +485,7 @@ extern void scsi_unregister_module(int, void *);
  * Even bigger hack for SparcSTORAGE arrays. Those are at least 6 disks, but
  * usually up to 30 disks, so everyone would need to change this. -jj
  */
-#ifdef CONFIG_SCSI_PLUTO_MODULE
 #define SD_EXTRA_DEVS 40
-#else
-#define SD_EXTRA_DEVS 4
-#endif
 #define ST_EXTRA_DEVS 2
 #define SR_EXTRA_DEVS 2
 #define SG_EXTRA_DEVS (SD_EXTRA_DEVS + SR_EXTRA_DEVS + ST_EXTRA_DEVS)
