@@ -438,6 +438,7 @@ parent->d_name.name, dentry->d_name.name);
 
 	/* Ok, remeber that we successfully checked it.. */
 	nfs_renew_times(dentry);
+	nfs_refresh_inode(inode, &fattr);
 
 out_valid:
 	return 1;
@@ -571,11 +572,6 @@ show_dentry(&inode->i_dentry);
 			error = 0;
 		}
 	}
-#ifdef NFS_PARANOIA
-if (error)
-printk("nfs_lookup: %s/%s failed, error=%d\n",
-dentry->d_parent->d_name.name, dentry->d_name.name, error);
-#endif
 out:
 	return error;
 }

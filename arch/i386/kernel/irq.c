@@ -189,7 +189,7 @@ BUILD_IRQ(60) BUILD_IRQ(61) BUILD_IRQ(62) BUILD_IRQ(63)
 /*
  * The following vectors are part of the Linux architecture, there
  * is no hardware IRQ pin equivalent for them, they are triggered
- * through the ICC by us (IPIs), via smp_message_pass():
+ * through the ICC by us (IPIs)
  */
 BUILD_SMP_INTERRUPT(reschedule_interrupt)
 BUILD_SMP_INTERRUPT(invalidate_interrupt)
@@ -297,7 +297,7 @@ int get_irq_list(char *buf)
 	}
 	p += sprintf(p, "NMI: %10u\n", atomic_read(&nmi_counter));
 #ifdef __SMP__
-	p += sprintf(p, "IPI: %10lu\n", ipi_count);
+	p += sprintf(p, "ERR: %10lu\n", ipi_count);
 #endif		
 	return p - buf;
 }
@@ -709,7 +709,7 @@ void enable_irq(unsigned int irq)
 	spin_lock_irqsave(&irq_controller_lock, flags);
 	switch (irq_desc[irq].depth) {
 	case 1:
-		irq_desc[irq].status &= ~IRQ_DISABLED;
+		irq_desc[irq].status &= ~(IRQ_DISABLED | IRQ_INPROGRESS);
 		irq_desc[irq].handler->enable(irq);
 		/* fall throught */
 	default:
@@ -989,22 +989,22 @@ __initfunc(void init_IRQ(void))
 	 */
 
 	/* IPI for rescheduling */
-	set_intr_gate(0x30, reschedule_interrupt);
+	set_intr_gate(RESCHEDULE_VECTOR, reschedule_interrupt);
 
 	/* IPI for invalidation */
-	set_intr_gate(0x31, invalidate_interrupt);
+	set_intr_gate(INVALIDATE_TLB_VECTOR, invalidate_interrupt);
 
 	/* IPI for CPU halt */
-	set_intr_gate(0x40, stop_cpu_interrupt);
+	set_intr_gate(STOP_CPU_VECTOR, stop_cpu_interrupt);
 
 	/* self generated IPI for local APIC timer */
-	set_intr_gate(0x41, apic_timer_interrupt);
+	set_intr_gate(LOCAL_TIMER_VECTOR, apic_timer_interrupt);
 
 	/* IPI for MTRR control */
-	set_intr_gate(0x50, mtrr_interrupt);
+	set_intr_gate(MTRR_CHANGE_VECTOR, mtrr_interrupt);
 
 	/* IPI vector for APIC spurious interrupts */
-	set_intr_gate(0xff, spurious_interrupt);
+	set_intr_gate(SPURIOUS_APIC_VECTOR, spurious_interrupt);
 #endif	
 	request_region(0x20,0x20,"pic1");
 	request_region(0xa0,0x20,"pic2");
