@@ -670,6 +670,7 @@ int fb_prepare_logo(struct fb_info *info)
 	case FB_VISUAL_MONO10:
 		fb_logo.needs_logo = 1;
 		break;
+	case FB_VISUAL_PSEUDOCOLOR:
 	case FB_VISUAL_STATIC_PSEUDOCOLOR:
 		if (fb_logo.depth >= 8) {
 			fb_logo.needs_logo = 8;
@@ -1111,13 +1112,11 @@ fb_mmap(struct file *file, struct vm_area_struct * vma)
 #elif defined(__mips__)
 	pgprot_val(vma->vm_page_prot) &= ~_CACHE_MASK;
 	pgprot_val(vma->vm_page_prot) |= _CACHE_UNCACHED;
-#elif defined(__arm__)
-	vma->vm_page_prot = pgprot_noncached(vma->vm_page_prot);
 #elif defined(__sh__)
 	pgprot_val(vma->vm_page_prot) &= ~_PAGE_CACHABLE;
 #elif defined(__hppa__)
 	pgprot_val(vma->vm_page_prot) |= _PAGE_NO_CACHE;
-#elif defined(__ia64__)
+#elif defined(__ia64__) || defined(__arm__)
 	vma->vm_page_prot = pgprot_writecombine(vma->vm_page_prot);
 #else
 #warning What do we have to do here??
