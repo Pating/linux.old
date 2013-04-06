@@ -134,13 +134,20 @@ checkCPUtype:
 isnew:	pushl %ecx		# restore original EFLAGS
 	popfl
 	incl SYMBOL_NAME(have_cpuid)	# we have CPUID
+	/*
+ 	 *	Technically we should use CPUID 0 to see if we have CPUID 1!
+	 */
 	/* get processor type */
 	movl $1, %eax		# Use the CPUID instruction to 
+#ifdef GAS_KNOWS_CPUID
+	cpuid			# check the processor type
+#else
 	.byte 0x0f, 0xa2	# check the processor type
+#endif
 	movb %al, %cl		# save reg for future use
 	andb $0x0f,%ah		# mask processor family
 	movb %ah,SYMBOL_NAME(x86)
-	andb $0xf0, %eax	# mask model
+	andb $0xf0, %al		# mask model
 	shrb $4, %al
 	movb %al,SYMBOL_NAME(x86_model)
 	andb $0x0f, %cl		# mask mask revision
@@ -148,7 +155,11 @@ isnew:	pushl %ecx		# restore original EFLAGS
 	movl %edx,SYMBOL_NAME(x86_capability)
 	/* get vendor info */
 	xorl %eax, %eax			# call CPUID with 0 -> return vendor ID
+#ifdef GAS_KNOWS_CPUID
+	cpuid
+#else
 	.byte 0x0f, 0xa2		# CPUID
+#endif
 	movl %ebx,SYMBOL_NAME(x86_vendor_id)	# lo 4 chars
 	movl %edx,SYMBOL_NAME(x86_vendor_id)+4	# next 4 chars
 	movl %ecx,SYMBOL_NAME(x86_vendor_id)+8	# last 4 chars
@@ -171,8 +182,8 @@ is386:	pushl %ecx		# restore original EFLAGS
 2:	movl %eax,%cr0
 	call check_x87
 #ifdef __SMP__
-	movb ready,%eax
-	orb %eax,%eax
+	movb ready,%al
+	orb %al,%al
 	jz 3f	
 	movl $ SYMBOL_NAME(swapper_pg_dir), %eax
 	movl %eax, %cr3

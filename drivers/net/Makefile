@@ -148,7 +148,7 @@ ifeq ($(CONFIG_ULTRA32),y)
 L_OBJS += smc-ultra32.o
 CONFIG_8390_BUILTIN = y
 else
-  ifeq ($(CONFIG_ULTRA),m)
+  ifeq ($(CONFIG_ULTRA32),m)
   CONFIG_8390_MODULE = y
   M_OBJS += smc-ultra32.o
   endif
@@ -247,8 +247,9 @@ endif
 
 ifeq ($(CONFIG_LANCE),y)
 L_OBJS += lance.o
-  ifeq ($(CONFIG_LANCE32),y)
-  L_OBJS += lance32.o
+else
+  ifeq ($(CONFIG_LANCE),m)
+  M_OBJS += lance.o
   endif
 endif
 
@@ -296,6 +297,14 @@ else
   endif
 endif
 
+ifeq ($(CONFIG_3C515),y)
+L_OBJS += 3c515.o
+else
+  ifeq ($(CONFIG_3C515),m)
+  M_OBJS += 3c515.o
+  endif
+endif
+
 ifeq ($(CONFIG_VORTEX),y)
 L_OBJS += 3c59x.o
 else
@@ -328,6 +337,47 @@ else
   endif
 endif
 
+ifeq ($(CONFIG_EPIC),y)
+L_OBJS += epic100.o
+else
+  ifeq ($(CONFIG_EPIC),m)
+  M_OBJS += epic100.o
+  endif
+endif
+
+ifeq ($(CONFIG_NE2K_PCI),y)
+L_OBJS += ne2k-pci.o
+CONFIG_8390_BUILTIN = y
+else
+  ifeq ($(CONFIG_NE2K_PCI),m)
+  CONFIG_8390_MODULE = y
+  M_OBJS += ne2k-pci.o
+  endif
+endif
+
+ifeq ($(CONFIG_PCNET32),y)
+L_OBJS += pcnet32.o
+else
+  ifeq ($(CONFIG_PCNET32),m)
+  M_OBJS += pcnet32.o
+  endif
+endif
+
+ifeq ($(CONFIG_RTL8139),y)
+L_OBJS += rtl8139.o
+else
+  ifeq ($(CONFIG_RTL8139),m)
+  M_OBJS += rtl8139.o
+  endif
+endif
+
+ifeq ($(CONFIG_YELLOWFIN),y)
+L_OBJS += yellowfin.o
+else
+  ifeq ($(CONFIG_YELLOWFIN),m)
+  M_OBJS += yellowfin.o
+  endif
+endif
 
 ifeq ($(CONFIG_WAVELAN),y)
 L_OBJS += wavelan.o
@@ -359,6 +409,10 @@ endif
 
 ifeq ($(CONFIG_ATP),y)
 L_OBJS += atp.o
+else
+  ifeq ($(CONFIG_ATP),m)
+  M_OBJS += atp.o
+  endif
 endif
 
 ifeq ($(CONFIG_DE4X5),y)
@@ -420,6 +474,14 @@ L_OBJS += tulip.o
 else
   ifeq ($(CONFIG_DEC_ELCP),m)
   M_OBJS += tulip.o
+  endif
+endif
+
+ifeq ($(CONFIG_TLAN),y)
+L_OBJS += tlan.o
+else
+  ifeq ($(CONFIG_TLAN),m)
+  M_OBJS += tlan.o
   endif
 endif
 

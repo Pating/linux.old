@@ -519,9 +519,10 @@ int sr_ioctl(struct inode * inode, struct file * file, unsigned int cmd, unsigne
 	return result;
     }
 	
-    case CDROMREADMODE2:
-	return -EINVAL;
+    /* these are compatible with the ide-cd driver */
+    case CDROMREADRAW:
     case CDROMREADMODE1:
+    case CDROMREADMODE2:
 	return -EINVAL;
 	
 	/* block-copy from ../block/sbpcd.c with some adjustments... */

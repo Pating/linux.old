@@ -17,7 +17,7 @@
  * 
  * Author:  Marco van Wieringen <mvw@mcs.ow.nl> <mvw@tnix.net>
  * 
- * Fixes:   Dmitry Gorodchanin <begemot@bgm.rosprint.net>, 11 Feb 96
+ * Fixes:   Dmitry Gorodchanin <pgmdsg@ibi.com>, 11 Feb 96
  *	    removed race conditions in dqput(), dqget() and iput(). 
  *          Nick Kralevich <nickkral@cal.alumni.berkeley.edu>, 21 Jul 97
  *          Fixed a condition where user and group quotas could get mixed up.
@@ -231,8 +231,13 @@ static void write_dquot(struct dquot *dquot)
 			unlock_dquot(dquot);
 			return;
 		}
-	} else
-		filp->f_pos = dqoff(dquot->dq_id);
+	}
+	else
+	{
+		int p = dqoff(dquot->dq_id);
+		if(p>=0)
+			filp->f_pos = p;
+	}
 	fs = get_fs();
 	set_fs(KERNEL_DS);
 	if (filp->f_op->write(filp->f_inode, filp,
@@ -1074,6 +1079,9 @@ asmlinkage int sys_quotactl(int cmd, const char *special, int id, caddr_t addr)
 		default:
 			return(-EINVAL);
 	}
+
+	if (id & ~0xFFFF)
+		return(-EINVAL);
 
 	flags |= QUOTA_SYSCALL;
 	if (has_quota_enabled(dev, type))

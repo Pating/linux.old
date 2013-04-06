@@ -87,6 +87,7 @@ struct symbol_table symbol_table = {
 
 	/* stackable module support */
 	X(register_symtab_from),
+	X(get_module_symbol),
 #ifdef CONFIG_KERNELD
 	X(kerneld_send),
 #endif
@@ -162,6 +163,7 @@ struct symbol_table symbol_table = {
 	X(__brelse),
 	X(__bforget),
 	X(ll_rw_block),
+	X(brw_page),
 	X(__wait_on_buffer),
 	X(mark_buffer_uptodate),
 	X(unlock_buffer),

@@ -2,6 +2,7 @@
 /* By Ross Biro 1/23/92 */
 /* edited by Linus Torvalds */
 
+#include <linux/config.h> /* CONFIG_MATH_EMULATION */
 #include <linux/head.h>
 #include <linux/kernel.h>
 #include <linux/sched.h>
@@ -688,3 +689,9 @@ asmlinkage void syscall_trace(void)
 		current->signal |= (1 << (current->exit_code - 1));
 	current->exit_code = 0;
 }
+
+void get_pt_regs_for_task(struct pt_regs *regs, struct task_struct *task)
+{
+        *regs = *(struct pt_regs *) (((unsigned char *) task->tss.esp0) - MAGICNUMBER);
+}
+

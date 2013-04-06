@@ -9,6 +9,9 @@
 #include <linux/config.h>
 #include <linux/fs.h>
 
+#ifdef CONFIG_NLS
+#include <linux/nls.h>
+#endif
 #include <linux/minix_fs.h>
 #include <linux/ext_fs.h>
 #include <linux/ext2_fs.h>
@@ -42,6 +45,10 @@ asmlinkage int sys_setup(void)
 	device_setup();
 
 	binfmt_setup();
+
+#ifdef CONFIG_NLS
+	init_nls();
+#endif
 
 #ifdef CONFIG_EXT_FS
 	init_ext_fs();

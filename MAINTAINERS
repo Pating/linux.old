@@ -82,7 +82,7 @@ S:	Maintained
 
 8390 NETWORK DRIVERS [WD80x3/SMC-ELITE, SMC-ULTRA, NE2000, 3C503, etc.]
 P:	Paul Gortmaker
-M	gpg109@rsphy1.anu.edu.au
+M:	gpg109@rsphy1.anu.edu.au
 L:	linux-net@vger.rutgers.edu
 S:	Maintained
 
@@ -97,6 +97,12 @@ P:	Philip Blundell
 M:	phil@tazenda.demon.co.uk
 L:	linux-net@vger.rutgers.edu
 S:	Maintained
+
+TLAN NETWORK DRIVER
+P:	James Banks
+M:	james.banks@caldera.com
+L:	linux-net@vger.rutgers.edu
+S:	Supported
 
 DIGI RIGHTSWITCH NETWORK DRIVER
 P:	Rick Richardson
@@ -342,7 +348,7 @@ S:	Maintained
 
 RISCOM8 DRIVER:
 P:	Dmitry Gorodchanin
-M:	begemot@bgm.rosprint.net
+M:	pgmdsg@ibi.com
 L:	linux-kernel@vger.rutgers.edu
 S:	Maintained
 
@@ -416,6 +422,12 @@ DEVICE NUMBER REGISTRY
 P:	H. Peter Anvin
 M:	hpa@zytor.com
 L:	linux-kernel@vger.rutgers.edu
+S:	Maintained
+
+WD7000 SCSI DRIVER
+P:	Miroslav Zagorac
+M:	zaga@fly.cc.fer.hr
+L:	linux-scsi@vger.rutgers.edu
 S:	Maintained
 
 REST:

@@ -370,7 +370,7 @@ void tcp_write_xmit(struct sock *sk)
                          * a packet that contains both old and new data. (Feh!)
                          * Soooo, we have this uglyness here.
                          */
-			if (after(sk->rcv_ack_seq,skb->seq+th->syn+th->fin))
+			if (after(sk->rcv_ack_seq,skb->seq+th->syn))
 				tcp_shrink_skb(sk,skb,sk->rcv_ack_seq);
 
 			size = skb->len - (((unsigned char *) th) - skb->data);
@@ -487,6 +487,21 @@ void tcp_do_retransmit(struct sock *sk, int all)
 
 		iph = (struct iphdr *)skb->data;
 		th = (struct tcphdr *)(((char *)iph) + (iph->ihl << 2));
+
+		/* See if we need to shrink the leading packet on
+		 * the retransmit queue. Strictly speaking, we
+		 * should never need to do this, but some buggy TCP
+		 * implementations get confused if you send them
+		 * a packet that contains both old and new data. (Feh!)
+		 * Soooo, we have this uglyness here.
+		 *
+		 * Is the && test needed here? If so, then it implies that
+		 * we might be retransmitting an acked packet. This code is
+		 * needed here to talk to Solaris 2.6 stack.
+		 */
+		if (after(sk->rcv_ack_seq,skb->seq+th->syn) && before(sk->rcv_ack_seq, skb->end_seq))
+			tcp_shrink_skb(sk,skb,sk->rcv_ack_seq);
+
 		size = ntohs(iph->tot_len) - (iph->ihl<<2);
 		
 		/*
@@ -546,7 +561,7 @@ void tcp_do_retransmit(struct sock *sk, int all)
 				struct sk_buff *skb2 = sk->write_queue.next;
 				while (skb2 && skb2->dev == skb->dev) {
 					skb2->raddr=rt->rt_gateway;
-                                        if (sk->state == TCP_SYN_SENT && sysctl_ip_dynaddr)
+                                        if (sysctl_ip_dynaddr & 4 || (sk->state == TCP_SYN_SENT && sysctl_ip_dynaddr & 3))
                                                 ip_rewrite_addrs (sk, skb2, dev);
 					skb_pull(skb2,((unsigned char *)skb2->ip_hdr)-skb2->data);
 					skb2->dev = dev;
@@ -572,7 +587,7 @@ void tcp_do_retransmit(struct sock *sk, int all)
 				}
 			}
 			skb->raddr=rt->rt_gateway;
-                        if (skb->dev !=dev && sk->state == TCP_SYN_SENT && sysctl_ip_dynaddr)
+			if ((skb->dev !=dev || skb->dev->pa_addr != skb->ip_hdr->saddr) && (sysctl_ip_dynaddr & 4 || (sk->state == TCP_SYN_SENT && sysctl_ip_dynaddr & 3)))
                                 ip_rewrite_addrs(sk, skb, dev);
 			skb->dev=dev;
 			skb->arp=1;
@@ -820,6 +835,7 @@ void tcp_send_synack_probe(unsigned long saddr, unsigned long daddr, struct tcph
 	t1->urg = 0;
 	t1->rst = 0;
 	t1->psh = 0;
+	t1->fin = 0;		/* In case someone sent us a SYN|FIN frame! */
 	t1->doff = sizeof(*t1)/4;
 
 	tcp_send_check(t1, saddr, daddr, sizeof(*t1), buff);
@@ -1398,6 +1414,10 @@ void tcp_send_probe0(struct sock *sk)
  * Needed to deal with buggy TCP implementations that can't deal
  * with seeing a packet that contains some data that has already
  * been received.
+ *
+ * Note that the SYN sequence number is at the start of the packet
+ * while the FIN is at the end. This means that we always clear out
+ * the SYN bit, and never clear out the FIN bit.
  */
 void tcp_shrink_skb(struct sock *sk, struct sk_buff *skb, u32 ack)
 {
@@ -1415,9 +1435,9 @@ void tcp_shrink_skb(struct sock *sk, struct sk_buff *skb, u32 ack)
 	th = (struct tcphdr *)(((char *)iph) +(iph->ihl << 2));
 
 	/* how much data are we droping from the tcp frame */
-	diff = ack - skb->seq;
+	diff = ack - (skb->seq + th->syn);
 	/* how much data are we keeping in the tcp frame */
-	len = (skb->end_seq - (th->fin + th->syn)) - ack;
+	len = (skb->end_seq - th->fin) - ack;
 
 	/* pointers to new start of remaining data, and old start */
 	new = (unsigned char *)th + th->doff*4;
@@ -1426,6 +1446,7 @@ void tcp_shrink_skb(struct sock *sk, struct sk_buff *skb, u32 ack)
 	/* Update our starting seq number */
 	skb->seq = ack;
 	th->seq = htonl(ack);
+	th->syn = 0;		/* Turn SYN off as it is logically at the start of the packet */
 
 	iph->tot_len = htons(ntohs(iph->tot_len)-diff);
 	ip_send_check(iph);

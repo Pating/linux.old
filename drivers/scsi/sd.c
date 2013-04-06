@@ -259,6 +259,21 @@ static void rw_intr (Scsi_Cmnd *SCpnt)
       }
     
     /*
+     * Handle RECOVERED ERRORs that indicate success after recovery action
+     * by the target device.
+     */
+
+    if (SCpnt->sense_buffer[0] == 0xF0 &&	    /* Sense data is valid */
+	SCpnt->sense_buffer[2] == RECOVERED_ERROR)
+      {
+	printk("scsidisk recovered I/O error: dev %s, sector %lu, absolute sector %lu\n",
+	       kdevname(SCpnt->request.rq_dev), SCpnt->request.sector, 
+	       SCpnt->request.sector + sd[MINOR(SCpnt->request.rq_dev)].start_sect);
+	good_sectors = this_count;
+	result = 0;
+      }
+
+    /*
      * First case : we assume that the command succeeded.  One of two things 
      * will happen here.  Either we will be finished, or there will be more
      * sectors that we were unable to read last time.
@@ -1360,14 +1375,21 @@ static int sd_init()
     return 0;
 }
 
-static void sd_finish()
+static void sd_finish(void)
 {
+    struct gendisk *gendisk;
     int i;
 
     blk_dev[MAJOR_NR].request_fn = DEVICE_REQUEST;
     
-    sd_gendisk.next = gendisk_head;
-    gendisk_head = &sd_gendisk;
+    for (gendisk = gendisk_head; gendisk != NULL; gendisk = gendisk->next)
+      if (gendisk == &sd_gendisk)
+	break;
+    if (gendisk == NULL)
+      {
+	sd_gendisk.next = gendisk_head;
+	gendisk_head = &sd_gendisk;
+      }
     
     for (i = 0; i < sd_template.dev_max; ++i)
 	if (!rscsi_disks[i].capacity && 

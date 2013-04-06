@@ -573,12 +573,13 @@ static int empty_dir (struct inode * inode)
 	    	ext2_warning (inode->i_sb, "empty_dir",
 			      "bad directory (dir #%lu) - no `.' or `..'",
 			      inode->i_ino);
+		brelse (bh);
 		return 1;
 	}
 	offset = de->rec_len + de1->rec_len;
 	de = (struct ext2_dir_entry *) ((char *) de1 + de1->rec_len);
 	while (offset < inode->i_size ) {
-		if ((void *) de >= (void *) (bh->b_data + sb->s_blocksize)) {
+		if (!bh || (void *) de >= (void *) (bh->b_data + sb->s_blocksize)) {
 			brelse (bh);
 			bh = ext2_bread (inode, offset >> EXT2_BLOCK_SIZE_BITS(sb), 1, &err);
 			if (!bh) {

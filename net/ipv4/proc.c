@@ -29,6 +29,7 @@
  *		as published by the Free Software Foundation; either version
  *		2 of the License, or (at your option) any later version.
  */
+#include <linux/config.h>
 #include <asm/system.h>
 #include <linux/sched.h>
 #include <linux/socket.h>
@@ -166,6 +167,10 @@ int raw_get_info(char *buffer, char **start, off_t offset, int length, int dummy
  */
 int afinet_get_info(char *buffer, char **start, off_t offset, int length, int dummy)
 {
+#ifdef CONFIG_SYN_COOKIES
+	extern unsigned int ui_c_send_cookies;
+	static unsigned int ui_c_last_send_cookies = 0;
+#endif	
 	/* From  net/socket.c  */
 	extern int socket_get_info(char *, char **, off_t, int);
 	extern struct proto packet_prot;
@@ -180,6 +185,13 @@ int afinet_get_info(char *buffer, char **start, off_t offset, int length, int du
 		       raw_prot.inuse, raw_prot.highestinuse);
 	len += sprintf(buffer+len,"PAC: inuse %d highest %d\n",
 		       packet_prot.inuse, packet_prot.highestinuse);
+ 
+#if defined(CONFIG_SYN_COOKIES)
+	len += sprintf(buffer+len,"SYN_COOKIES: count %u since_last_check %u\n",
+        	ui_c_send_cookies, (ui_c_send_cookies - ui_c_last_send_cookies));
+
+	ui_c_last_send_cookies = ui_c_send_cookies;
+#endif
 	*start = buffer + offset;
 	len -= offset;
 	if (len > length)

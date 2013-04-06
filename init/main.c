@@ -78,6 +78,7 @@ extern void msmouse_setup(char *str, int *ints);
 extern void lp_setup(char *str, int *ints);
 extern void eth_setup(char *str, int *ints);
 extern void xd_setup(char *str, int *ints);
+extern void xd_manual_geo_init(char *str, int *ints);
 extern void floppy_setup(char *str, int *ints);
 extern void st_setup(char *str, int *ints);
 extern void st0x_setup(char *str, int *ints);
@@ -361,6 +362,7 @@ struct {
 #endif
 #ifdef CONFIG_BLK_DEV_XD
 	{ "xd=", xd_setup },
+	{ "xd_geo=", xd_manual_geo_init },
 #endif
 #ifdef CONFIG_BLK_DEV_FD
 	{ "floppy=", floppy_setup },
@@ -452,7 +454,7 @@ static void ramdisk_start_setup(char *str, int *ints)
 static void load_ramdisk(char *str, int *ints)
 {
    if (ints[0] > 0 && ints[1] >= 0)
-      rd_doload = ints[1] & 1;
+      rd_doload = ints[1] & 3;
 }
 
 static void prompt_ramdisk(char *str, int *ints)
@@ -565,11 +567,26 @@ static void parse_root_dev(char * line)
 		{ "hdb",     0x0340 },
 		{ "hdc",     0x1600 },
 		{ "hdd",     0x1640 },
+		{ "hde",     0x2100 },
+		{ "hdf",     0x2140 },
+		{ "hdg",     0x2200 },
+		{ "hdh",     0x2240 },
 		{ "sda",     0x0800 },
 		{ "sdb",     0x0810 },
 		{ "sdc",     0x0820 },
 		{ "sdd",     0x0830 },
 		{ "sde",     0x0840 },
+		{ "sdf",     0x0850 },
+		{ "sdg",     0x0860 },
+		{ "sdh",     0x0870 },
+		{ "sdi",     0x0880 },
+		{ "sdj",     0x0890 },
+		{ "sdk",     0x08a0 },
+		{ "sdl",     0x08b0 },
+		{ "sdm",     0x08c0 },
+		{ "sdn",     0x08d0 },
+		{ "sdo",     0x08e0 },
+		{ "sdp",     0x08f0 },
 		{ "fd",      0x0200 },
 		{ "xda",     0x0d00 },
 		{ "xdb",     0x0d40 },

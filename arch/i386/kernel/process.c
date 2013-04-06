@@ -421,8 +421,9 @@ void flush_thread(void)
 	int i;
 
 	if (current->ldt) {
-		free_page((unsigned long) current->ldt);
+		void * ldt = current->ldt;
 		current->ldt = NULL;
+		vfree(ldt);
 		for (i=1 ; i<NR_TASKS ; i++) {
 			if (task[i] == current)  {
 				set_ldt_desc(gdt+(i<<1)+
@@ -487,7 +488,7 @@ void copy_thread(int nr, unsigned long clone_flags, unsigned long esp,
 	}
 	set_tss_desc(gdt+(nr<<1)+FIRST_TSS_ENTRY,&(p->tss));
 	if (p->ldt)
-		set_ldt_desc(gdt+(nr<<1)+FIRST_LDT_ENTRY,p->ldt, 512);
+		set_ldt_desc(gdt+(nr<<1)+FIRST_LDT_ENTRY,p->ldt, LDT_ENTRIES);
 	else
 		set_ldt_desc(gdt+(nr<<1)+FIRST_LDT_ENTRY,&default_ldt, 1);
 	p->tss.bitmap = offsetof(struct thread_struct,io_bitmap);

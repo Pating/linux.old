@@ -20,14 +20,12 @@ dep_tristate 'Adaptec AHA1542 support' CONFIG_SCSI_AHA1542 $CONFIG_SCSI
 dep_tristate 'Adaptec AHA1740 support' CONFIG_SCSI_AHA1740 $CONFIG_SCSI
 dep_tristate 'Adaptec AIC7xxx support' CONFIG_SCSI_AIC7XXX $CONFIG_SCSI
 if [ "$CONFIG_SCSI_AIC7XXX" != "n" ]; then
-    bool '   Enable tagged command queueing' CONFIG_AIC7XXX_TAGGED_QUEUEING Y
     bool '   Override driver defaults for commands per LUN' CONFIG_OVERRIDE_CMDS N
     if [ "$CONFIG_OVERRIDE_CMDS" != "n" ]; then
-      int  '   Maximum number of commands per LUN' CONFIG_AIC7XXX_CMDS_PER_LUN 8
+      int  '   Maximum number of commands per LUN' CONFIG_AIC7XXX_CMDS_PER_LUN 24
     fi
-    bool '   Enable SCB paging' CONFIG_AIC7XXX_PAGE_ENABLE N
     bool '   Collect statistics to report in /proc' CONFIG_AIC7XXX_PROC_STATS N
-    int  '   Delay in seconds after SCSI bus reset' CONFIG_AIC7XXX_RESET_DELAY 15
+    int  '   Delay in seconds after SCSI bus reset' CONFIG_AIC7XXX_RESET_DELAY 5
 fi
 dep_tristate 'AdvanSys SCSI support' CONFIG_SCSI_ADVANSYS $CONFIG_SCSI
 dep_tristate 'Always IN2000 SCSI support' CONFIG_SCSI_IN2000 $CONFIG_SCSI
@@ -79,6 +77,9 @@ if [ "$CONFIG_PCI" = "y" -a "$CONFIG_SCSI_NCR53C7xx" != "y" ]; then
   fi
 fi
 dep_tristate 'IOMEGA Parallel Port ZIP drive SCSI support' CONFIG_SCSI_PPA $CONFIG_SCSI
+if [ "$CONFIG_SCSI_PPA" != "n" ]; then
+    bool '  Buggy EPP chipset support' CONFIG_SCSI_PPA_HAVE_PEDANTIC
+fi
 dep_tristate 'PAS16 SCSI support' CONFIG_SCSI_PAS16 $CONFIG_SCSI
 dep_tristate 'Qlogic FAS SCSI support' CONFIG_SCSI_QLOGIC_FAS $CONFIG_SCSI
 if [ "$CONFIG_PCI" = "y" ]; then

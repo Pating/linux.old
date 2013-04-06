@@ -104,7 +104,7 @@ static void mark_screen_rdonly(struct task_struct * tsk)
 
 
 
-static do_vm86_irq_handling(int subfunction, int irqnumber);
+static int do_vm86_irq_handling(int subfunction, int irqnumber);
 static void do_sys_vm86(struct kernel_vm86_struct *info, struct task_struct *tsk);
 
 asmlinkage int sys_vm86old(struct vm86_struct * v86)
@@ -611,7 +611,7 @@ static int do_vm86_irq_handling(int subfunction, int irqnumber)
 			int sig = irqnumber >> 8;
 			int irq = irqnumber & 255;
 			handle_irq_zombies();
-			if (!suser()) return -EPERM;
+			if (!suser() || securelevel > 0) return -EPERM;
 			if (!((1 << sig) & ALLOWED_SIGS)) return -EPERM;
 			if ( (irq<3) || (irq>15) ) return -EPERM;
 			if (vm86_irqs[irq].tsk) return -EPERM;
