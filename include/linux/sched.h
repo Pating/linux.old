@@ -147,7 +147,7 @@ struct mm_struct {
 	struct semaphore mmap_sem;
 	unsigned long context;
 	unsigned long start_code, end_code, start_data, end_data;
-	unsigned long start_brk, brk, start_stack, start_mmap;
+	unsigned long start_brk, brk, start_stack;
 	unsigned long arg_start, arg_end, env_start, env_end;
 	unsigned long rss, total_vm, locked_vm;
 	unsigned long def_flags;
@@ -159,7 +159,7 @@ struct mm_struct {
 		MUTEX,					\
 		0,					\
 		0, 0, 0, 0,				\
-		0, 0, 0, 0,				\
+		0, 0, 0, 				\
 		0, 0, 0, 0,				\
 		0, 0, 0,				\
 		0, 0 }
@@ -179,17 +179,18 @@ struct signal_struct {
 struct task_struct {
 /* these are hardcoded - don't touch */
 	volatile long state;	/* -1 unrunnable, 0 runnable, >0 stopped */
-	long counter;
-	long priority;
 	unsigned long flags;	/* per process flags, defined below */
 	int sigpending;
-	long debugreg[8];  /* Hardware debugging registers */
-	struct exec_domain *exec_domain;
-/* various fields */
 	mm_segment_t addr_limit;	/* thread address space:
 					 	0-0xBFFFFFFF for user-thead
 						0-0xFFFFFFFF for kernel-thread
 					 */
+	struct exec_domain *exec_domain;
+
+/* various fields */
+	long debugreg[8];  /* Hardware debugging registers */
+	long counter;
+	long priority;
 	struct linux_binfmt *binfmt;
 	struct task_struct *next_task, *prev_task;
 	struct task_struct *next_run,  *prev_run;
@@ -230,6 +231,7 @@ struct task_struct {
 	struct timer_list real_timer;
 	struct tms times;
 	unsigned long start_time;
+	long per_cpu_utime[NR_CPUS], per_cpu_stime[NR_CPUS];
 /* mm fault and swap info: this can arguably be seen as either mm-specific or thread-specific */
 	unsigned long min_flt, maj_flt, nswap, cmin_flt, cmaj_flt, cnswap;
 	int swappable:1;
@@ -311,10 +313,9 @@ struct task_struct {
  * your own risk!. Base=0, limit=0x1fffff (=2MB)
  */
 #define INIT_TASK \
-/* state etc */	{ 0,DEF_PRIORITY,DEF_PRIORITY,0,0, \
+/* state etc */	{ 0,0,0,KERNEL_DS,&default_exec_domain, \
 /* debugregs */ { 0, },            \
-/* exec domain */&default_exec_domain, \
-/* mm_seg */	KERNEL_DS, \
+/* counter */	DEF_PRIORITY,DEF_PRIORITY, \
 /* binfmt */	NULL, \
 /* schedlink */	&init_task,&init_task, &init_task, &init_task, \
 /* ec,brk... */	0,0,0,0,0,0, \
@@ -328,6 +329,7 @@ struct task_struct {
 /* timeout */	0,SCHED_OTHER,0,0,0,0,0,0,0, \
 /* timer */	{ NULL, NULL, 0, 0, it_real_fn }, \
 /* utime */	{0,0,0,0},0, \
+/* per cpu times */ {0, 0, }, {0, 0, }, \
 /* flt */	0,0,0,0,0,0, \
 /* swp */	0,0,0,0,0, \
 /* rlimits */   INIT_RLIMITS, \
