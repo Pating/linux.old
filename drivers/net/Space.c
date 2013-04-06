@@ -120,7 +120,7 @@ extern int via_rhine_probe(struct device *dev);
 extern int tc515_probe(struct device *dev);
 extern int lance_probe(struct device *dev);
 extern int rcpci_probe(struct device *);
-extern int dmfe_reg_board(struct device *);
+extern int dmfe_probe(struct device *);
 
 /* Gigabit Ethernet adapters */
 extern int yellowfin_probe(struct device *dev);
@@ -145,6 +145,9 @@ extern int iph5526_probe(struct device *dev);
 
 /* SBNI adapters */
 extern int sbni_probe(struct device *);
+
+/* WAN Adapters */
+extern int lmc_probe_fake(struct device *);
 
 struct devprobe
 {
@@ -201,6 +204,9 @@ struct devprobe pci_probes[] __initdata = {
 #ifdef CONFIG_EEXPRESS_PRO100	/* Intel EtherExpress Pro/100 */
 	{eepro100_probe, 0},
 #endif
+#ifdef CONFIG_LANMEDIA          /* Lanmedia must be before Tulip */
+        {lmc_probe_fake, 0},
+#endif
 #if defined(CONFIG_DEC_ELCP) || defined(CONFIG_DEC_ELCP_OLD)
 	{tulip_probe, 0},
 #endif
@@ -221,7 +227,7 @@ struct devprobe pci_probes[] __initdata = {
 #endif
 
 #ifdef CONFIG_DM9102
-	{dmfe_reg_board, 0}, 
+	{dmfe_probe, 0}, 
 #endif
 
 #ifdef CONFIG_YELLOWFIN
@@ -237,7 +243,7 @@ struct devprobe pci_probes[] __initdata = {
 	{via_rhine_probe, 0},
 #endif
 #ifdef CONFI_NET_DM9102
-	{dmfe_reg_board, 0},
+	{dmfe_probe, 0},
 #endif	
 	{NULL, 0},
 };
@@ -623,6 +629,12 @@ static int fcif_probe(struct device *dev)
 #   define NEXT_DEV	(&tap0_dev)
 #endif
 
+#ifdef CONFIG_LANMEDIA
+static struct device lmc_dev = { "lmc_dev", 0, 0, 0, 0, 0, 0, 0, 0, 0, NEXT_DEV, lmc_probe_fake, };
+#    undef NEXT_DEV
+#    define NEXT_DEV    (&lmc_dev)
+#endif
+
 #ifdef CONFIG_SDLA
     extern int sdla_init(struct device *);
     static struct device sdla0_dev = { "sdla0", 0, 0, 0, 0, 0, 0, 0, 0, 0, NEXT_DEV, sdla_init, };
@@ -779,6 +791,7 @@ struct device eql_dev = {
 /* Token-ring device probe */
 extern int ibmtr_probe(struct device *);
 extern int olympic_probe(struct device *);
+extern int streamer_probe(struct device *);
 
 static int
 trif_probe(struct device *dev)
@@ -790,6 +803,9 @@ trif_probe(struct device *dev)
 #ifdef CONFIG_IBMOL
 	&& olympic_probe(dev)
 #endif
+#ifdef CONFIG_IBMLS
+	&& streamer_probe(dev)
+#endif	
 #ifdef CONFIG_SKTR
 	&& sktr_probe(dev)
 #endif

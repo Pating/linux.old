@@ -91,9 +91,6 @@
 #include <linux/config.h>
 #include <linux/version.h>
 #include <linux/tqueue.h>
-#ifdef CONFIG_APM
-#include <linux/apm_bios.h>
-#endif
 
 #include <asm/io.h>
 #include <asm/system.h>
@@ -186,6 +183,12 @@ DECLARE_TASK_QUEUE(con_task_queue);
  * For the same reason, we defer scrollback to the console_bh.
  */
 static int scrollback_delta = 0;
+
+/*
+ * Hook so that the power management routines can (un)blank
+ * the console on our behalf.
+ */
+int (*console_blank_hook)(int) = NULL;
 
 /*
  *	Low-Level Functions
@@ -355,7 +358,7 @@ static u8 build_attr(int currcons, u8 _color, u8 _intensity, u8 _blink, u8 _unde
 static void update_attr(int currcons)
 {
 	attr = build_attr(currcons, color, intensity, blink, underline, reverse ^ decscnm);
-	video_erase_char = (build_attr(currcons, color, 1, 0, 0, decscnm) << 8) | ' ';
+	video_erase_char = (build_attr(currcons, color, 1, blink, 0, decscnm) << 8) | ' ';
 }
 
 /* Note: inverting the screen twice should revert to the original state */
@@ -2539,10 +2542,8 @@ void do_blank_screen(int entering_gfx)
 	if (i)
 		set_origin(currcons);
 
-#ifdef CONFIG_APM
-	if (apm_display_blank())
+	if (console_blank_hook && console_blank_hook(1))
 		return;
-#endif
     	if (vesa_blank_mode)
 		sw->con_blank(vc_cons[currcons].d, vesa_blank_mode + 1);
 }
@@ -2566,9 +2567,8 @@ void unblank_screen(void)
 
 	currcons = fg_console;
 	console_blanked = 0;
-#ifdef CONFIG_APM
-	apm_display_unblank();
-#endif
+	if (console_blank_hook)
+		console_blank_hook(0);
 	if (sw->con_blank(vc_cons[currcons].d, 0))
 		/* Low-level driver cannot restore -> do it ourselves */
 		update_screen(fg_console);

@@ -216,7 +216,7 @@ S:	Maintained
 
 CYCLADES ASYNC MUX DRIVER
 P:	Ivan Passos
-M:	Ivan Passos <ivan@cyclades.com>
+M:	ivan@cyclades.com
 W:	http://www.cyclades.com/
 S:	Supported
 
@@ -250,9 +250,9 @@ S:	Maintained
 
 DIGI INTL. EPCA DRIVER
 P:      Daniel Taylor
-M:      support@dgii.com
-M:      danielt@dgii.com
-L:      digilnux@dgii.com
+M:      support@digi.com
+M:      danielt@digi.com
+L:      digilnux@digi.com
 S:      Maintained
 
 DIGI RIGHTSWITCH NETWORK DRIVER
@@ -302,6 +302,11 @@ EATA-PIO SCSI DRIVER
 P:	Michael Neuffer
 M:	mike@i-Connect.Net
 L:	linux-eata@i-connect.net, linux-scsi@vger.rutgers.edu
+S:	Maintained
+
+EEPRO100 NETWORK DRIVER
+P:	Andrey V. Savochkin
+M:	saw@saw.sw.com.sg
 S:	Maintained
 
 ETHEREXPRESS-16 NETWORK DRIVER
@@ -463,6 +468,19 @@ L:	linux-joystick@atrey.karlin.mff.cuni.cz
 W:	http://www.suse.cz/development/joystick/
 S:	Maintained
 
+KCTT DRIVER FOR ANTENNA ROTORS
+P:	Jean-Paul Roubelat
+M:	jpr@f6fbb.org
+L:	linux-hams@vger.rutgers.edu
+S:	Maintained
+
+KERNEL  (2.2.XX TREE)
+P:      Alan Cox
+M:	Alan.Cox@linux.org
+L:      linux-kernel@vger.rutgers.edu
+W:      http://www.kernel.org/pub/linux/kernel/alan/
+S:      Maintained
+
 KERNEL AUTOMOUNTER (AUTOFS)
 P:	H. Peter Anvin
 M:	hpa@zytor.com
@@ -475,6 +493,12 @@ M:	gam3@acm.org
 L:	nfs-devel@linux.kernel.org (Linux NFS)
 W:	http://csua.berkeley.edu/~gam3/knfsd
 S:	Maintained
+
+LANMEDIA WAN CARD DRIVER
+P:	Andrew Stanley-Jones
+M:	asj@lanmedia.com
+W:      http://www.lanmedia.com/
+S:	Supported
 
 LAPB module
 P:	Henner Eisen
@@ -542,8 +566,8 @@ L:	linux-kernel@vger.rutgers.edu
 S:	Maintained
 
 MODULE SUPPORT [GENERAL], KERNELD
-P:	Richard Henderson
-M:	richard@gnu.ai.mit.edu
+P:	Keith Owens
+M:	kaos@ocs.com.au
 L:	linux-kernel@vger.rutgers.edu
 S:	Maintained
 
@@ -632,7 +656,7 @@ S:	Maintained
 
 OPL3-SA2, SA3, and SAx DRIVER
 P:	Scott Murray
-M:	scottm@interlog.com
+M:	scott@spiteful.org
 L:	linux-sound@vger.rutgers.edu
 S:	Maintained
 
@@ -694,6 +718,13 @@ M:	longyear@pobox.com
 L:	linux-ppp@vger.rutgers.edu
 S:	Maintained
 
+QNX4 FILESYSTEM
+P:	Anders Larsen
+M:	al@alarsen.net
+L:	linux-kernel@vger.rutgers.edu
+W:	http://www.alarsen.net/linux/qnx4fs/
+S:	Maintained
+
 REAL TIME CLOCK DRIVER
 P:	Paul Gortmaker
 M:	p_gortmaker@yahoo.com
@@ -701,8 +732,8 @@ L:	linux-kernel@vger.rutgers.edu
 S:	Maintained
 
 ROSE NETWORK LAYER
-P:	Frederic Rible
-M:	frible@teaser.fr
+P:	Jean-Paul Roubelat
+M:	jpr@f6fbb.org
 L:	linux-hams@vger.rutgers.edu
 S:	Maintained
 
@@ -710,6 +741,13 @@ RISCOM8 DRIVER
 P:	Dmitry Gorodchanin
 M:	pgmdsg@ibi.com
 L:	linux-kernel@vger.rutgers.edu
+S:	Maintained
+
+RTLINUX  REALTIME  LINUX
+P:	Victor Yodaiken
+M:	yodaiken@fsmlabs.com
+L:	rtl@rtlinux.org
+W:	www.rtlinux.org
 S:	Maintained
 
 SBPCD CDROM DRIVER
@@ -795,9 +833,7 @@ L:	linux-net@vger.rutgers.edu
 S:	Supported
 
 STALLION TECHNOLOGIES MULTIPORT SERIAL BOARDS
-P:	Greg Ungerer
 M:	support@stallion.oz.au
-M:	gerg@stallion.com
 W:	http://www.stallion.com
 S:	Supported
 
@@ -902,6 +938,12 @@ X.25 NETWORK LAYER
 P:	Henner Eisen
 M:	eis@baty.hanse.de
 L:	linux-x25@vger.rutgers.edu
+S:	Maintained
+
+YAM DRIVER FOR AX.25
+P:	Jean-Paul Roubelat
+M:	jpr@f6fbb.org
+L:	linux-hams@vger.rutgers.edu
 S:	Maintained
 
 Z85230 SYNCHRONOUS DRIVER

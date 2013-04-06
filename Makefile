@@ -1,6 +1,6 @@
 VERSION = 2
 PATCHLEVEL = 2
-SUBLEVEL = 14
+SUBLEVEL = 15
 EXTRAVERSION = 
 
 ARCH := $(shell uname -m | sed -e s/i.86/i386/ -e s/sun4u/sparc64/ -e s/arm.*/arm/ -e s/sa110/arm/)
@@ -202,6 +202,10 @@ ifeq ($(CONFIG_IRDA),y)
 DRIVERS := $(DRIVERS) drivers/net/irda/irda_drivers.a
 endif
 
+ifeq ($(CONFIG_I2O),y)
+DRIVERS := $(DRIVERS) drivers/i2o/i2o.a
+endif
+
 ifeq ($(CONFIG_PHONE),y)
 DRIVERS := $(DRIVERS) drivers/telephony/telephony.a
 endif
@@ -278,8 +282,8 @@ include/linux/compile.h: $(CONFIGURATION) include/linux/version.h newversion
 	@echo -n \#define UTS_VERSION \"\#`cat .version` > .ver
 	@if [ -n "$(CONFIG_SMP)" ] ; then echo -n " SMP" >> .ver; fi
 	@if [ -f .name ]; then  echo -n \-`cat .name` >> .ver; fi
-	@echo ' '`date`'"' >> .ver
-	@echo \#define LINUX_COMPILE_TIME \"`date +%T`\" >> .ver
+	@echo ' '`LANG=C date`'"' >> .ver
+	@echo \#define LINUX_COMPILE_TIME \"`LANG=C date +%T`\" >> .ver
 	@echo \#define LINUX_COMPILE_BY \"`whoami`\" >> .ver
 	@echo \#define LINUX_COMPILE_HOST \"`hostname`\" >> .ver
 	@if [ -x /bin/dnsdomainname ]; then \
@@ -313,7 +317,7 @@ ifdef CONFIG_MODVERSIONS
 MODFLAGS += -DMODVERSIONS -include $(HPATH)/linux/modversions.h
 endif
 
-modules: $(patsubst %, _mod_%, $(SUBDIRS))
+modules: include/config/MARKER $(patsubst %, _mod_%, $(SUBDIRS))  
 
 $(patsubst %, _mod_%, $(SUBDIRS)) : include/linux/version.h
 	$(MAKE) -C $(patsubst _mod_%, %, $@) CFLAGS="$(CFLAGS) $(MODFLAGS)" MAKING_MODULES=1 modules

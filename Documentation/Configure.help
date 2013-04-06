@@ -2550,6 +2550,20 @@ CONFIG_IP_MASQUERADE
   kernel whenever you want; read Documentation/modules.txt for
   details.
 
+IP: UDP masquerading loose checking
+CONFIG_IP_MASQUERADE_UDP_LOOSE
+  Whether UDP masquerading does address checking in a loose fashion.
+
+  If you say Y here, then UDP masqueraded connections will allow
+  any external system to be connect back through the firewall to the
+  port on the internal machine.  However it will allow the more
+  efficient use of masqueraded ports, and may be required for some
+  gaming uses.
+
+  You should only say Y here if you understand the consequences since
+  it will open your internal network to external probing and potential
+  attacks.  In all other cases choose N
+
 IP: ICMP masquerading
 CONFIG_IP_MASQUERADE_ICMP
   The basic masquerade code described for "IP: masquerading" above
@@ -2573,7 +2587,7 @@ CONFIG_IP_MASQUERADE_MOD
 
   You will need the user space program "ipmasqadm" to use these
   additional modules; you can download it from
-  http://juanjox.linuxhq.com/
+  http://juanjox.kernelnotes.org/
 
   All this additional code is still under development and so is
   currently marked EXPERIMENTAL.
@@ -2588,7 +2602,7 @@ CONFIG_IP_MASQUERADE_IPAUTOFW
   ftp://ftp.netis.com/pub/members/rlynch/
 
   You will also need the ipmasqadm tool available from
-  http://juanjox.linuxhq.com/ .
+  http://juanjox.kernelnotes.org/ .
 
   The ipautofw code is still under development and so is currently
   marked EXPERIMENTAL. If you want to try it, say Y.
@@ -2619,7 +2633,7 @@ CONFIG_IP_MASQUERADE_IPPORTFW
   see ftp://ftp.compsoc.net/users/steve/ipportfw/linux21/
 
   You will need the user space program "ipmasqadm" which can be
-  downloaded from http://juanjox.linuxhq.com/
+  downloaded from http://juanjox.kernelnotes.org/
 
   The portfw code is still under development and so is currently
   marked EXPERIMENTAL. If you want to try it, say Y.
@@ -3481,12 +3495,11 @@ CONFIG_BRIDGE
   other third party bridge products. 
 
   In order to use this, you'll need the bridge configuration tools
-  available via FTP (user: anonymous) from
-  ftp://shadow.cabi.net/pub/Linux. Please read the Bridge mini-HOWTO
-  for more information. Note that if your box acts as a bridge, it
-  probably contains several Ethernet devices, but the kernel is not
-  able to recognize more than one at boot time without help; for
-  details read the Ethernet-HOWTO, available via FTP (user: anonymous)
+  available from http://lrp.plain.co.nz/tarballs/bridgex-0.30.tar.gz
+  Note that if your box acts as a bridge, it probably contains several
+  Ethernet devices, but the kernel is not able to recognize more than 
+  one ISA ethernet card at boot time without help; for  details read 
+  the Ethernet-HOWTO, available via FTP (user: anonymous)
   in ftp://metalab.unc.edu/pub/Linux/docs/HOWTO. The Bridging code is
   still in test. If unsure, say N.
 
@@ -5490,6 +5503,31 @@ CONFIG_COSA
   The module will be called cosa.o. For general information about
   modules read Documentation/modules.txt.
 
+Lan Media sync serial boards support
+CONFIG_LANMEDIA
+  This is a driver for the following Lan Media family of serial boards.
+
+  LMC 1000 board allows you to connect synchronous serial devices (for
+  example base-band modems, or any other device with the X.21, V.24,
+  V.35 or V.36 interface) to your Linux box. 
+
+  LMC 1200 with on board DSU board allows you to connect your Linux
+  box dirrectly to a T1 or E1 circuit. 
+
+  LMC 5200 board provides a HSSI interface capable of runnig up to
+  52 mbits per second.
+
+  LMC 5245 board connects directly to a T3 circuit saving the
+  additional external hardware.
+
+  To change setting such as syncPPP vs cisco HDLC or clock source you
+  will need lmcctl.  It it available at ftp.lanmedia.com.
+
+  The driver will be compiled as a module ( = code which can be
+  inserted in and removed from the running kernel whenever you want).
+  The module will be called lmc.o. For general information about
+  modules read Documentation/modules.txt.
+
 Red Creek Hardware VPN (EXPERIMENTAL)
 CONFIG_RCPCI
   This is a driver for hardware which provides a Virtual Private
@@ -5941,10 +5979,11 @@ CONFIG_SK98LIN
   - SK-9844 (dual link   1000Base-SX)
   - SK-9821 (single link 1000Base-T)
   - SK-9822 (dual link   1000Base-T)
+  The adapters support Jumbo Frames.
   The dual link adapters support a link-failover feature.
   Read Documentation/networking/sk98lin.txt for information about
   optional driver parameters.
-  Questions concerning this driver may be addresse to:
+  Questions concerning this driver may be addressed to:
     linux@syskonnect.de
 
   If you want to compile this driver as a module ( = code which can be
@@ -6524,8 +6563,8 @@ CONFIG_DEC_ELCP_OLD
 
   This driver is also available as a module ( = code which can be
   inserted in and removed from the running kernel whenever you want).
-  The module will be called tulip.o. If you want to compile it as a
-  module, say M here and read Documentation/modules.txt as well as
+  The module will be called old_tulip.o. If you want to compile it as
+  a module, say M here and read Documentation/modules.txt as well as
   Documentation/networking/net-modules.txt.
 
 Digi Intl. RightSwitch support
@@ -6584,7 +6623,7 @@ CONFIG_TLAN
   module, say M here and read Documentation/modules.txt as well as
   Documentation/networking/net-modules.txt.
 
-  Please email feedback to james.banks@caldera.com.
+  Please email feedback to torben.mathiasen@compaq.com.
 
 VIA Rhine support
 CONFIG_VIA_RHINE
@@ -6742,11 +6781,26 @@ CONFIG_IBMOL
   Linux Token Ring Project site for the latest information at
   http://www.linuxtr.net
 
+IBM Lanstreamer chipset PCI adapter support
+CONFIG_IBMLS
+  This is support for IBM Lanstreamer PCI Token Ring Cards.
+
+  If you have such an adapter, say Y and read the Token-Ring mini-HOWTO
+  available via FTP (user:anonymous) from
+  ftp://metalab.unc/edu/pub/Linux/docs/HOWTO.
+
+  This driver is also available as a modules ( = code which can be
+  inserted in and removed from the running kernel whenever you want).
+  The modules will be called lanstreamer.o. If you want to compile it as
+  a module, say M here and read Documentation/modules.txt.
+
 SysKonnect adapter support
 CONFIG_SKTR
   This is support for all SysKonnect Token Ring cards, specifically
   SysKonnect TR4/16(+) ISA (SK-4190), SysKonnect TR4/16(+) PCI
   (SK-4590), SysKonnect TR4/16 PCI (SK-4591) adapters.
+  It also supports Compaq PCI Token Ring adapters and Proteon ISA
+  Token Ring adapters (1392 and 1392+).
 
   If you have such an adapter and would like to use it, say Y or M and
   read the Token-Ring mini-HOWTO, available via FTP (user: anonymous)
@@ -7539,11 +7593,11 @@ CONFIG_ROMFS_FS
   If you don't know whether you need it, then you don't need it:
   answer N.
 
-QNX filesystem support (EXPERIMENTAL)
+QNX4 filesystem support (EXPERIMENTAL)
 CONFIG_QNX4FS_FS  
   This is the filesystem used by the operating system QNX 4. Say Y if
   you intend to mount QNX hard disks or floppies. Unless you say Y to
-  "QNXFS read-write support" below, you will only be able to read
+  "QNX4FS write support" below, you will only be able to read
   these filesystems.
 
   This filesystem support is also available as a module ( = code which
@@ -7551,11 +7605,12 @@ CONFIG_QNX4FS_FS
   want). The module is called qnx4.o. If you want to compile it as a
   module, say M here and read Documentation/modules.txt. 
 
-  If unsure, say N.
+  If you don't know whether you need it, then you don't need it:
+  answer N.
 
-QNXFS read-write support (FOR TESTING ONLY)
+QNX4FS write support (DANGEROUS)
 CONFIG_QNX4FS_RW
-  Say Y if you want to test write support for QNX filesystems.
+  Say Y if you want to test write support for QNX4 filesystems.
 
 Kernel automounter support
 CONFIG_AUTOFS_FS
@@ -8365,6 +8420,44 @@ CONFIG_SPECIALIX_RTSCTS
   on, it will always be RTS. Read the file Documentation/specialix.txt
   for more information.
 
+Specialix SX card support
+CONFIG_SX
+  This is a driver for the Specialix SX multiport card (both the
+  ISA and the PCI version of both the older SI/XIO and the newer SX
+  variants of the card) which gives you many serial ports. You
+  would need something like this to connect more than two modems to 
+  your Linux box, for instance in order to become a dial-in server.
+  You will also need the specialix_sxtools package to be able to 
+  initialize and use the SX system. This driver does NOT support 
+  the rev 1 cards (+/- 1990), or the EISA version of the card. Sorry.
+
+  If you have one of these cards, say Y here and read the file
+  Documentation/sx.txt. Also it's possible to say M here and
+  compile this driver as kernel loadable module which will be called
+  sx.o.
+
+Specialix RIO system support
+CONFIG_RIO
+  This is a driver for the Specialix RIO hostcard (both the
+  ISA and the PCI versions of the card). This hostcard allows you
+  to connect many remote terminal adapters, each supporting 8 or 16
+  serial ports. These cards are ideal if you have more than 100 
+  terminals that need to be connected to your server. (But don't 
+  worry if you have only 32 ports.... That works too). You will 
+  also need the specialix_riotools to be able to initialize and
+  configure your rio system.  
+
+  If you have one of these cards, say Y here. Also it's possible to 
+  say M here and compile this driver as kernel loadable module which 
+  will be called rio.o.
+
+Specialix OLD RIO/PCI support 
+CONFIG_RIO_OLDPCI
+  This turns on support for the older PCI card. If you include
+  this support, performance on the newer cards will suffer a bit.
+
+  If you have one of these cards, say Y here.
+
 Cyclades async mux support
 CONFIG_CYCLADES
   This is a driver for a card that gives you many serial ports. You
@@ -8976,9 +9069,12 @@ CONFIG_MTRR
 
   The AMD K6-2 (stepping 8 and above) and K6-3 processors have two
   MTRRs. These are supported.
-  
-  The Centaur C6 (WinChip) has 8 MCRs, allowing write-combining. These
-  are supported.
+
+  The Centaur C6 (WinChip) and WinChip 2&3 processors have 8 MCRs. 
+  These are supported. Note that, due to the design of the WinChip 2&3, 
+  setting the access for normal memory to uncachable or write-combine
+  on these processors will result in instant kernel panic. It is okay 
+  to set this for non-cacheable (video) memory.
 
   Saying Y here also fixes a problem with buggy SMP BIOSes which only
   set the MTRRs for the boot CPU and not the secondary CPUs. This can
@@ -8997,8 +9093,8 @@ CONFIG_FT_ALPHA_CLOCK
 
 Zilog serial support
 CONFIG_SUN_ZS
-  This driver does not exist at this point, so you might as well 
-  say N.
+  If you are asked this question, something is wrong with config scripts.
+  Zilog serial driver is always enabled in sparc architecture.
 
 Double Talk PC internal speech card support
 CONFIG_DTLK
@@ -9025,8 +9121,8 @@ CONFIG_APM
   machines with more than one CPU.
 
   Supporting software is available; for more information, read the
-  Battery Powered Linux mini-HOWTO, available via FTP (user:
-  anonymous) from ftp://metalab.unc.edu/pub/Linux/docs/HOWTO/mini.
+  Battery Powered Linux mini-HOWTO, available from
+  http://www.linuxdoc.org/docs.html#howto .
 
   This driver does not spin down disk drives (see the hdparm(8)
   manpage ("man 8 hdparm") for that), and it doesn't turn off
@@ -9039,9 +9135,7 @@ CONFIG_APM
 
   If you are running Linux on a laptop, you may also want to read the
   Linux Laptop home page on the WWW at
-  http://www.cs.utexas.edu/users/kharker/linux-laptop/ (to browse the
-  WWW, you need to have access to a machine on the Internet that has a
-  program like lynx or netscape). 
+  http://www.cs.utexas.edu/users/kharker/linux-laptop/ .
 
   Generally, if you don't have a battery in your machine, there isn't
   much point in using this driver and you should say N. If you get
@@ -9112,18 +9206,6 @@ CONFIG_APM_DISPLAY_BLANK
   backlight at all, or it might print a lot of errors to the console,
   especially if you are using gpm.
 
-Power off on shutdown 
-CONFIG_APM_POWER_OFF
-  Enable the ability to power off the computer after the Linux kernel
-  is halted. You will need software (e.g., a suitable version of the
-  halt(8) command ("man 8 halt")) to cause the computer to power down.
-  Recent versions of the sysvinit package available from
-  ftp://metalab.unc.edu/pub/Linux/system/daemons/init/ (user:
-  anonymous) contain support for this ("halt -p" shuts down Linux and
-  powers off the computer, if executed from runlevel 0). As with the
-  other APM options, this option may not work reliably with some APM
-  BIOS implementations.
-
 Ignore multiple suspend/standby events
 CONFIG_APM_IGNORE_MULTIPLE_SUSPEND
   This option is necessary on the IBM Thinkpad 560, but should work on
@@ -9160,6 +9242,12 @@ CONFIG_APM_ALLOW_INTS
   needs to.  Unfortunately, some BIOSes do not - especially those in
   many of the newer IBM Thinkpads.  If you experience hangs when you
   suspend, try setting this to Y.  Otherwise, say N.
+
+Use real mode APM BIOS call to power off
+CONFIG_APM_REAL_MODE_POWER_OFF
+  Use real mode APM BIOS calls to switch off the computer. This is
+  a work-around for a number of buggy BIOSes. Switch this option on if
+  your computer crashes instead of powering off properly.
 
 Watchdog Timer Support 
 CONFIG_WATCHDOG
@@ -9903,6 +9991,19 @@ CONFIG_ACI_MIXER
   the radio tuner. This is supported in the video4linux
   radio-miropcm20 driver.
 
+Micronas Intermetall MSP 3400 support
+CONFIG_VIDEO_MSP3400
+  This option enables the driver for the Micronas Intermetall MSP 3400 
+  series sound decoder/mixer chips often found on BT848-style TV cards.
+
+  Say Y here if your sound card has a MSP 3400 series sound decoder or 
+  mixer chip.
+
+  This driver is also available as a module ( = code which can be
+  inserted in and removed from the running kernel whenever you want).
+  If you want to compile it as a module, say M here and read
+  Documentation/modules.txt. The module will be called msp3400.o.
+
 SB32/AWE support
 CONFIG_AWE32_SYNTH
   Say Y here if you have a Sound Blaster SB32, AWE32-PnP, SB AWE64 or
@@ -10262,11 +10363,16 @@ CONFIG_HISAX_NO_LLC
   If you have trouble with some ugly exchanges try to select this
   option.
 
+Disable keypad protocol option
+CONFIG_HISAX_NO_KEYPAD
+  If you like to send special dialstrings including * or # without
+  using the keypad protocol, select this option.
+
 HiSax Support for german 1TR6
 CONFIG_HISAX_1TR6
   Enable this if you have a old german 1TR6 line.
 
-HiSax Support for Teles 16.0/8.0
+Teles 16.0/8.0
 CONFIG_HISAX_16_0
   This enables HiSax support for the Teles ISDN-cards S0-16.0, S0-8
   and many compatibles. 
@@ -10275,7 +10381,7 @@ CONFIG_HISAX_16_0
   different cards, a different D-channel protocol, or non-standard
   IRQ/port/shmem settings.
 
-HiSax Support for Teles 16.3 or PNP or PCMCIA
+Teles 16.3 or PNP or PCMCIA
 CONFIG_HISAX_16_3
   This enables HiSax support for the Teles ISDN-cards S0-16.3 the
   Teles/Creatix PnP and the Teles PCMCIA.
@@ -10284,17 +10390,17 @@ CONFIG_HISAX_16_3
   different cards, a different D-channel protocol, or non-standard
   IRQ/port settings.
 
-HiSax Support for Teles PCI
+Teles PCI
 CONFIG_HISAX_TELESPCI
   This enables HiSax support for the Teles PCI.
   See Documentation/isdn/README.HiSax on how to configure it.
 
-HiSax Support for Teles S0Box
+Teles S0Box
 CONFIG_HISAX_S0BOX
   This enables HiSax support for the Teles/Creatix parallel port
   S0BOX.  See Documentation/isdn/README.HiSax on how to configure it.
 
-HiSax Support for AVM A1 (Fritz)
+AVM A1 (Fritz)
 CONFIG_HISAX_AVM_A1
   This enables HiSax support for the AVM A1 (aka "Fritz").
   
@@ -10302,17 +10408,17 @@ CONFIG_HISAX_AVM_A1
   different cards, a different D-channel protocol, or non-standard
   IRQ/port settings.
 
-HiSax Support for AVM PnP/PCI (Fritz!PNP/PCI)
+AVM PnP/PCI (Fritz!PNP/PCI)
 CONFIG_HISAX_FRITZPCI
   This enables HiSax support for the AVM "Fritz!PnP" and "Fritz!PCI".
   See Documentation/isdn/README.HiSax on how to configure it.
 
-HiSax Support for AVM A1 PCMCIA (Fritz)
+AVM A1 PCMCIA (Fritz)
 CONFIG_HISAX_AVM_A1_PCMCIA
   This enables HiSax support for the AVM A1 "Fritz!PCMCIA").
   See Documentation/isdn/README.HiSax on how to configure it.
 
-HiSax Support for Elsa cards
+Elsa cards
 CONFIG_HISAX_ELSA
   This enables HiSax support for the Elsa Mircolink ISA cards, for the
   Elsa Quickstep series cards and Elsa PCMCIA.
@@ -10321,7 +10427,7 @@ CONFIG_HISAX_ELSA
   different cards, a different D-channel protocol, or non-standard
   IRQ/port settings.
 
-HiSax Support for ITK ix1-micro Revision 2
+ITK ix1-micro Revision 2
 CONFIG_HISAX_IX1MICROR2
   This enables HiSax support for the ITK ix1-micro Revision 2 card.
 
@@ -10329,7 +10435,7 @@ CONFIG_HISAX_IX1MICROR2
   different cards, a different D-channel protocol, or non-standard
   IRQ/port settings.
 
-HiSax Support for Eicon.Diehl Diva cards
+Eicon.Diehl Diva cards
 CONFIG_HISAX_DIEHLDIVA
   This enables HiSax support for the Eicon.Diehl Diva none PRO
   versions passive ISDN cards.
@@ -10338,16 +10444,16 @@ CONFIG_HISAX_DIEHLDIVA
   different cards, a different D-channel protocol, or non-standard
   IRQ/port settings.
 
-HiSax Support for ASUSCOM cards
+ASUSCOM ISA cards
 CONFIG_HISAX_ASUSCOM
   This enables HiSax support for the AsusCom and their OEM versions
-  passive ISDN cards.
+  passive ISDN ISA cards.
 
   See Documentation/isdn/README.HiSax on how to configure it using the
   different cards, a different D-channel protocol, or non-standard
   IRQ/port settings.
 
-HiSax Support for TELEINT cards
+TELEINT cards
 CONFIG_HISAX_TELEINT
   This enables HiSax support for the TELEINT SA1 semiactiv ISDN card.
 
@@ -10355,7 +10461,7 @@ CONFIG_HISAX_TELEINT
   different cards, a different D-channel protocol, or non-standard
   IRQ/port settings.
 
-HiSax Support for HFC-S based cards
+HFC-S based cards
 CONFIG_HISAX_HFCS
   This enables HiSax support for the HFC-S 2BDS0 based cards, like
   teles 16.3c.
@@ -10364,7 +10470,7 @@ CONFIG_HISAX_HFCS
   different cards, a different D-channel protocol, or non-standard
   IRQ/port settings.
 
-HiSax Support for Sedlbauer cards
+Sedlbauer cards
 CONFIG_HISAX_SEDLBAUER
   This enables HiSax support for the Sedlbauer passive ISDN cards.
 
@@ -10372,21 +10478,21 @@ CONFIG_HISAX_SEDLBAUER
   different cards, a different D-channel protocol, or non-standard
   IRQ/port settings.
 
-HiSax Support for USR Sportster internal TA
+USR Sportster internal TA
 CONFIG_HISAX_SPORTSTER
   This enables HiSax support for the USR Sportster internal TA card.
 
   See Documentation/isdn/README.HiSax on how to configure it using a
   different D-channel protocol, or non-standard IRQ/port settings.
 
-HiSax Support for MIC card
+MIC card
 CONFIG_HISAX_MIC
   This enables HiSax support for the ITH MIC card. 
 
   See Documentation/isdn/README.HiSax on how to configure it using a
   different D-channel protocol, or non-standard IRQ/port settings.
 
-HiSax Support for NETjet card
+NETjet card
 CONFIG_HISAX_NETJET
   This enables HiSax support for the NetJet from Traverse
   Technologies.
@@ -10394,62 +10500,67 @@ CONFIG_HISAX_NETJET
   See Documentation/isdn/README.HiSax on how to configure it using a
   different D-channel protocol, or non-standard IRQ/port settings.
 
-HiSax Support for Niccy PnP/PCI card
+Niccy PnP/PCI card
 CONFIG_HISAX_NICCY
   This enables HiSax support for the Dr. Neuhaus Niccy PnP or PCI. 
 
   See Documentation/isdn/README.HiSax on how to configure it using a
   different D-channel protocol, or non-standard IRQ/port settings.
 
-HiSax Support for Siemens I-Surf card
+Siemens I-Surf card
 CONFIG_HISAX_ISURF
   This enables HiSax support for the Siemens I-Talk/I-Surf card with
   ISAR chip.
   See Documentation/isdn/README.HiSax on how to configure it using a
   different D-channel protocol, or non-standard IRQ/port settings.
 
-HiSax Support for HST Saphir card
+HST Saphir card
 CONFIG_HISAX_HSTSAPHIR
   This enables HiSax support for the HST Saphir card.
   
   See Documentation/isdn/README.HiSax on how to configure it using a
   different D-channel protocol, or non-standard IRQ/port settings.
 
-HiSax Support for Telekom A4T card
+Telekom A4T card
 CONFIG_HISAX_BKM_A4T
   This enables HiSax support for the Telekom A4T card.
   
   See Documentation/isdn/README.HiSax on how to configure it using a
   different D-channel protocol, or non-standard IRQ/port settings.
 
-HiSax Support for Scitel Quadro card
+Scitel Quadro card
 CONFIG_HISAX_SCT_QUADRO
   This enables HiSax support for the Scitel Quadro card.
   
   See Documentation/isdn/README.HiSax on how to configure it using a
   different D-channel protocol, or non-standard IRQ/port settings.
 
-HiSax Support for Gazel cards
+Gazel cards
 CONFIG_HISAX_GAZEL
   This enables HiSax support for the Gazel cards.
 
   See Documentation/isdn/README.HiSax on how to configure it using a
   different D-channel protocol, or non-standard IRQ/port settings.
 
-HiSax Support for HFC PCI-Bus cards
+HFC PCI-Bus cards
 CONFIG_HISAX_HFC_PCI
   This enables HiSax support for the HFC-S PCI 2BDS0 based cards.
   
   For more informations see under Documentation/isdn/README.hfc-pci.
 
-HiSax Support for Winbond W6692 based cards
+Winbond W6692 based cards
 CONFIG_HISAX_W6692
   This enables HiSax support for Winbond W6692 based PCI ISDN cards.
   
   See Documentation/isdn/README.HiSax on how to configure it using a
   different D-channel protocol, or non-standard IRQ/port settings.
 
-HiSax Support for Am7930 (EXPERIMENTAL)
+HFC-S+, HFC-SP, HFC-PCMCIA cards (EXPERIMENTAL)
+CONFIG_HISAX_HFC_SX
+  This enables HiSax support for the HFC-S+, HFC-SP and HFC-PCMCIA cards.
+  This code is not finished yet.
+
+Am7930 (EXPERIMENTAL)
 CONFIG_HISAX_AMD7930
   This enables HiSax support for the AMD7930 chips on some SPARCs.
   This code is not finished yet.
@@ -10526,6 +10637,10 @@ AVM B1 PCI support
 CONFIG_ISDN_DRV_AVMB1_B1PCI
   Enable support for the PCI version of the AVM B1 card.
 
+AVM B1 PCI V4 support
+CONFIG_ISDN_DRV_AVMB1_B1PCIV4
+  Enable support for the V4 version of AVM B1 PCI card.
+
 AVM T1/T1-B ISA support
 CONFIG_ISDN_DRV_AVMB1_T1ISA
   Enable support for the AVM T1 T1B card.
@@ -10539,6 +10654,11 @@ AVM T1/T1-B PCI support
 CONFIG_ISDN_DRV_AVMB1_T1PCI
   Enable support for the AVM T1 T1B card.
   Note: This is a PRI card and handle 30 B-channels.
+
+AVM C4 support
+CONFIG_ISDN_DRV_AVMB1_C4
+  Enable support for the AVM C4 PCI card.
+  This card handle 4 BRI ISDN lines (8 channels).
 
 Verbose reason code reporting (kernel size +=7K)
 CONFIG_ISDN_DRV_AVMB1_VERBOSE_REASON
@@ -10584,8 +10704,14 @@ CONFIG_SUN_OPENPROMIO
   inserted in and removed from the running kernel whenever you want),
   say M and read Documentation/modules.txt. If unsure, say Y.
 
-#Mostek real time clock support
-#CONFIG_SUN_MOSTEK_RTC
+Mostek real time clock support
+CONFIG_SUN_MOSTEK_RTC
+  The Mostek RTC chip is used on all knows Sun computers except
+  some JavaStation-s. For a JavaStation you need to say Y both here
+  and to CONFIG_RTC.
+
+  Say Y here unless you are building a special purpose kernel.
+
 #
 #Siemens SAB82532 serial support
 #CONFIG_SAB82532
@@ -11200,11 +11326,6 @@ CONFIG_RADIO_RTRACK2
   Choose Y here if you have this FM radio card, and then fill in the 
   port address below.
 
-  If you have GemTeks combined (PnP) sound- and radio card you must use
-  this driver as a module and setup the card with isapnptools. You must
-  also pass the module a suitable io parameter, 0x248 has been reported
-  to be used by these cards.
-
   In order to control your radio card, you will need to use programs
   that are compatible with the Video for Linux API. Information on 
   this API and pointers to "v4l" programs may be found on the WWW at
@@ -11388,6 +11509,12 @@ CONFIG_RADIO_GEMTEK
   Choose Y here if you have this FM radio card, and then fill in the 
   port address below.
 
+  If you have GemTeks combined (PnP) sound- and radio card you might want
+  to use this driver as a module and setup the card with isapnptools. You
+  must also pass the module a suitable io parameter. If you have trouble
+  getting the driver to work with the card as a module, please try building
+  it into the kernel by answering Y.
+
   In order to control your radio card, you will need to use programs
   that are compatible with the Video for Linux API. Information on 
   this API and pointers to "v4l" programs may be found on the WWW at
@@ -11402,8 +11529,9 @@ CONFIG_RADIO_GEMTEK
 
 GemTek i/o port
 CONFIG_RADIO_GEMTEK_PORT
-  Enter either 0x20c, 0x30c, 0x24c or 0x34c here. The card default is
-  0x34c, if you haven't changed the jumper setting on the card.
+  Enter either 0x20c, 0x30c, 0x24c or 0x34c here. 0x20c and 0x248 have
+  been reported to work with the combined sound/radio card. The card
+  default is 0x34c, if you haven't changed the jumper setting on the card.
 
 Trust FM Radio Card
 CONFIG_RADIO_TRUST
@@ -11736,33 +11864,7 @@ CONFIG_IRCOMM
   and makes it possible to use all existing applications that
   understands TTY's with an infrared link. Thus you should be able to
   use application like PPP, minicom and others. Enabling this option
-  will create two modules called ircomm and ircomm_tty. For more
-  information go to http://www.pluto.dti.ne.jp/~thiguchi/irda/
-
-IrLPT Protocol
-CONFIG_IRLPT
-  Say Y here if you want to build support for the IrLPT protocol. If
-  you want to compile it as a module, say M here and read
-  Documentation/modules.txt. IrLPT makes it possible to print
-  documents to IrDA capable printers.
-
-IrLPT Client Protocol 
-CONFIG_IRLPT_CLIENT
-  Say Y here if you want to build support for the IrLPT client
-  protocol. If you want to compile it as a module, say M here and read
-  Documentation/modules.txt. The IrLPT client protocol can be used to
-  print documents to IrDA compatible printers like the HP-5MP, or
-  IrLPT printer adapters like the ACTiSYS IR-100M.
-
-IrLPT Server Protocol 
-CONFIG_IRLPT_SERVER
-  Say Y here if you want to build support for the IrLPT server
-  protocol. If you want to compile it as a module, say M here and read
-  Documentation/modules.txt. The IrLPT server protocol makes it
-  possible to use a Linux machine as an infrared printer server for
-  other laptops. So if your Linux machine has a cable connection to a
-  printer, then other laptops can use the Linux machine to print out 
-  documents using infrared communication.
+  will create two modules called ircomm and ircomm-tty.
 
 IrTTY IrDA Device Driver
 CONFIG_IRTTY_SIR
@@ -11799,20 +11901,12 @@ CONFIG_WINBOND_FIR
   used for the IrDA chipset in the Corel NetWinder. The driver
   supports SIR, MIR and FIR (4Mbps) speeds.
 
-NSC PC87108 IrDA Device Driver
+NSC IrDA Device Driver
 CONFIG_NSC_FIR
-  Say Y here if you want to build support for the NSC PC87108 IrDA
-  chipset. If you want to compile it as a module, say M here and
-  read Documentation/modules.txt. This drivers currently only supports
-  the ACTiSYS IR2000B ISA card and supports SIR, MIR and FIR (4Mbps)
-  speeds.
-
-Sharp UIRCC IrDA Device Driver
-CONFIG_SHARP_FIR
-  Say Y here if you want to build support for the Sharp UIRCC IrDA
-  chipset. If you want to compile it as a module, say M here and
-  read Documentation/modules.txt. This chipset is used by the Toshiba
-  Tecra laptops.
+  Say Y here if you want to build support for the NSC PC87108 and
+  PC87338 IrDA chipsets. If you want to compile it as a module, say M 
+  here and read Documentation/modules.txt. This driver supports SIR, 
+  MIR and FIR (4Mbps) speeds.
 
 Toshiba Type-O IR Port Device Driver
 CONFIG_TOSHIBA_FIR
@@ -11828,7 +11922,7 @@ CONFIG_ESI_DONGLE
   and read Documentation/modules.txt. The ESI dongle attaches to the
   normal 9-pin serial port connector, and can currently only be used
   by IrTTY. To activate support for ESI dongles you will have to
-  insert "irattach -d esi" in the /etc/irda/drivers script.
+  start irattach like this: "irattach -d esi".
 
 ACTiSYS IR-220L and IR220L+ dongle
 CONFIG_ACTISYS_DONGLE
@@ -11837,8 +11931,8 @@ CONFIG_ACTISYS_DONGLE
   say M here and read Documentation/modules.txt. The ACTiSYS dongles
   attaches to the normal 9-pin serial port connector, and can
   currently only be used by IrTTY. To activate support for ACTiSYS
-  dongles you will have to insert "irattach -d actisys" or
-  "irattach -d actisys_plus" in the/etc/irda/drivers script.
+  dongles you will have to start irattach like this: 
+  "irattach -d actisys" or "irattach -d actisys+".
 
 Tekram IrMate 210B dongle
 CONFIG_TEKRAM_DONGLE
@@ -11847,7 +11941,7 @@ CONFIG_TEKRAM_DONGLE
   and read Documentation/modules.txt. The Tekram dongle attaches to
   the normal 9-pin serial port connector, and can currently only be
   used by IrTTY. To activate support for Tekram dongles you will have
-  to insert "irattach -d tekram" in the /etc/irda/drivers script.
+  to start irattach like this: "irattach -d tekram".
 
 Greenwich GIrBIL dongle
 CONFIG_GIRBIL_DONGLE
@@ -11865,7 +11959,19 @@ CONFIG_LITELINK_DONGLE
   Documentation/modules.txt. The Parallax dongle attaches to the
   normal 9-pin serial port connector, and can currently only be used
   by IrTTY. To activate support for Parallax dongles you will have to
-  insert "irattach -d litelink" in the /etc/irda/drivers script.
+  start irattach like this "irattach -d litelink".
+
+Old Belking dongle
+CONFIG_OLD_BELKING_DONGLE
+  Say Y here if you want to build support for the old Belkin SmartBeam
+  dongle. If you want to compile it as a module, say M here and read
+  Documentation/modules.txt. The Belkin SmartBeam dongle (F5F500) come 
+  in two variants. The only way to distinguish those is to open the 
+  dongle and check the presence of a jumper (the jumper, on the new 
+  dongle, toggle between IrDA and ASK modes). This driver only support 
+  the old dongle. The old dongle is also limited to 9600 b/s (which is 
+  not very fun). To activate support for old Belkin dongles you will 
+  have to start irattach like this: "irattach -d old_dongle".
 
 VME (Motorola and BVM) support
 CONFIG_VME
@@ -12040,6 +12146,33 @@ CONFIG_PHONE_IXJ
   If you do not have any Quicknet telephony cards, you can safely
   ignore this option.
  
+CPiA Video For Linux
+CONFIG_VIDEO_CPIA
+  This is the video4linux driver for cameras based on Vision's CPiA
+  (Colour Processor Interface ASIC), such as the Creative Labs Video
+  Blaster Webcam II. If you have one of these cameras, say Y here
+  and select parallel port lowlevel support below (the USB-version,
+  is not supported on this kernel-version) otherwise say N. This will
+  not work with the Creative Webcam III. It is also available as a
+  module (cpia.o).
+
+  For more information (supported camera models, module autoloading, DMA
+  interrupt settings, supported applications, etc.) read
+  Documentation/video4linux/README.cpia.
+
+CPiA Parallel Port Lowlevel Support
+CONFIG_VIDEO_CPIA_PP
+  This is the lowlevel parallel port support for cameras based on
+  Vision's CPiA (Colour Processor Interface ASIC), such as the
+  Creative Webcam II. If you have the parallel port version of one
+  of these cameras, say Y here, otherwise say N. It is also available
+  as a module (cpia_pp.o).
+
+CPiA Parallel Port DMA Support
+CONFIG_VIDEO_CPIA_PP_DMA
+  This will use DMA if possible to reduce CPU usage.  If in doubt,
+  say Y here.
+   
 #
 # A couple of things I keep forgetting:
 #   capitalize: AppleTalk, Ethernet, DOS, DMA, FAT, FTP, Internet, 
@@ -12265,6 +12398,6 @@ CONFIG_PHONE_IXJ
 # LocalWords:  ACTiSYS Dongle dongle dongles esi actisys IrMate tekram BVM MVME
 # LocalWords:  BVME BVME WRITETHROUGH copyback writethrough fwmark syncookie tu
 # LocalWords:  alphalinux GOBIOS csn chemnitz nat ACARD AMI MegaRAID megaraid
-# LocalWords:  QNXFS ISI isicom xterms Apollos VPN RCPCI rcpci sgi visws pcmcia
+# LocalWords:  QNX4FS ISI isicom xterms Apollos VPN RCPCI rcpci sgi visws pcmcia
 # LocalWords:  IrLPT UIRCC Tecra
 

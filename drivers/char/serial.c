@@ -816,6 +816,7 @@ static void do_softint(void *private_)
 		    tty->ldisc.write_wakeup)
 			(tty->ldisc.write_wakeup)(tty);
 		wake_up_interruptible(&tty->write_wait);
+		wake_up_interruptible(&tty->poll_wait);
 	}
 }
 
@@ -1383,8 +1384,13 @@ static void change_speed(struct async_struct *info,
 	if (info->state->type == PORT_16750)
 		serial_outp(info, UART_FCR, fcr); 	/* set fcr */
 	serial_outp(info, UART_LCR, cval);		/* reset DLAB */
-	if (info->state->type != PORT_16750)
+	if (info->state->type != PORT_16750) {
+		if (fcr & UART_FCR_ENABLE_FIFO) {
+			/* emulated UARTs (Lucent Venus 167x) need two steps */
+			serial_outp(info, UART_FCR, UART_FCR_ENABLE_FIFO);
+		}
 		serial_outp(info, UART_FCR, fcr); 	/* set fcr */
+	}
 	restore_flags(flags);
 }
 
@@ -1532,6 +1538,7 @@ static void rs_flush_buffer(struct tty_struct *tty)
 	info->xmit_cnt = info->xmit_head = info->xmit_tail = 0;
 	restore_flags(flags);
 	wake_up_interruptible(&tty->write_wait);
+	wake_up_interruptible(&tty->poll_wait);
 	if ((tty->flags & (1 << TTY_DO_WRITE_WAKEUP)) &&
 	    tty->ldisc.write_wakeup)
 		(tty->ldisc.write_wakeup)(tty);

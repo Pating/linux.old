@@ -74,7 +74,7 @@ static unsigned long last_tsc_low; /* lsb 32 bits of Time Stamp Counter */
  * Equal to 2^32 * (1 / (clocks per usec) ).
  * Initialized in time_init.
  */
-static unsigned long fast_gettimeoffset_quotient=0;
+unsigned long fast_gettimeoffset_quotient=0;
 
 extern rwlock_t xtime_lock;
 
@@ -612,6 +612,8 @@ bad_ctc:
 	return 0;
 }
 
+extern int x86_udelay_tsc;
+
 __initfunc(void time_init(void))
 {
 	xtime.tv_sec = get_cmos_time();
@@ -649,6 +651,11 @@ __initfunc(void time_init(void))
 		if (tsc_quotient) {
 			fast_gettimeoffset_quotient = tsc_quotient;
 			use_tsc = 1;
+			/*
+			 *	We should be more selective here I suspect
+			 *	and just enable this for the new intel chips ?
+			 */
+			x86_udelay_tsc = 1;
 #ifndef do_gettimeoffset
 			do_gettimeoffset = do_fast_gettimeoffset;
 #endif

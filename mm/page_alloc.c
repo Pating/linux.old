@@ -123,7 +123,7 @@ static inline void free_pages_ok(unsigned long map_nr, unsigned long order, unsi
 	spin_unlock_irqrestore(&page_alloc_lock, flags);
 }
 
-static inline void __free_pages(struct page *page, unsigned long order)
+void __free_pages(struct page *page, unsigned long order)
 {
 	if (!PageReserved(page) && atomic_dec_and_test(&page->count)) {
 		if (PageSwapCache(page))
@@ -132,11 +132,6 @@ static inline void __free_pages(struct page *page, unsigned long order)
 		free_pages_ok(page - mem_map, order, PageDMA(page) ? 1 : 0);
 		return;
 	}
-}
-
-void __free_page(struct page *page)
-{
-	__free_pages(page, 0);
 }
 
 void free_pages(unsigned long addr, unsigned long order)
@@ -184,8 +179,6 @@ do { unsigned long size = 1 << high; \
 	atomic_set(&map->count, 1); \
 } while (0)
 
-int low_on_memory = 0;
-
 unsigned long __get_free_pages(int gfp_mask, unsigned long order)
 {
 	unsigned long flags;
@@ -211,17 +204,24 @@ unsigned long __get_free_pages(int gfp_mask, unsigned long order)
 	 */
 	if (!(current->flags & PF_MEMALLOC)) {
 		int freed;
+		extern struct wait_queue * kswapd_wait;
 
-		if (nr_free_pages > freepages.min) {
-			if (!low_on_memory)
+		if (nr_free_pages >= freepages.high)
+		{
+			/* share RO cachelines in fast path */
+			if (current->trashing_mem)
+				current->trashing_mem = 0;
+			goto ok_to_allocate;
+		}
+		else
+		{
+			if (nr_free_pages < freepages.low)
+				wake_up_interruptible(&kswapd_wait);
+			if (nr_free_pages > freepages.min && !current->trashing_mem)
 				goto ok_to_allocate;
-			if (nr_free_pages >= freepages.high) {
-				low_on_memory = 0;
-				goto ok_to_allocate;
-			}
 		}
 
-		low_on_memory = 1;
+		current->trashing_mem = 1;
 		current->flags |= PF_MEMALLOC;
 		freed = try_to_free_pages(gfp_mask);
 		current->flags &= ~PF_MEMALLOC;
@@ -236,16 +236,6 @@ ok_to_allocate:
 		RMQUEUE_TYPE(order, 0);
 	RMQUEUE_TYPE(order, 1);
 	spin_unlock_irqrestore(&page_alloc_lock, flags);
-
-	/*
-	 * If we can schedule, do so, and make sure to yield.
-	 * We may be a real-time process, and if kswapd is
-	 * waiting for us we need to allow it to run a bit.
-	 */
-	if (gfp_mask & __GFP_WAIT) {
-		current->policy |= SCHED_YIELD;
-		schedule();
-	}
 
 nopage:
 	return 0;

@@ -93,7 +93,7 @@ EXPORT_SYMBOL(exit_sighand);
 /* internal kernel memory management */
 EXPORT_SYMBOL(__get_free_pages);
 EXPORT_SYMBOL(free_pages);
-EXPORT_SYMBOL(__free_page);
+EXPORT_SYMBOL(__free_pages);
 EXPORT_SYMBOL(kmem_find_general_cachep);
 EXPORT_SYMBOL(kmem_cache_create);
 EXPORT_SYMBOL(kmem_cache_shrink);
@@ -116,6 +116,7 @@ EXPORT_SYMBOL(get_unmapped_area);
 
 /* filesystem internal functions */
 EXPORT_SYMBOL(in_group_p);
+EXPORT_SYMBOL(in_egroup_p);
 EXPORT_SYMBOL(update_atime);
 EXPORT_SYMBOL(get_super);
 EXPORT_SYMBOL(get_fs_type);
@@ -424,3 +425,4 @@ EXPORT_SYMBOL(strnicmp);
 
 /* init task, for moving kthread roots - ought to export a function ?? */
 EXPORT_SYMBOL(init_task_union);
+

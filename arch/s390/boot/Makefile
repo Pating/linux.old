@@ -14,21 +14,19 @@ O_OBJS	 :=
 
 include $(TOPDIR)/Rules.make
 
+.S.o:
+	$(CC) -D__ASSEMBLY__ $(AFLAGS) -traditional -c $< -o $*.o
+
 %.lnk: %.o
 	$(LD) -Ttext 0x0 -o $@ $<
 
 %.boot: %.lnk
 	$(OBJCOPY) -O binary $< $@
 
-silo: silo.c
-	$(CROSS_COMPILE)gcc $< -o $@
-
-dasdfmt: dasdfmt.c
-	$(CROSS_COMPILE)gcc $< -o $@
-
 image: $(CONFIGURE) $(TOPDIR)/vmlinux \
 	iplfba.boot ipleckd.boot 
 	$(OBJCOPY) -O binary $(TOPDIR)/vmlinux image
+	$(NM) $(TOPDIR)/vmlinux | grep -v '\(compiled\)\|\( [aU] \)\|\(\.\)\|\(LASH[RL]DI\)' | sort > $(TOPDIR)/System.map
 
 listing: ../../../vmlinux
 	$(OBJDUMP) --disassemble --disassemble-all --disassemble-zeroes --reloc $(TOPDIR)/vmlinux > listing
@@ -36,5 +34,5 @@ listing: ../../../vmlinux
 dep:
 
 clean:
-	rm -f image listing silo dasdfmt iplfba.boot ipleckd.boot
+	rm -f image listing iplfba.boot ipleckd.boot
 

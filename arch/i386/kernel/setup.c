@@ -7,8 +7,8 @@
  *  and Martin Mares, November 1997.
  *
  *  Force Cyrix 6x86(MX) and M II processors to report MTRR capability
- *  and fix against Cyrix "coma bug" by
- *      Zoltan Boszormenyi <zboszor@mol.hu> February 1999.
+ *  and Cyrix "coma bug" recognition by
+ *      Zoltán Böszörményi <zboszor@mail.externet.hu> February 1999.
  * 
  *  Force Centaur C6 processors to report MTRR capability.
  *      Bart Hartgers <bart@etpmod.phys.tue.nl>, May 199.
@@ -44,9 +44,7 @@
 #include <linux/delay.h>
 #include <linux/config.h>
 #include <linux/init.h>
-#ifdef CONFIG_APM
 #include <linux/apm_bios.h>
-#endif
 #ifdef CONFIG_BLK_DEV_RAM
 #include <linux/blk.h>
 #endif
@@ -84,9 +82,7 @@ unsigned int mca_pentium_flag = 0;
  */
 struct drive_info_struct { char dummy[32]; } drive_info;
 struct screen_info screen_info;
-#ifdef CONFIG_APM
 struct apm_bios_info apm_bios_info;
-#endif
 struct sys_desc_table_struct {
 	unsigned short length;
 	unsigned char table[0];
@@ -277,9 +273,7 @@ __initfunc(void setup_arch(char **cmdline_p,
  	ROOT_DEV = to_kdev_t(ORIG_ROOT_DEV);
  	drive_info = DRIVE_INFO;
  	screen_info = SCREEN_INFO;
-#ifdef CONFIG_APM
 	apm_bios_info = APM_BIOS_INFO;
-#endif
 	if( SYS_DESC_TABLE.length != 0 ) {
 		MCA_bus = SYS_DESC_TABLE.table[3] &0x2;
 		machine_id = SYS_DESC_TABLE.table[0];
@@ -394,7 +388,7 @@ __initfunc(void setup_arch(char **cmdline_p,
 	*memory_start_p = memory_start;
 	*memory_end_p = memory_end;
 
-#ifdef __SMP__
+#ifdef CONFIG_SMP
 	/*
 	 *	Save possible boot-time SMP configuration:
 	 */
@@ -436,14 +430,14 @@ __initfunc(void setup_arch(char **cmdline_p,
 
 __initfunc(static int get_model_name(struct cpuinfo_x86 *c))
 {
-	unsigned int n, dummy, *v;
+	unsigned int n, dummy, *v, ecx, edx;
 
 	/* Actually we must have cpuid or we could never have
 	 * figured out that this was AMD from the vendor info :-).
 	 */
 
 	cpuid(0x80000000, &n, &dummy, &dummy, &dummy);
-	if (n < 4)
+	if (n < 0x80000004)
 		return 0;
 	cpuid(0x80000001, &dummy, &dummy, &dummy, &(c->x86_capability));
 	v = (unsigned int *) c->x86_model_id;
@@ -451,14 +445,29 @@ __initfunc(static int get_model_name(struct cpuinfo_x86 *c))
 	cpuid(0x80000003, &v[4], &v[5], &v[6], &v[7]);
 	cpuid(0x80000004, &v[8], &v[9], &v[10], &v[11]);
 	c->x86_model_id[48] = 0;
-	/*  Set MTRR capability flag if appropriate  */
-	if(boot_cpu_data.x86 !=5)
-		return 1;
-	if((boot_cpu_data.x86_model == 9) ||
-	   ((boot_cpu_data.x86_model == 8) && 
-	    (boot_cpu_data.x86_mask >= 8)))
-		c->x86_capability |= X86_FEATURE_MTRR;
+	
+	if(c->x86_vendor == X86_VENDOR_AMD)
+	{
+		/*  Set MTRR capability flag if appropriate  */
+		if(boot_cpu_data.x86 == 5) {
+			if((boot_cpu_data.x86_model == 9) ||
+			   ((boot_cpu_data.x86_model == 8) && 
+			    (boot_cpu_data.x86_mask >= 8)))
+				c->x86_capability |= X86_FEATURE_MTRR;
+		}
 
+		if (n >= 0x80000005){
+			cpuid(0x80000005, &dummy, &dummy, &ecx, &edx);
+			printk("CPU: L1 I Cache: %dK  L1 D Cache: %dK\n",
+				ecx>>24, edx>>24);
+			c->x86_cache_size=(ecx>>24)+(edx>>24);
+		}
+		if (n >= 0x80000006){
+			cpuid(0x80000006, &dummy, &dummy, &ecx, &edx);
+			printk("CPU: L2 Cache: %dK\n", ecx>>16);
+			c->x86_cache_size = ecx>>16;
+		}
+	}
 	return 1;
 }
 
@@ -494,7 +503,7 @@ __initfunc(static int amd_model(struct cpuinfo_x86 *c))
 				rdmsr(0xC0000082, l, h);
 				if((l&0x0000FFFF)==0)
 				{		
-					l=(1<<0)|(mbytes/4);
+					l=(1<<0)|((mbytes/4)<<1);
 					save_flags(flags);
 					__cli();
 					__asm__ __volatile__ ("wbinvd": : :"memory");
@@ -529,14 +538,6 @@ __initfunc(static int amd_model(struct cpuinfo_x86 *c))
 			break;
 		case 6:	/* An Athlon. We can trust the BIOS probably */
 		{
-			
-			u32 ecx, edx, dummy;
-			cpuid(0x80000005, &dummy, &dummy, &ecx, &edx);
-			printk("L1 I Cache: %dK  L1 D Cache: %dK\n",
-				ecx>>24, edx>>24);
-			cpuid(0x80000006, &dummy, &dummy, &ecx, &edx);
-			printk("L2 Cache: %dK\n", ecx>>16);
-			c->x86_cache_size = ecx>>16;
 			break;
 		}
 		
@@ -667,10 +668,18 @@ __initfunc(static void cyrix_model(struct cpuinfo_x86 *c))
                 /* It isnt really a PCI quirk directly, but the cure is the
        	           same. The MediaGX has deep magic SMM stuff that handles the
                    SB emulation. It thows away the fifo on disable_dma() which
-                   is wrong and ruins the audio. */
+                   is wrong and ruins the audio. 
+                   
+                   Bug2: VSA1 has a wrap bug so that using maximum sized DMA 
+                   causes bad things. According to NatSemi VSA2 has another
+                   bug to do with 'hlt'. I've not seen any boards using VSA2
+                   and X doesn't seem to support it either so who cares 8).
+                   VSA1 we work around however.
+                   
+                  */
 
 		printk(KERN_INFO "Working around Cyrix MediaGX virtual DMA bug.\n");
-                isa_dma_bridge_buggy = 1;
+                isa_dma_bridge_buggy = 2;
                   	                                                                     	        
 #endif
 		/* GXm supports extended cpuid levels 'ala' AMD */
@@ -975,7 +984,7 @@ int get_cpuinfo(char * buffer)
 	int i, n;
 
 	for(n=0; n<NR_CPUS; n++, c++) {
-#ifdef __SMP__
+#ifdef CONFIG_SMP
 		if (!(cpu_online_map & (1<<n)))
 			continue;
 #endif

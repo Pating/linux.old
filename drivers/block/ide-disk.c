@@ -571,7 +571,7 @@ static void idedisk_pre_reset (ide_drive_t *drive)
 	drive->special.b.recalibrate  = 1;
 	if (OK_TO_RESET_CONTROLLER)
 		drive->mult_count = 0;
-	if (!drive->keep_settings)
+	if (!drive->keep_settings && !drive->using_dma)
 		drive->mult_req = 0;
 	if (drive->mult_req != drive->mult_count)
 		drive->special.b.set_multmode = 1;
@@ -799,9 +799,6 @@ static void idedisk_setup (ide_drive_t *drive)
 	/* Use physical geometry if what we have still makes no sense */
 	if ((!drive->head || drive->head > 16) &&
 	    id->heads && id->heads <= 16) {
-		if ((id->lba_capacity > 16514064) || (id->cyls == 0x3fff)) {
-			id->cyls = ((int)(id->lba_capacity/(id->heads * id->sectors)));
-		}
 		drive->cyl  = id->cyls;
 		drive->head = id->heads;
 		drive->sect = id->sectors;

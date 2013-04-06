@@ -270,6 +270,7 @@ static struct dev_info device_list[] =
 						 * SCSI code to reset bus.*/
 {"QUANTUM","LPS525S","3110", BLIST_NOLUN},      /* Locks sometimes if polled for lun != 0 */
 {"QUANTUM","PD1225S","3110", BLIST_NOLUN},      /* Locks sometimes if polled for lun != 0 */
+{"QUANTUM","FIREBALL ST4.3S","0F0C",BLIST_NOLUN},/* Locks sometimes if polled for lun != 0 */
 {"MEDIAVIS","CDR-H93MV","1.31", BLIST_NOLUN},   /* Locks up if polled for lun != 0 */
 {"SANKYO", "CP525","6.64", BLIST_NOLUN},        /* causes failed REQ SENSE, extra reset */
 {"HP", "C1750A", "3226", BLIST_NOLUN},          /* scanjet iic */
@@ -277,7 +278,11 @@ static struct dev_info device_list[] =
 {"HP", "C2500A", "", BLIST_NOLUN},              /* scanjet iicx */
 {"YAMAHA","CDR100","1.00", BLIST_NOLUN},	/* Locks up if polled for lun != 0 */
 {"YAMAHA","CDR102","1.00", BLIST_NOLUN},	/* Locks up if polled for lun != 0 */
+{"YAMAHA","CRW8424S","1.0", BLIST_NOLUN},	/* Locks up if polled for lun != 0 */
+{"YAMAHA","CRW6416S","1.0c", BLIST_NOLUN},	/* Locks up if polled for lun != 0 */
+{"MITSUMI", "CD-R CR-2201CS", "6119", BLIST_NOLUN}, /* Locks up if polled for lun != 0 */
 {"RELISYS", "Scorpio", "*", BLIST_NOLUN},	/* responds to all LUN */
+{"MICROTEK", "ScanMaker II", "5.61", BLIST_NOLUN}, /* responds to all LUN */
 
 /*
  * Other types of devices that have special flags.
@@ -290,6 +295,7 @@ static struct dev_info device_list[] =
 {"NRC","MBR-7","*", BLIST_FORCELUN | BLIST_SINGLELUN},
 {"NRC","MBR-7.4","*", BLIST_FORCELUN | BLIST_SINGLELUN},
 {"REGAL","CDC-4X","*", BLIST_MAX5LUN | BLIST_SINGLELUN},
+{"LASOUND","CDX7405","3.10", BLIST_MAX5LUN | BLIST_SINGLELUN},
 {"NAKAMICH","MJ-4.8S","*", BLIST_FORCELUN | BLIST_SINGLELUN},
 {"NAKAMICH","MJ-5.16S","*", BLIST_FORCELUN | BLIST_SINGLELUN},
 {"PIONEER","CD-ROM DRM-600","*", BLIST_FORCELUN | BLIST_SINGLELUN},
@@ -303,10 +309,12 @@ static struct dev_info device_list[] =
 {"iomega","jaz 1GB","J.86", BLIST_NOTQ | BLIST_NOLUN},
 {"CREATIVE","DVD-RAM RAM","*", BLIST_GHOST},
 {"MATSHITA","PD-2 LF-D100","*", BLIST_GHOST},
+{"AOpen","PD-2 DVD-520S","*", BLIST_GHOST},
 {"HITACHI","GF-1050","*", BLIST_GHOST},        /* Hitachi SCSI DVD-RAM */
 {"TOSHIBA","CDROM","*", BLIST_ISROM},
 {"TOSHIBA","DVD-RAM SD-W1101","*", BLIST_GHOST},
 {"TOSHIBA","DVD-RAM SD-W1111","*", BLIST_GHOST},
+{"MegaRAID", "LD", "*", BLIST_FORCELUN},
 /*
  * Must be at end of list...
  */
@@ -3452,6 +3460,8 @@ scsi_dump_status(int level)
 }
 
 #ifdef MODULE
+
+MODULE_PARM(max_scsi_luns, "i");
 
 int init_module(void) 
 {

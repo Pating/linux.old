@@ -253,9 +253,9 @@ W: http://math-www.uni-paderborn.de/~axel/
 D: Configuration help text support
 D: Linux CD and Support Giveaway List
 
-N: Zoltan Boszormenyi
-E: zboszor@mol.hu
-D: MTRR emulation with Cyrix style ARR registers
+N: Zoltán Böszörményi
+E: zboszor@mail.externet.hu
+D: MTRR emulation with Cyrix style ARR registers, Athlon MTRR support
 
 N: John Boyd
 E: boyd@cis.ohio-state.edu
@@ -867,7 +867,8 @@ S: CV5 8BZ
 S: United Kingdom
 
 N: Ron Holt
-E: ron@sovereign.org
+E: ron@holt.org
+E: rholt@netcom.com
 W: http://www.holt.org/
 P: 1024/1FD44539 DF 4B EB 9F 5B 68 38 9A  40 E3 FB 71 D1 C8 0B 56
 D: Kernel development
@@ -1408,7 +1409,7 @@ S: 7546 JA  Enschede
 S: Netherlands
 
 N: David S. Miller
-E: davem@dm.cobaltmicro.com
+E: davem@redhat.com
 D: Sparc and blue box hacker
 D: Vger Linux mailing list co-maintainer
 D: Linux Emacs elf/qmagic support + other libc/gcc things
@@ -1545,6 +1546,15 @@ D: IPX development and support
 N: David Parsons
 E: orc@pell.chi.il.us
 D: improved memory detection code.
+
+N: Ivan Passos
+E: ivan@cyclades.com
+D: Author of the Cyclades-PC300 synchronous card driver
+D: Maintainer of the Cyclom-Y/Cyclades-Z asynchronous card driver
+S: Cyclades Corp
+S: 41934 Christy St
+S: Fremont, CA 94538
+S: USA
 
 N: Vojtech Pavlik
 E: vojtech@suse.cz
@@ -1892,6 +1902,13 @@ D: Optics Storage 8000AT cdrom driver
 S: Cliffwood, New Jersey 07721
 S: USA
 
+N: Andrew Stanley-Jones
+E: asj@lanmedia.com
+D: LanMedia Corp. Device WAN card device driver
+S: #102, 686 W. Maude Ave
+S: Sunyvale, CA 94086
+S: USA
+
 N: Henrik Storner
 E: storner@image.dk
 W: http://www.image.dk/~storner/
@@ -2042,12 +2059,8 @@ S: 97078 Wuerzburg
 S: Germany
 
 N: Greg Ungerer
-E: gerg@stallion.com
+E: gerg@moreton.com.au
 D: Author of Stallion multiport serial drivers
-S: Stallion Technologies
-S: 33 Woodstock Rd
-S: Toowong, QLD. 4066
-S: Australia
 
 N: Jeffrey A. Uphoff
 E: juphoff@nrao.edu
@@ -2263,6 +2276,13 @@ E: qx@math.columbia.edu
 D: Xiafs filesystem [defunct]
 S: 542 West 112th Street, 5N
 S: New York, New York 10025
+S: USA
+
+N: Victor Yodaiken
+E: yodaiken@fsmlabs.com
+D: RTLinux (RealTime Linux)
+S: POB 1822 
+S: Socorro NM, 87801
 S: USA
 
 N: Eric Youngdale

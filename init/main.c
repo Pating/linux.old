@@ -75,8 +75,7 @@ extern int kupdate(void *);
 extern int kswapd(void *);
 extern int kpiod(void *);
 extern void kswapd_setup(void);
-
-extern void init_IRQ(void);
+extern unsigned long init_IRQ( unsigned long);
 extern void init_modules(void);
 extern long console_init(long, long);
 extern void sock_init(void);
@@ -110,6 +109,9 @@ extern void msmouse_setup(char *str, int *ints);
 extern void console_setup(char *str, int *ints);
 #ifdef CONFIG_PRINTER
 extern void lp_setup(char *str, int *ints);
+#endif
+#ifdef CONFIG_VIDEO_CPIA_PP
+extern void cpia_pp_setup(char *str, int *ints);
 #endif
 #ifdef CONFIG_JOY_AMIGA
 extern void js_am_setup(char *str, int *ints);
@@ -151,6 +153,9 @@ extern void arcrimi_setup(char *str, int *ints);
 #ifdef CONFIG_CTC  
 extern void ctc_setup(char *str, int *ints);
 #endif
+#ifdef CONFIG_IUCV
+extern void iucv_setup(char *str, int *ints);
+#endif
 #ifdef CONFIG_ARCNET_COM90xxIO
 extern void com90io_setup(char *str, int *ints);
 #endif
@@ -181,6 +186,12 @@ extern void pg_setup(char *str, int *ints);
 #endif
 #ifdef CONFIG_PARIDE_PCD
 extern void pcd_setup(char *str, int *ints);
+#endif
+#ifdef CONFIG_3215
+extern void con3215_setup(char *str, int *ints);
+#endif
+#ifdef CONFIG_3215
+extern void con3215_setup(char *str, int *ints);
 #endif
 #ifdef CONFIG_MDISK
 extern void mdisk_setup(char *str, int *ints);
@@ -486,6 +497,24 @@ static struct dev_name_struct {
 	{ "rd/c0d14p",0x3070 },
 	{ "rd/c0d15p",0x3078 },
 #endif
+#if defined(CONFIG_BLK_CPQ_DA) || defined(CONFIG_BLK_CPQ_DA_MODULE)
+	{ "ida/c0d0p",0x4800 },
+	{ "ida/c0d1p",0x4810 },
+	{ "ida/c0d2p",0x4820 },
+	{ "ida/c0d3p",0x4830 },
+	{ "ida/c0d4p",0x4840 },
+	{ "ida/c0d5p",0x4850 },
+	{ "ida/c0d6p",0x4860 },
+	{ "ida/c0d7p",0x4870 },
+	{ "ida/c0d8p",0x4880 },
+	{ "ida/c0d9p",0x4890 },
+	{ "ida/c0d10p",0x48A0 },
+	{ "ida/c0d11p",0x48B0 },
+	{ "ida/c0d12p",0x48C0 },
+	{ "ida/c0d13p",0x48D0 },
+	{ "ida/c0d14p",0x48E0 },
+	{ "ida/c0d15p",0x48F0 },
+#endif
 #ifdef CONFIG_ATARI_ACSI
 	{ "ada",     0x1c00 },
 	{ "adb",     0x1c10 },
@@ -551,24 +580,24 @@ static struct dev_name_struct {
 	{ "ddv", DDV_MAJOR << 8},
 #endif
 #ifdef CONFIG_MDISK
-        { "mnd0", (MDISK_MAJOR << MINORBITS)},
-        { "mnd1", (MDISK_MAJOR << MINORBITS) + 1},
-        { "mnd2", (MDISK_MAJOR << MINORBITS) + 2},
-        { "mnd3", (MDISK_MAJOR << MINORBITS) + 3},
-        { "mnd4", (MDISK_MAJOR << MINORBITS) + 4},
-        { "mnd5", (MDISK_MAJOR << MINORBITS) + 5},
-        { "mnd6", (MDISK_MAJOR << MINORBITS) + 6},
-        { "mnd7", (MDISK_MAJOR << MINORBITS) + 7},
+        { "mnda", (MDISK_MAJOR << MINORBITS)},
+        { "mndb", (MDISK_MAJOR << MINORBITS) + 1},
+        { "mndc", (MDISK_MAJOR << MINORBITS) + 2},
+        { "mndd", (MDISK_MAJOR << MINORBITS) + 3},
+        { "mnde", (MDISK_MAJOR << MINORBITS) + 4},
+        { "mndf", (MDISK_MAJOR << MINORBITS) + 5},
+        { "mndg", (MDISK_MAJOR << MINORBITS) + 6},
+        { "mndh", (MDISK_MAJOR << MINORBITS) + 7},
 #endif
 #ifdef CONFIG_DASD
-       { "dasd0", (DASD_MAJOR << MINORBITS) },
-       { "dasd1", (DASD_MAJOR << MINORBITS) + (1 << 2) },
-       { "dasd2", (DASD_MAJOR << MINORBITS) + (2 << 2) },
-       { "dasd3", (DASD_MAJOR << MINORBITS) + (3 << 2) },
-       { "dasd4", (DASD_MAJOR << MINORBITS) + (4 << 2) },
-       { "dasd5", (DASD_MAJOR << MINORBITS) + (5 << 2) },
-       { "dasd6", (DASD_MAJOR << MINORBITS) + (6 << 2) },
-       { "dasd7", (DASD_MAJOR << MINORBITS) + (7 << 2) },
+       { "dasda", (DASD_MAJOR << MINORBITS) },
+       { "dasdb", (DASD_MAJOR << MINORBITS) + (1 << 2) },
+       { "dasdc", (DASD_MAJOR << MINORBITS) + (2 << 2) },
+       { "dasdd", (DASD_MAJOR << MINORBITS) + (3 << 2) },
+       { "dasde", (DASD_MAJOR << MINORBITS) + (4 << 2) },
+       { "dasdf", (DASD_MAJOR << MINORBITS) + (5 << 2) },
+       { "dasdg", (DASD_MAJOR << MINORBITS) + (6 << 2) },
+       { "dasdh", (DASD_MAJOR << MINORBITS) + (7 << 2) },
 #endif
 	{ NULL, 0 }
 };
@@ -638,6 +667,10 @@ static struct kernel_param cooked_params[] __initdata = {
 #ifdef CONFIG_CTC
         { "ctc=", ctc_setup } ,
 #endif
+#ifdef CONFIG_IUCV
+        { "iucv=", iucv_setup } ,
+#endif
+
 #endif
 
 #ifdef CONFIG_FB
@@ -682,6 +715,9 @@ static struct kernel_param cooked_params[] __initdata = {
 #endif
 #ifdef CONFIG_PRINTER
         { "lp=", lp_setup },
+#endif
+#ifdef CONFIG_VIDEO_CPIA_PP
+        { "cpia_pp=", cpia_pp_setup },
 #endif
 #ifdef CONFIG_JOY_AMIGA
 	{ "js_am=", js_am_setup },
@@ -981,6 +1017,12 @@ static struct kernel_param raw_params[] __initdata = {
 #ifdef CONFIG_APM
 	{ "apm=", apm_setup },
 #endif
+#ifdef CONFIG_3215
+	{ "condev=", con3215_setup },
+#endif
+#ifdef CONFIG_3215
+	{ "condev=", con3215_setup },
+#endif
 #ifdef CONFIG_MDISK
         { "mdisk=", mdisk_setup },
 #endif
@@ -1227,7 +1269,7 @@ asmlinkage void __init start_kernel(void)
 	setup_arch(&command_line, &memory_start, &memory_end);
 	memory_start = paging_init(memory_start,memory_end);
 	trap_init();
-	init_IRQ();
+        memory_start = init_IRQ( memory_start );
 	sched_init();
 	time_init();
 	parse_options(command_line);
@@ -1418,6 +1460,10 @@ static void __init do_basic_setup(void)
 
 	/* .. filesystems .. */
 	filesystem_setup();
+
+#ifdef CONFIG_IRDA
+	irda_device_init(); /* Must be done after protocol initialization */
+#endif
 
 	/* Mount the root filesystem.. */
 	mount_root();
