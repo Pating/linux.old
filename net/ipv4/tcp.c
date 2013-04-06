@@ -5,7 +5,7 @@
  *
  *		Implementation of the Transmission Control Protocol(TCP).
  *
- * Version:	$Id: tcp.c,v 1.140.2.15 2000/10/06 23:29:33 davem Exp $
+ * Version:	$Id: tcp.c,v 1.140.2.16 2001/01/04 05:28:46 davem Exp $
  *
  * Authors:	Ross Biro, <bir7@leland.Stanford.Edu>
  *		Fred N. van Kempen, <waltje@uWalt.NL.Mugnet.ORG>
@@ -1619,6 +1619,7 @@ static struct open_request * wait_for_connect(struct sock * sk,
 	struct wait_queue wait = { current, NULL };
 	struct open_request *req;
 
+	current->task_exclusive = 1;
 	add_wait_queue(sk->sleep, &wait);
 	for (;;) {
 		current->state = TASK_INTERRUPTIBLE;
@@ -1632,6 +1633,8 @@ static struct open_request * wait_for_connect(struct sock * sk,
 			break;
 	}
 	current->state = TASK_RUNNING;
+	wmb();
+	current->task_exclusive = 0;
 	remove_wait_queue(sk->sleep, &wait);
 	return req;
 }
@@ -1776,6 +1779,9 @@ int tcp_getsockopt(struct sock *sk, int level, int optname, char *optval,
 		return -EFAULT;
 
 	len = min(len, sizeof(int));
+	
+	if(len < 0)
+		return -EINVAL;
 
 	switch(optname) {
 	case TCP_MAXSEG:

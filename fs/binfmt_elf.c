@@ -113,6 +113,7 @@ create_elf_tables(char *p, int argc, int envc,
 	char *k_platform, *u_platform;
 	long hwcap;
 	size_t platform_len = 0;
+	long len;
 
 	/*
 	 * Get hold of platform and hardware capabilities masks for
@@ -191,13 +192,21 @@ create_elf_tables(char *p, int argc, int envc,
 	current->mm->arg_start = (unsigned long) p;
 	while (argc-->0) {
 		__put_user((elf_caddr_t)(unsigned long)p,argv++);
-		p += strlen_user(p);
+		len = strnlen_user(p, PAGE_SIZE*MAX_ARG_PAGES);
+		/* "can't happen" */
+		if (!len || len > PAGE_SIZE*MAX_ARG_PAGES)
+			return NULL;
+		p += len;
 	}
 	__put_user(NULL, argv);
 	current->mm->arg_end = current->mm->env_start = (unsigned long) p;
 	while (envc-->0) {
 		__put_user((elf_caddr_t)(unsigned long)p,envp++);
-		p += strlen_user(p);
+		len = strnlen_user(p, PAGE_SIZE*MAX_ARG_PAGES);
+		/* "can't happen" */
+		if (!len || len > PAGE_SIZE*MAX_ARG_PAGES)
+			return NULL;
+		p += len;
 	}
 	__put_user(NULL, envp);
 	current->mm->env_end = (unsigned long) p;
@@ -706,7 +715,7 @@ do_load_elf_binary(struct linux_binprm * bprm, struct pt_regs * regs)
 				elf_interpreter);
 			kfree(elf_interpreter);
 			kfree(elf_phdata);
-			send_sig(SIGSEGV, current, 0);
+			force_sig(SIGSEGV, current);
 			return 0;
 		}
 
@@ -729,9 +738,6 @@ do_load_elf_binary(struct linux_binprm * bprm, struct pt_regs * regs)
 	if (current->binfmt && current->binfmt->module)
 		__MOD_INC_USE_COUNT(current->binfmt->module);
 
-#ifndef VM_STACK_FLAGS
-	current->executable = dget(bprm->dentry);
-#endif
 	compute_creds(bprm);
 	current->flags &= ~PF_FORKNOEXEC;
 	bprm->p = (unsigned long)
@@ -742,6 +748,10 @@ do_load_elf_binary(struct linux_binprm * bprm, struct pt_regs * regs)
 			load_addr, load_bias,
 			interp_load_addr,
 			(interpreter_type == INTERPRETER_AOUT ? 0 : 1));
+	if (!bprm->p) {
+		force_sig(SIGSEGV, current);
+		return 0;
+	}
 	/* N.B. passed_fileno might not be initialized? */
 	if (interpreter_type == INTERPRETER_AOUT)
 		current->mm->arg_start += strlen(passed_fileno) + 1;
@@ -948,9 +958,9 @@ static int load_elf_library(int fd)
 static int dump_write(struct file *file, const void *addr, int nr)
 {
 	int r;
-	down(&file->f_dentry->d_inode->i_sem);
+	fs_down(&file->f_dentry->d_inode->i_sem);
 	r = file->f_op->write(file, addr, nr, &file->f_pos) == nr;
-	up(&file->f_dentry->d_inode->i_sem);
+	fs_up(&file->f_dentry->d_inode->i_sem);
 	return r;
 }
 
@@ -1056,7 +1066,7 @@ static int writenote(struct memelfnote *men, struct file *file)
 #undef DUMP_SEEK
 
 #define DUMP_WRITE(addr, nr)	\
-	if (!dump_write(file, (addr), (nr))) \
+	if ((size += (nr)) > limit || !dump_write(file, (addr), (nr))) \
 		goto close_coredump;
 #define DUMP_SEEK(off)	\
 	if (!dump_seek(file, (off))) \
@@ -1078,7 +1088,7 @@ static int elf_core_dump(long signr, struct pt_regs * regs)
 	char corefile[6+sizeof(current->comm)];
 	int segs;
 	int i;
-	size_t size;
+	size_t size = 0;
 	struct vm_area_struct *vma;
 	struct elfhdr elf;
 	off_t offset = 0, dataoff;
@@ -1099,24 +1109,10 @@ static int elf_core_dump(long signr, struct pt_regs * regs)
 	MOD_INC_USE_COUNT;
 #endif
 
-	/* Count what's needed to dump, up to the limit of coredump size */
-	segs = 0;
-	size = 0;
-	for(vma = current->mm->mmap; vma != NULL; vma = vma->vm_next) {
-		if (maydump(vma))
-		{
-			unsigned long sz = vma->vm_end-vma->vm_start;
+	segs = current->mm->map_count;
 
-			if (size+sz >= limit)
-				break;
-			else
-				size += sz;
-		}
-
-		segs++;
-	}
 #ifdef DEBUG
-	printk("elf_core_dump: %d segs taking %d bytes\n", segs, size);
+	printk("elf_core_dump: %d segs %lu limit\n", segs, limit);
 #endif
 
 	/* Set up header */
@@ -1294,12 +1290,9 @@ static int elf_core_dump(long signr, struct pt_regs * regs)
 	dataoff = offset = roundup(offset, ELF_EXEC_PAGESIZE);
 
 	/* Write program headers for segments dump */
-	for(vma = current->mm->mmap, i = 0;
-		i < segs && vma != NULL; vma = vma->vm_next) {
+	for(vma = current->mm->mmap; vma != NULL; vma = vma->vm_next) {
 		struct elf_phdr phdr;
 		size_t sz;
-
-		i++;
 
 		sz = vma->vm_end - vma->vm_start;
 
@@ -1326,19 +1319,36 @@ static int elf_core_dump(long signr, struct pt_regs * regs)
 
 	DUMP_SEEK(dataoff);
 
-	for(i = 0, vma = current->mm->mmap;
-	    i < segs && vma != NULL;
-	    vma = vma->vm_next) {
-		unsigned long addr = vma->vm_start;
-		unsigned long len = vma->vm_end - vma->vm_start;
+	for(vma = current->mm->mmap; vma != NULL; vma = vma->vm_next) {
+		unsigned long addr;
 
-		i++;
 		if (!maydump(vma))
 			continue;
 #ifdef DEBUG
 		printk("elf_core_dump: writing %08lx %lx\n", addr, len);
 #endif
-		DUMP_WRITE((void *)addr, len);
+		for (addr = vma->vm_start;
+		     addr < vma->vm_end;
+		     addr += PAGE_SIZE) {
+			pgd_t *pgd;
+			pmd_t *pmd;
+			pte_t *pte;
+
+			pgd = pgd_offset(vma->vm_mm, addr);
+			pmd = pmd_alloc(pgd, addr);
+	
+			if (!pmd)
+				goto end_coredump;
+			pte = pte_alloc(pmd, addr);
+			if (!pte)
+				goto end_coredump;
+			if (!pte_present(*pte) &&
+			    pte_none(*pte)) {
+				DUMP_SEEK (file->f_pos + PAGE_SIZE);
+			} else {
+				DUMP_WRITE((void*)addr, PAGE_SIZE);
+			}
+		}
 	}
 
 	if ((off_t) file->f_pos != offset) {

@@ -12,6 +12,7 @@
  * 08/07/00 added some bits to define_extent for ESS support
  * 10/26/00 fixed ITPMPL020144ASC (problems when accesing a device formatted by VIF)
  * 10/30/00 fixed ITPMPL010263EPA (erronoeous timeout messages)
+ * 01/23/00 fixed kmalloc in dump_sense to be GFP_ATOMIC
  */
 
 #include <linux/stddef.h>
@@ -49,22 +50,6 @@
 #define ECKD_F7(i) (i->factor7)
 #define ECKD_F8(i) (i->factor8)
 
-#define DASD_ECKD_CCW_WRITE 0x05
-#define DASD_ECKD_CCW_READ 0x06
-#define DASD_ECKD_CCW_WRITE_HOME_ADDRESS 0x09
-#define DASD_ECKD_CCW_READ_HOME_ADDRESS 0x0a
-#define DASD_ECKD_CCW_READ_COUNT 0x12
-#define DASD_ECKD_CCW_WRITE_RECORD_ZERO 0x15
-#define DASD_ECKD_CCW_READ_RECORD_ZERO 0x16
-#define DASD_ECKD_CCW_WRITE_CKD 0x1d
-#define DASD_ECKD_CCW_READ_CKD 0x1e
-#define DASD_ECKD_CCW_LOCATE_RECORD 0x47
-#define DASD_ECKD_CCW_DEFINE_EXTENT 0x63
-#define DASD_ECKD_CCW_WRITE_MT 0x85
-#define DASD_ECKD_CCW_READ_MT 0x86
-#define DASD_ECKD_CCW_READ_CKD_MT 0x9e
-#define DASD_ECKD_CCW_WRITE_CKD_MT 0x9d
-
 dasd_discipline_t dasd_eckd_discipline;
 
 typedef struct
@@ -74,6 +59,7 @@ dasd_eckd_private_t {
         eckd_count_t count_area;
 } dasd_eckd_private_t;
 
+#ifdef CONFIG_DASD_DYNAMIC
 static
 devreg_t dasd_eckd_known_devices[] = {
 	{
@@ -92,6 +78,7 @@ devreg_t dasd_eckd_known_devices[] = {
                 oper_func: dasd_oper_handler
         }
 };
+#endif
 
 static inline unsigned int
 round_up_multiple (unsigned int no, unsigned int mult)
@@ -372,9 +359,9 @@ static int
 dasd_eckd_check_characteristics (struct dasd_device_t *device)
 {
         int rc = -ENODEV;
-        void *conf_data;
+        void *conf_data=NULL;
         void *rdc_data;
-        int conf_len;
+        int conf_len=0;
         dasd_eckd_private_t *private;
 
         if ( device == NULL ) {
@@ -382,13 +369,14 @@ dasd_eckd_check_characteristics (struct dasd_device_t *device)
                          "Null device pointer passed to characteristics checker\n");
                 return -ENODEV;
         }
+        if ( device->private != NULL ) {
+                kfree(device->private);
+        }
+        device->private = kmalloc(sizeof(dasd_eckd_private_t),GFP_KERNEL);
         if ( device->private == NULL ) {
-          device->private = kmalloc(sizeof(dasd_eckd_private_t),GFP_KERNEL);
-          if ( device->private == NULL ) {
-            printk ( KERN_WARNING PRINTK_HEADER
-                     "memory allocation failed for private data\n");
-            return -ENOMEM;
-          }
+                printk ( KERN_WARNING PRINTK_HEADER
+                         "memory allocation failed for private data\n");
+                return -ENOMEM;
         }
         private = (dasd_eckd_private_t *)device->private;
         rdc_data = (void *)&(private->rdc_data);
@@ -448,7 +436,7 @@ dasd_eckd_init_analysis (struct dasd_device_t *device)
 	LO_eckd_data_t *LO_data;
 	eckd_count_t *count_data = &(((dasd_eckd_private_t *)(device->private))->count_area);
 
-        cqr = ccw_alloc_request (dasd_eckd_discipline.name, 3, sizeof (DE_eckd_data_t) + sizeof (LO_eckd_data_t));
+        cqr = dasd_alloc_request (dasd_eckd_discipline.name, 3, sizeof (DE_eckd_data_t) + sizeof (LO_eckd_data_t));
         if ( cqr == NULL ) {
                 printk ( KERN_WARNING PRINTK_HEADER
                          "No memory to allocate initialization request\n");
@@ -622,9 +610,9 @@ dasd_eckd_format_device (dasd_device_t *device, format_data_t *fdata)
                         datasize += sizeof(eckd_home_t);
                 }
         }
-	fcp = ccw_alloc_request (dasd_eckd_discipline.name, 
-                                 wrccws + 2,
-                                 datasize+rpt*sizeof(eckd_count_t));
+	fcp = dasd_alloc_request (dasd_eckd_discipline.name, 
+                                  wrccws + 2,
+                                  datasize+rpt*sizeof(eckd_count_t));
         if ( fcp != NULL ) {
                 fcp->device = device;
                 fcp->retries = 2;       /* set retry counter to enable ERP */
@@ -749,21 +737,26 @@ dasd_eckd_examine_error  (ccw_req_t *cqr, devstat_t * stat)
 	}
 }
 
-static dasd_erp_action_fn_t 
-dasd_eckd_erp_action ( ccw_req_t * cqr ) 
+static dasd_erp_action_fn_t
+dasd_eckd_erp_action (ccw_req_t * cqr)
 {
-        return default_erp_action;
+	dasd_device_t *device = (dasd_device_t *) cqr->device;
+
+	switch (device->devinfo.sid_data.cu_type) {
+	case 0x3990:
+	case 0x2105:
+		return dasd_3990_erp_action;
+	case 0x9343:
+		/* return dasd_9343_erp_action; */
+	default:
+		return default_erp_action;
+	}
 }
 
 static dasd_erp_postaction_fn_t
 dasd_eckd_erp_postaction (ccw_req_t * cqr)
 {
-        if ( cqr -> function == default_erp_action)
-                return default_erp_postaction;
-        printk ( KERN_WARNING PRINTK_HEADER
-                 "unknown ERP action %p\n",
-                 cqr -> function);
-	return NULL;
+	return default_erp_postaction;
 }
 
 static ccw_req_t *
@@ -842,7 +835,7 @@ dasd_eckd_build_cp_from_req (dasd_device_t *device, struct request *req)
 			}
 			if (size != byt_per_blk) {
 				PRINT_WARN ("Cannot fulfill small request %ld vs. %d (%ld sects)\n", size, byt_per_blk, req->nr_sectors);
-				ccw_free_request (rw_cp);
+				dasd_free_request (rw_cp);
 				return NULL;
 			}
 			ccw->flags = CCW_FLAG_CC;
@@ -860,7 +853,7 @@ dasd_eckd_build_cp_from_req (dasd_device_t *device, struct request *req)
 static char *
 dasd_eckd_dump_sense(struct dasd_device_t *device, ccw_req_t *req)
 {
-        char *page = (char *)get_free_page(GFP_KERNEL);
+        char *page = (char *)get_free_page(GFP_ATOMIC);
         devstat_t *stat = &device->dev_status;
 	char *sense = stat->ii.sense.data;
         int len,sl,sct;
@@ -905,6 +898,7 @@ dasd_eckd_dump_sense(struct dasd_device_t *device, ccw_req_t *req)
 dasd_discipline_t dasd_eckd_discipline = {
 	name :                          "ECKD",
 	ebcname :                       "ECKD",
+	max_blocks:			255,
         id_check:                       dasd_eckd_id_check,          
         check_characteristics:          dasd_eckd_check_characteristics,
         init_analysis:                  dasd_eckd_init_analysis,
@@ -923,7 +917,9 @@ dasd_discipline_t dasd_eckd_discipline = {
 int
 dasd_eckd_init( void ) {
         int rc = 0;
+#ifdef CONFIG_DASD_DYNAMIC
 	int i;
+#endif
         printk ( KERN_INFO PRINTK_HEADER
                  "%s discipline initializing\n", dasd_eckd_discipline.name);
         ASCEBC(dasd_eckd_discipline.ebcname,4);
@@ -944,8 +940,9 @@ dasd_eckd_init( void ) {
 
 void
 dasd_eckd_cleanup( void ) {
-        int rc = 0;
+#ifdef CONFIG_DASD_DYNAMIC
 	int i;
+#endif
         printk ( KERN_INFO PRINTK_HEADER
                  "%s discipline cleaning up\n", dasd_eckd_discipline.name);
 #ifdef CONFIG_DASD_DYNAMIC
@@ -960,7 +957,7 @@ dasd_eckd_cleanup( void ) {
 	} 
 #endif /* CONFIG_DASD_DYNAMIC */
         dasd_discipline_deq(&dasd_eckd_discipline);
-        return rc;
+        return;
 }
 
 /*

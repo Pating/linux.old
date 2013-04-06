@@ -136,7 +136,7 @@
 #endif
 
 #ifdef CONFIG_SCSI_AIC7XXX
-#include "aic7xxx.h"
+#include "aic7xxx/aic7xxx.h"
 #endif
 
 #ifdef CONFIG_SCSI_IPS
@@ -897,6 +897,9 @@ __initfunc(unsigned int scsi_init(void))
 #endif
 #ifdef CONFIG_CHR_DEV_ST
     scsi_register_device(&st_template);
+#endif
+#ifdef CONFIG_CHR_DEV_OSST
+    scsi_register_device(&osst_template);
 #endif
 #ifdef CONFIG_CHR_DEV_SG
     scsi_register_device(&sg_template);

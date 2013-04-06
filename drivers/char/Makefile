@@ -200,7 +200,13 @@ else
   endif
 endif
 
-obj-$(CONFIG_SX) += sx.o generic_serial.o
+ifeq ($(CONFIG_SX),y)
+O_OBJS += sx.o generic_serial.o
+else
+  ifeq ($(CONFIG_SX),m)
+  M_OBJS += sx.o generic_serial.o
+  endif
+endif
 
 ifeq ($(CONFIG_RIO),y)
 O_OBJS += rio/rio.o generic_serial.o
@@ -292,6 +298,14 @@ O_OBJS += acquirewdt.o
 else
   ifeq ($(CONFIG_ACQUIRE_WDT),m)
   M_OBJS += acquirewdt.o
+  endif
+endif
+
+ifeq ($(CONFIG_ADVANTECH_WDT),y)
+O_OBJS += advantechwdt.o
+else
+  ifeq ($(CONFIG_ADVANTECH_WDT),m)
+  M_OBJS += advantechwdt.o
   endif
 endif
 
@@ -678,6 +692,14 @@ O_OBJS += toshiba.o
 else
   ifeq ($(CONFIG_TOSHIBA),m)
   M_OBJS += toshiba.o
+  endif
+endif
+
+ifeq ($(CONFIG_I810_TCO),y)
+O_OBJS += i810-tco.o
+else
+  ifeq ($(CONFIG_I810_TCO),m)
+  M_OBJS += i810-tco.o
   endif
 endif
 

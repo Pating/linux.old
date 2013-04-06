@@ -1,5 +1,5 @@
 /*
- * $Id: divert_procfs.c,v 1.10 2000/11/13 22:51:47 kai Exp $
+ * $Id: divert_procfs.c,v 1.11 2000/11/25 17:01:00 kai Exp $
  *
  * Filesystem handling for the diversion supplementary services.
  *
@@ -32,6 +32,7 @@
 #include <linux/fs.h>
 #endif
 #include <linux/isdnif.h>
+#include <linux/isdn_compat.h>
 #include "isdn_divert.h"
 
 /*********************************/
@@ -40,7 +41,7 @@
 ulong if_used = 0;		/* number of interface users */
 static struct divert_info *divert_info_head = NULL;	/* head of queue */
 static struct divert_info *divert_info_tail = NULL;	/* pointer to last entry */
-static struct wait_queue *rd_queue = 0;		/* Queue IO */
+static wait_queue_head_t rd_queue;
 
 /*********************************/
 /* put an info buffer into queue */
@@ -281,19 +282,14 @@ isdn_divert_lseek(struct file *file, loff_t offset, int orig)
 
 static struct file_operations isdn_fops =
 {
-	isdn_divert_lseek,
-	isdn_divert_read,
-	isdn_divert_write,
-	NULL,			/* isdn_readdir */
-	isdn_divert_poll,	/* isdn_poll */
-	isdn_divert_ioctl,	/* isdn_ioctl */
-	NULL,			/* isdn_mmap */
-	isdn_divert_open,
-	NULL,			/* flush */
-	isdn_divert_close,
-	NULL			/* fsync */
+	llseek:         isdn_divert_lseek,
+	read:           isdn_divert_read,
+	write:          isdn_divert_write,
+	poll:           isdn_divert_poll,
+	ioctl:          isdn_divert_ioctl,
+	open:           isdn_divert_open,
+	release:        isdn_divert_close,                                      
 };
-
 struct inode_operations divert_file_inode_operations;
 
 /****************************/
@@ -310,6 +306,7 @@ int
 divert_dev_init(void)
 {
 
+	init_waitqueue_head(&rd_queue);
 
 #ifdef CONFIG_PROC_FS
 	isdn_proc_entry = create_proc_entry("isdn", S_IFDIR | S_IRUGO | S_IXUGO, proc_net);

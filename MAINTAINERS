@@ -87,6 +87,12 @@ M:	ajk@iehk.rwth-aachen.de
 L:	linux-hams@vger.kernel.org
 S:	Maintained
 
+8139too NETWORK DRIVER
+P:	Jeff Garzik, Jens David (Linux-2.2 port)
+M:	dg1kjd@afthd.tu-darmstadt.de
+L:	linux-net@vger.rutgers.edu
+S:	Maintained
+
 8390 NETWORK DRIVERS [WD80x3/SMC-ELITE, SMC-ULTRA, NE2000, 3C503, etc.]
 P:	Paul Gortmaker
 M:	p_gortmaker@yahoo.com
@@ -129,9 +135,9 @@ S:	Maintained
 
 APM DRIVER
 P:	Stephen Rothwell
-M:	apm@linuxcare.com.au
+M:	sfr@canb.auug.org.au
 L:	linux-laptop@vger.kernel.org
-W:	http://linuxcare.com.au/apm/
+W:	http://www.canb.auug.org.au/~sfr/
 S:	Supported
 
 APPLETALK NETWORK LAYER
@@ -251,7 +257,7 @@ S:	Maintained
 
 DC390/AM53C974 SCSI driver
 P:	Kurt Garloff
-M:	kurt@garloff.de
+M:	garloff@suse.de
 W:	http://www.garloff.de/kurt/linux/dc390/
 S:	Maintained
 
@@ -493,6 +499,13 @@ W:      http://paulbristow.net/linux
 L:	linux-kernel@vger.kernel.org
 S:	Maintained
 
+INTEL IA32 MICROCODE UPDATE DRIVER
+P:	Tigran Aivazian
+M:	Tigran Aivazian <tigran@veritas.com>
+W:      http://www.urbanmyth.org/microcode
+L:	linux-kernel@vger.kernel.org
+S:	Maintained
+
 IP FIREWALL
 P:	Paul Russell
 M:	Paul.Russell@rustcorp.com.au
@@ -532,6 +545,13 @@ M:	keil@isdn4linux.de
 L:	isdn4linux@listserv.isdn4linux.de
 S:	Maintained
 
+ISDN SUBSYSTEM (Eicon active card driver)
+P:	Armin Schindler
+M:	mac@melware.de
+L:	isdn4linux@listserv.isdn4linux.de
+W:	http://www.melware.net
+S:	Maintained
+
 JOYSTICK DRIVER
 P:	Vojtech Pavlik
 M:	vojtech@suse.cz
@@ -559,10 +579,12 @@ L:	autofs@linux.kernel.org
 S:	Maintained
 
 KERNEL NFSD
-P:	G. Allen Morris III
-M:	gam3@acm.org
+P:	Neil Brown
+M:	neilb@cse.unsw.edu.au
 L:	nfs-devel@linux.kernel.org (Linux NFS)
-W:	http://csua.berkeley.edu/~gam3/knfsd
+L:	nfs@lists.sourceforge.net
+W:	http://nfs.sourceforge.net/
+W:	http://www.cse.unsw.edu.au/~neilb/patches/knfsd-2.2/
 S:	Maintained
 
 LANMEDIA WAN CARD DRIVER
@@ -579,13 +601,13 @@ S:	Maintained
 
 LINUX FOR POWERPC (PREP)
 P:	Cort Dougan
-M:	cort@cs.nmt.edu
-W:	http://linuxppc.cs.nmt.edu/
+M:	cort@fsmlabs.com
+W:	http://www.fsmlabs.com/linuxppcbk.html
 S:	Maintained
 
 LINUX FOR POWER MACINTOSH
 P:	Paul Mackerras
-M:	paulus@linuxcare.com
+M:	paulus@samba.org
 W:	http://www.linuxppc.org/
 L:	linuxppc-dev@lists.linuxppc.org
 S:	Maintained
@@ -723,6 +745,13 @@ M:	phillim@amtrak.com
 L:	linux-net@vger.kernel.org
 L:	linux-tr@emissary.aus-etc.com
 W:	http://www.linuxtr.net
+S:	Maintained
+
+ONSTREAM SCSI TAPE DRIVER
+P:	Willem Riede
+M:	osst@riede.org
+L:	osst@linux1.onstream.nl
+L:	linux-scsi@vger.rutgers.edu
 S:	Maintained
 
 OPL3-SA2, SA3, and SAx DRIVER
@@ -915,6 +944,11 @@ STALLION TECHNOLOGIES MULTIPORT SERIAL BOARDS
 M:	support@stallion.oz.au
 W:	http://www.stallion.com
 S:	Supported
+
+STARFIRE/DURALAN NETWORK DRIVER
+P:	Ion Badulescu
+M:	ionut@cs.columbia.edu
+S:	Maintained
 
 STARMODE RADIO IP (STRIP) PROTOCOL DRIVER
 W:	http://mosquitonet.Stanford.EDU/strip.html

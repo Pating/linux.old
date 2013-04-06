@@ -15,19 +15,20 @@
 
 	Support and updates available at
 	http://cesdis.gsfc.nasa.gov/linux/drivers/tulip.html
-	
+
 	This driver also contains updates by Wolfgang Walter and others.
 	For this specific driver variant please use linux-kernel for 
 	bug reports.
+
+	Updated 12/17/2000 by Jim McQuillan <jam@McQuil.com> to
+	include support for the Linksys LNE100TX card based on the
+	Admtek 985 Centaur-P chipset.
 */
 
 #define SMP_CHECK
 static const char version[] = "tulip.c:v0.91g-ppc 7/16/99 becker@cesdis.gsfc.nasa.gov\n";
 
 /* A few user-configurable values. */
-
-/* Maximum events (Rx packets, etc.) to handle at each interrupt. */
-static int max_interrupt_work = 25;
 
 #define MAX_UNITS 8
 /* Used to pass the full-duplex flag, etc. */
@@ -139,7 +140,6 @@ static int csr0 = 0x00A00000 | 0x4800;
 MODULE_AUTHOR("Donald Becker <becker@cesdis.gsfc.nasa.gov>");
 MODULE_DESCRIPTION("Digital 21*4* Tulip ethernet driver");
 MODULE_PARM(debug, "i");
-MODULE_PARM(max_interrupt_work, "i");
 MODULE_PARM(reverse_probe, "i");
 MODULE_PARM(rx_copybreak, "i");
 MODULE_PARM(csr0, "i");
@@ -148,10 +148,6 @@ MODULE_PARM(full_duplex, "1-" __MODULE_STRING(MAX_UNITS) "i");
 #endif
 
 #define RUN_AT(x) (jiffies + (x))
-
-#if (LINUX_VERSION_CODE >= 0x20100)
-static char kernel_version[] = UTS_RELEASE;
-#endif
 
 #if LINUX_VERSION_CODE < 0x20123
 #define hard_smp_processor_id() smp_processor_id()
@@ -398,6 +394,8 @@ static struct tulip_chip_table {
 	HAS_MII | HAS_NWAY143 | HAS_8023X, t21142_timer },
   { "ADMtek Comet", 256, 0x0001abef,
 	MC_HASH_ONLY, comet_timer },
+  { "ADMtek Centaur-P", 256, 0x0001abef,
+  	MC_HASH_ONLY, comet_timer },
   { "Compex 9881 PMAC", 128, 0x0001ebef,
 	HAS_MII | HAS_MEDIA_TABLE | CSR12_IN_SROM, mxic_timer },
   { "Intel DS21145 Tulip", 128, 0x0801fbff,
@@ -411,8 +409,8 @@ static struct tulip_chip_table {
 /* This matches the table above.  Note 21142 == 21143. */
 enum chips {
 	DC21040=0, DC21041=1, DC21140=2, DC21142=3, DC21143=3,
-	LC82C168, MX98713, MX98715, MX98725, AX88140, PNIC2, COMET, COMPEX9881,
-	I21145,
+	LC82C168, MX98713, MX98715, MX98725, AX88140, PNIC2, COMET, COMET5,
+        COMPEX9881, I21145, XIRCOM,
 };
 
 /* A full-duplex map for media types. */
@@ -750,7 +748,7 @@ static struct device *tulip_probe1(int pci_bus, int pci_devfn,
 			put_unaligned(le16_to_cpu(value), ((u16*)dev->dev_addr) + i);
 			sum += value & 0xffff;
 		}
-	} else if (chip_idx == COMET) {
+	} else if ((chip_idx == COMET) || (chip_idx == COMET5)) {
 		/* No need to read the EEPROM. */
 		put_unaligned(inl(ioaddr + 0xA4), (u32 *)dev->dev_addr);
 		put_unaligned(inl(ioaddr + 0xA8), (u16 *)(dev->dev_addr + 4));
@@ -993,6 +991,7 @@ static struct device *tulip_probe1(int pci_bus, int pci_devfn,
 		outl(0x00001000, ioaddr + CSR12);
 		break;
 	case COMET:
+	case COMET5:
 		/* No initialization necessary. */
 		break;
 	}
@@ -1310,7 +1309,7 @@ static int mdio_read(struct device *dev, int phy_id, int location)
 		return 0xffff;
 	}
 
-	if (tp->chip_id == COMET) {
+	if ((tp->chip_id == COMET) || (tp->chip_id == COMET5)) {
 		if (phy_id == 1) {
 			if (location < 7)
 				return inl(ioaddr + 0xB4 + (location<<2));
@@ -1367,7 +1366,7 @@ static void mdio_write(struct device *dev, int phy_id, int location, int value)
 		return;
 	}
 
-	if (tp->chip_id == COMET) {
+	if ((tp->chip_id == COMET) || (tp->chip_id == COMET5)) {
 		if (phy_id != 1)
 			return;
 		if (location < 7)
@@ -1457,7 +1456,7 @@ tulip_open(struct device *dev)
 			outl(addr_low,  ioaddr + CSR14);
 			outl(1, ioaddr + CSR13);
 			outl(addr_high, ioaddr + CSR14);
-		} else if (tp->chip_id == COMET) {
+		} else if ((tp->chip_id == COMET) || (tp->chip_id == COMET5)) {
 			outl(addr_low,  ioaddr + 0xA4);
 			outl(addr_high, ioaddr + 0xA8);
 			outl(0, ioaddr + 0xAC);
@@ -1572,7 +1571,7 @@ media_picked:
 		outl(0x0000, ioaddr + CSR13);
 		outl(0x0000, ioaddr + CSR14);
 		outl(0x0008, ioaddr + CSR15);
-	} else if (tp->chip_id == COMET) {
+	} else if ((tp->chip_id == COMET) || (tp->chip_id == COMET5)) {
 		dev->if_port = 0;
 		tp->csr6 = 0x00040000;
 	} else if (tp->chip_id == AX88140) {
@@ -3012,7 +3011,7 @@ static int private_ioctl(struct device *dev, struct ifreq *rq, int cmd)
 			data[0] = phy;
 		else if (tp->flags & HAS_NWAY143)
 			data[0] = 32;
-		else if (tp->chip_id == COMET)
+		else if ((tp->chip_id == COMET) || (tp->chip_id == COMET5))
 			data[0] = 1;
 		else
 			return -ENODEV;
@@ -3139,7 +3138,9 @@ static void set_rx_mode(struct device *dev)
 				outl(mc_filter[0], ioaddr + CSR14);
 				outl(3, ioaddr + CSR13);
 				outl(mc_filter[1], ioaddr + CSR14);
-			} else if (tp->chip_id == COMET) { /* Has a simple hash filter. */
+
+			/* Has a simple hash filter. */
+			} else if ((tp->chip_id == COMET) || (tp->chip_id == COMET5)) {
 				outl(mc_filter[0], ioaddr + 0xAC);
 				outl(mc_filter[1], ioaddr + 0xB0);
 			}

@@ -2,7 +2,7 @@
  *	IP_MASQ_USER user space control module
  *
  *
- *	$Id: ip_masq_user.c,v 1.1.2.4 2000/02/29 23:50:24 davem Exp $
+ *	$Id: ip_masq_user.c,v 1.1.2.6 2001/01/04 04:20:16 davem Exp $
  */
 
 #include <linux/config.h>
@@ -35,7 +35,6 @@
  */
 static int debug=0;
 
-MODULE_PARM(ports, "1-" __MODULE_STRING(MAX_MASQ_APP_PORTS) "i");
 MODULE_PARM(debug, "i");
 
 /*

@@ -449,6 +449,16 @@ note_scsi_host(struct device_node *node, void *host))
 
 #ifdef CONFIG_BLK_DEV_IDE_PMAC
 
+void
+ide_pmac_init(void)
+{
+	if (_machine == _MACH_Pmac)
+		pmu_suspend();
+	ide_init();	
+	if (_machine == _MACH_Pmac)
+		pmu_resume();
+}
+
 extern kdev_t pmac_find_ide_boot(char *bootdevice, int n);
 
 __initfunc(kdev_t find_ide_boot(void))
@@ -657,6 +667,10 @@ pmac_init(unsigned long r3, unsigned long r4, unsigned long r5,
 	ppc_md.set_rtc_time   = pmac_set_rtc_time;
 	ppc_md.get_rtc_time   = pmac_get_rtc_time;
 	ppc_md.calibrate_decr = pmac_calibrate_decr;
+
+	ppc_md.pci_dev_root_bridge	= pmac_pci_dev_root_bridge;
+	ppc_md.pci_dev_mem_base		= pmac_pci_dev_mem_base;
+	ppc_md.pci_dev_io_base		= pmac_pci_dev_io_base;
 
 #ifdef CONFIG_VT
 #ifdef CONFIG_MAC_KEYBOARD

@@ -139,8 +139,17 @@ static struct file_operations misc_fops = {
 
 int misc_register(struct miscdevice * misc)
 {
+	struct miscdevice *c;
+
 	if (misc->next || misc->prev)
 		return -EBUSY;
+	c = misc_list.next;
+
+	while ((c != &misc_list) && (c->minor != misc->minor))
+		c = c->next;
+	if (c != &misc_list)
+		return -EBUSY;
+
 	if (misc->minor == MISC_DYNAMIC_MINOR) {
 		int i = DYNAMIC_MINORS;
 		while (--i >= 0)
@@ -229,6 +238,9 @@ int __init misc_init(void)
 #endif
 #ifdef CONFIG_ACQUIRE_WDT
 	acq_init();
+#endif
+#ifdef CONFIG_ADVANTECH_WDT
+	advwdt_init();
 #endif
 #ifdef CONFIG_60XX_WDT
 	sbc60xxwdt_init();

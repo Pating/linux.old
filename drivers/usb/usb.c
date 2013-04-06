@@ -187,6 +187,19 @@ struct usb_interface *usb_ifnum_to_if(struct usb_device *dev, unsigned ifnum)
 	return NULL;
 }
 
+struct usb_endpoint_descriptor *usb_epnum_to_ep_desc(struct usb_device *dev, unsigned epnum)
+{
+	int i, j, k;
+
+	for (i = 0; i < dev->actconfig->bNumInterfaces; i++)
+		for (j = 0; j < dev->actconfig->interface[i].num_altsetting; j++)
+			for (k = 0; k < dev->actconfig->interface[i].altsetting[j].bNumEndpoints; k++)
+				if (epnum == dev->actconfig->interface[i].altsetting[j].endpoint[k].bEndpointAddress)
+					return &dev->actconfig->interface[i].altsetting[j].endpoint[k];
+
+	return NULL;
+}
+
 /*
  * usb_calc_bus_time:
  *
@@ -283,11 +296,13 @@ void usb_claim_bandwidth (struct usb_device *dev, struct urb *urb, int bustime, 
 	else
 		dev->bus->bandwidth_int_reqs++;
 	urb->bandwidth = bustime;
-	
-	dbg("bw_alloc increased by %d to %d for %d requesters",
+
+#ifdef USB_BANDWIDTH_MESSAGES
+	dbg("bandwidth alloc increased by %d to %d for %d requesters",
 		bustime,
 		dev->bus->bandwidth_allocated,
 		dev->bus->bandwidth_int_reqs + dev->bus->bandwidth_isoc_reqs);
+#endif
 }
 
 /*
@@ -303,10 +318,12 @@ void usb_release_bandwidth(struct usb_device *dev, struct urb *urb, int isoc)
 	else
 		dev->bus->bandwidth_int_reqs--;
 
-	dbg("bw_alloc reduced by %d to %d for %d requesters",
+#ifdef USB_BANDWIDTH_MESSAGES
+	dbg("bandwidth alloc reduced by %d to %d for %d requesters",
 		urb->bandwidth,
 		dev->bus->bandwidth_allocated,
 		dev->bus->bandwidth_int_reqs + dev->bus->bandwidth_isoc_reqs);
+#endif
 	urb->bandwidth = 0;
 }
 
@@ -484,12 +501,17 @@ static int usb_find_interface_driver(struct usb_device *dev, unsigned ifnum)
 			
 		tmp = tmp->next;
 		down(&driver->serialize);
+		if (usb_interface_claimed(interface)) {
+			up(&driver->serialize);
+			return -1;
+		}
 		private = driver->probe(dev, ifnum);
-		up(&driver->serialize);
-		if (!private)
+		if (!private) {
+			up(&driver->serialize);
 			continue;
+		}
 		usb_driver_claim_interface(driver, interface, private);
-
+		up(&driver->serialize);
 		return 0;
 	}
 	
@@ -737,7 +759,7 @@ static void usb_find_drivers(struct usb_device *dev)
 		dbg("unhandled interfaces on device");
 
 	if (!claimed) {
-		warn("USB device %d (prod/vend 0x%x/0x%x) is not claimed by any active driver.",
+		warn("USB device %d (vend/prod 0x%x/0x%x) is not claimed by any active driver.",
 			dev->devnum,
 			dev->descriptor.idVendor,
 			dev->descriptor.idProduct);
@@ -2037,6 +2059,7 @@ struct list_head *usb_bus_get_list(void)
  * then these symbols need to be exported for the modules to use.
  */
 EXPORT_SYMBOL(usb_ifnum_to_if);
+EXPORT_SYMBOL(usb_epnum_to_ep_desc);
 
 EXPORT_SYMBOL(usb_register);
 EXPORT_SYMBOL(usb_deregister);

@@ -161,7 +161,7 @@ nfsd_cache_lookup(struct svc_rqst *rqstp, int type)
 		    xid == rp->c_xid && proc == rp->c_proc &&
 		    proto == rp->c_prot && vers == rp->c_vers &&
 		    time_before(jiffies, rp->c_timestamp + 120*HZ) &&
-		    memcmp((char*)&rqstp->rq_addr, (char*)&rp->c_addr, rqstp->rq_addrlen)==0) {
+		    memcmp((char*)&rqstp->rq_addr, (char*)&rp->c_addr, sizeof(rp->c_addr))==0) {
 			nfsdstats.rchits++;
 			goto found_entry;
 		}
@@ -217,13 +217,12 @@ nfsd_cache_lookup(struct svc_rqst *rqstp, int type)
 found_entry:
 	/* We found a matching entry which is either in progress or done. */
 	age = jiffies - rp->c_timestamp;
+	rp->c_timestamp = jiffies;
+	lru_put_front(rp);
 
 	/* Request being processed or excessive rexmits */
 	if (rp->c_state == RC_INPROG || age < RC_DELAY)
 		return RC_DROPIT;
-
-	rp->c_timestamp = jiffies;
-	lru_put_front(rp);
 
 	/* From the hall of fame of impractical attacks:
 	 * Is this a user who tries to snoop on the cache? */

@@ -751,6 +751,7 @@ static struct net_device *speedo_found1(struct pci_dev *pdev, int pci_bus,
 	   This takes less than 10usec and will easily finish before the next
 	   action. */
 	outl(PortReset, ioaddr + SCBPort);
+	inl(ioaddr + SCBPort);
 	/* Honor PortReset timing. */
 	udelay(10);
 
@@ -778,7 +779,7 @@ static struct net_device *speedo_found1(struct pci_dev *pdev, int pci_bus,
 		/* The self-test results must be paragraph aligned. */
 		s32 str[6], *volatile self_test_results;
 		int boguscnt = 16000;	/* Timeout for set-test. */
-		if (eeprom[3] & 0x03)
+		if ((eeprom[3] & 0x03) != 0x03)
 			printk(KERN_INFO "  Receiver lock-up bug exists -- enabling"
 				   " work-around.\n");
 		printk(KERN_INFO "  Board assembly %4.4x%2.2x-%3.3d, Physical"
@@ -839,6 +840,7 @@ static struct net_device *speedo_found1(struct pci_dev *pdev, int pci_bus,
 #endif  /* kernel_bloat */
 
 	outl(PortReset, ioaddr + SCBPort);
+	inl(ioaddr + SCBPort);
 	/* Honor PortReset timing. */
 	udelay(10);
 
@@ -1062,6 +1064,9 @@ static void speedo_resume(struct net_device *dev)
 	/* Set the segment registers to '0'. */
 	wait_for_cmd_done(ioaddr + SCBCmd);
 	outl(0, ioaddr + SCBPointer);
+	/* impose a delay to avoid a bug */
+	inl(ioaddr + SCBPointer);
+	udelay(10);
 	outb(RxAddrLoad, ioaddr + SCBCmd);
 	wait_for_cmd_done(ioaddr + SCBCmd);
 	outb(CUCmdBase, ioaddr + SCBCmd);

@@ -2,6 +2,7 @@ comment 'SCSI support type (disk, tape, CD-ROM)'
 
 dep_tristate 'SCSI disk support' CONFIG_BLK_DEV_SD $CONFIG_SCSI
 dep_tristate 'SCSI tape support' CONFIG_CHR_DEV_ST $CONFIG_SCSI
+dep_tristate 'OnStream SC-x0 SCSI tape support' CONFIG_CHR_DEV_OSST $CONFIG_SCSI
 dep_tristate 'SCSI CD-ROM support' CONFIG_BLK_DEV_SR $CONFIG_SCSI
 if [ "$CONFIG_BLK_DEV_SR" != "n" ]; then
   bool '  Enable vendor-specific extensions (for SCSI CDROM)' CONFIG_BLK_DEV_SR_VENDOR
@@ -29,9 +30,8 @@ dep_tristate 'Adaptec AHA1740 support' CONFIG_SCSI_AHA1740 $CONFIG_SCSI
 dep_tristate 'Adaptec AIC7xxx support' CONFIG_SCSI_AIC7XXX $CONFIG_SCSI
 if [ "$CONFIG_SCSI_AIC7XXX" != "n" ]; then
     bool '   Enable Tagged Command Queueing (TCQ) by default' CONFIG_AIC7XXX_TCQ_ON_BY_DEFAULT
-    int  '   Maximum number of TCQ commands per device' CONFIG_AIC7XXX_CMDS_PER_DEVICE 8
-    bool '   Collect statistics to report in /proc' CONFIG_AIC7XXX_PROC_STATS N
-    int  '   Delay in seconds after SCSI bus reset' CONFIG_AIC7XXX_RESET_DELAY 5
+    int  '   Maximum number of TCQ commands per device' CONFIG_AIC7XXX_CMDS_PER_DEVICE 24
+    bool '   Collect statistics to report in /proc' CONFIG_AIC7XXX_PROC_STATS
 fi
 dep_tristate 'IBM ServeRAID support' CONFIG_SCSI_IPS $CONFIG_SCSI
 dep_tristate 'AdvanSys SCSI support' CONFIG_SCSI_ADVANSYS $CONFIG_SCSI
@@ -71,7 +71,7 @@ if [ "$CONFIG_PCI" = "y" ]; then
   dep_tristate 'Initio 9100U(W) support' CONFIG_SCSI_INITIO $CONFIG_SCSI
   dep_tristate 'Initio INI-A100U2W support' CONFIG_SCSI_INIA100 $CONFIG_SCSI
 fi
-if [ "$CONFIG_PARPORT" != "n" ]; then
+if [ "$CONFIG_PARPORT" = "y" -o "$CONFIG_PARPORT" = "m" ]; then
   dep_tristate 'IOMEGA parallel port (ppa - older drives)' CONFIG_SCSI_PPA $CONFIG_SCSI $CONFIG_PARPORT
   dep_tristate 'IOMEGA parallel port (imm - newer drives)' CONFIG_SCSI_IMM $CONFIG_SCSI $CONFIG_PARPORT
   if [ "$CONFIG_SCSI_PPA" != "n" -o "$CONFIG_SCSI_IMM" != "n" ]; then

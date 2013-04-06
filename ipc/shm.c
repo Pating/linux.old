@@ -337,6 +337,8 @@ asmlinkage int sys_shmctl (int shmid, int cmd, struct shmid_ds *buf)
 		if (current->euid == shp->u.shm_perm.uid ||
 		    current->euid == shp->u.shm_perm.cuid || 
 		    capable(CAP_SYS_ADMIN)) {
+			/* Do not find it any more */
+			shp->u.shm_perm.key = IPC_PRIVATE;
 			shp->u.shm_perm.mode |= SHM_DEST;
 			if (shp->u.shm_nattch <= 0)
 				killseg (id);
@@ -679,7 +681,7 @@ done:	/* pte_val(pte) == shp->shm_pages[idx] */
 }
 
 /*
- * Goes through counter = (shm_rss >> prio) present shm pages.
+ * Goes through counter = (shm_rss / prio) present shm pages.
  */
 static unsigned long swap_id = 0; /* currently being swapped */
 static unsigned long swap_idx = 0; /* next to swap */
@@ -693,7 +695,7 @@ int shm_swap (int prio, int gfp_mask)
 	int loop = 0;
 	int counter;
 	
-	counter = shm_rss >> prio;
+	counter = shm_rss / prio;
 	if (!counter || !(swap_nr = get_swap_page()))
 		return 0;
 

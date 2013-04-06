@@ -1,4 +1,4 @@
-/* $Id: module.c,v 1.11 1999/10/30 09:48:04 keil Exp $
+/* $Id: module.c,v 1.14.6.2 2000/12/18 22:14:10 kai Exp $
  *
  * ISDN lowlevel-module for the IBM ISDN-S0 Active 2000.
  *
@@ -19,49 +19,12 @@
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA. 
  *
- * $Log: module.c,v $
- * Revision 1.11  1999/10/30 09:48:04  keil
- * miss one prefix act2000
- *
- * Revision 1.10  1999/10/24 18:46:05  fritz
- * Changed isa_ prefix to act2000_isa_ to prevent name-clash in latest
- * kernels.
- *
- * Revision 1.9  1999/04/12 13:13:56  fritz
- * Made cards pointer static to avoid name-clash.
- *
- * Revision 1.8  1998/11/05 22:12:51  fritz
- * Changed mail-address.
- *
- * Revision 1.7  1998/02/12 23:06:52  keil
- * change for 2.1.86 (removing FREE_READ/FREE_WRITE from [dev]_kfree_skb()
- *
- * Revision 1.6  1998/01/31 22:10:42  keil
- * changes for 2.1.82
- *
- * Revision 1.5  1997/10/09 22:23:04  fritz
- * New HL<->LL interface:
- *   New BSENT callback with nr. of bytes included.
- *   Sending without ACK.
- *
- * Revision 1.4  1997/09/25 17:25:43  fritz
- * Support for adding cards at runtime.
- * Support for new Firmware.
- *
- * Revision 1.3  1997/09/24 23:11:45  fritz
- * Optimized IRQ load and polling-mode.
- *
- * Revision 1.2  1997/09/24 19:44:17  fritz
- * Added MSN mapping support, some cleanup.
- *
- * Revision 1.1  1997/09/23 18:00:13  fritz
- * New driver for IBM Active 2000.
- *
  */
 
 #include "act2000.h"
 #include "act2000_isa.h"
 #include "capi.h"
+#include <linux/init.h>
 
 static unsigned short act2000_isa_ports[] =
 {
@@ -563,37 +526,6 @@ act2000_readstatus(u_char * buf, int len, int user, act2000_card * card)
         return count;
 }
 
-static void
-act2000_putmsg(act2000_card *card, char c)
-{
-        ulong flags;
-
-        save_flags(flags);
-        cli();
-        *card->status_buf_write++ = c;
-        if (card->status_buf_write == card->status_buf_read) {
-                if (++card->status_buf_read > card->status_buf_end)
-                card->status_buf_read = card->status_buf;
-        }
-        if (card->status_buf_write > card->status_buf_end)
-                card->status_buf_write = card->status_buf;
-        restore_flags(flags);
-}
-
-static void
-act2000_logstat(struct act2000_card *card, char *str)
-{
-        char *p = str;
-        isdn_ctrl c;
-
-	while (*p)
-		act2000_putmsg(card, *p++);
-        c.command = ISDN_STAT_STAVAIL;
-        c.driver = card->myid;
-        c.arg = strlen(str);
-        card->interface.statcallb(&c);
-}
-
 /*
  * Find card with given driverId
  */
@@ -889,12 +821,7 @@ act2000_addcard(int bus, int port, int irq, char *id)
 
 #define DRIVERNAME "IBM Active 2000 ISDN driver"
 
-#ifdef MODULE
-#define act2000_init init_module
-#endif
-
-int
-act2000_init(void)
+static int __init act2000_init(void)
 {
         printk(KERN_INFO "%s\n", DRIVERNAME);
         if (!cards)
@@ -906,9 +833,7 @@ act2000_init(void)
         return 0;
 }
 
-#ifdef MODULE
-void
-cleanup_module(void)
+static void  act2000_exit(void)
 {
         act2000_card *card = cards;
         act2000_card *last;
@@ -927,34 +852,5 @@ cleanup_module(void)
         printk(KERN_INFO "%s unloaded\n", DRIVERNAME);
 }
 
-#else
-void
-act2000_setup(char *str, int *ints)
-{
-        int i, j, argc, port, irq, bus;
-	
-        argc = ints[0];
-        i = 1;
-        if (argc)
-                while (argc) {
-                        port = irq = -1;
-			bus = 0;
-                        if (argc) {
-                                bus = ints[i];
-                                i++;
-                                argc--;
-                        }
-                        if (argc) {
-                                port = ints[i];
-                                i++;
-                                argc--;
-                        }
-                        if (argc) {
-                                irq = ints[i];
-                                i++;
-                                argc--;
-                        }
-			act2000_addcard(bus, port, irq, act_id);
-		}
-}
-#endif
+module_init(act2000_init);
+module_exit(act2000_exit);

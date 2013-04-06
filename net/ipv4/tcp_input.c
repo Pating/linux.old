@@ -5,7 +5,7 @@
  *
  *		Implementation of the Transmission Control Protocol(TCP).
  *
- * Version:	$Id: tcp_input.c,v 1.164.2.18 2000/12/08 20:29:33 davem Exp $
+ * Version:	$Id: tcp_input.c,v 1.164.2.21 2001/03/06 05:39:39 davem Exp $
  *
  * Authors:	Ross Biro, <bir7@leland.Stanford.Edu>
  *		Fred N. van Kempen, <waltje@uWalt.NL.Mugnet.ORG>
@@ -246,26 +246,22 @@ extern __inline__ int tcp_paws_discard(struct tcp_opt *tp, struct tcphdr *th, un
 }
 
 
-static int __tcp_sequence(struct tcp_opt *tp, u32 seq, u32 end_seq)
+/* Check segment sequence number for validity.
+ *
+ * Segment controls are considered valid, if the segment
+ * fits to the window after truncation to the window. Acceptability
+ * of data (and SYN, FIN, of course) is checked separately.
+ * See tcp_data_queue(), for example.
+ *
+ * Also, controls (RST is main one) are accepted using last_ack_sent instead
+ * of RCV.NXT. Peer still did not advance his SND.UNA when we
+ * delayed ACK, so that hisSND.UNA<=last_ack_sent.
+ * (borrowed from freebsd)
+ */
+static inline int tcp_sequence(struct tcp_opt *tp, u32 seq, u32 end_seq)
 {
-	u32 end_window = tp->rcv_wup + tp->rcv_wnd;
-
-	if (tp->rcv_wnd &&
-	    after(end_seq, tp->rcv_nxt) &&
-	    before(seq, end_window))
-		return 1;
-	if (seq != end_window)
-		return 0;
-	return (seq == end_seq);
-}
-
-/* This functions checks to see if the tcp header is actually acceptable. */
-extern __inline__ int tcp_sequence(struct tcp_opt *tp, u32 seq, u32 end_seq)
-{
-	if (seq == tp->rcv_nxt)
-		return (tp->rcv_wnd || (end_seq == seq));
-
-	return __tcp_sequence(tp, seq, end_seq);
+	return	!before(end_seq, tp->last_ack_sent) &&
+		!after(seq, tp->rcv_nxt + tcp_receive_window(tp));
 }
 
 /* When we get a reset we do this. */
@@ -1415,6 +1411,11 @@ static void tcp_data_queue(struct sock *sk, struct sk_buff *skb)
 	if (TCP_SKB_CB(skb)->seq == tp->rcv_nxt) {
 		/* Ok. In sequence. */
 	queue_and_out:
+		if (tcp_receive_window(tp) == 0)
+			goto out_of_window;
+
+		/* We know it is in window now too. */
+
 		dst_confirm(sk->dst_cache);
 		__skb_queue_tail(&sk->receive_queue, skb);
 		tp->rcv_nxt = TCP_SKB_CB(skb)->end_seq;
@@ -1441,6 +1442,8 @@ static void tcp_data_queue(struct sock *sk, struct sk_buff *skb)
 		/* A retransmit, 2nd most common case.  Force an imediate ack. */
 		SOCK_DEBUG(sk, "retransmit received: seq %X\n", TCP_SKB_CB(skb)->seq);
 		tcp_enter_quickack_mode(tp);
+out_of_window:
+		tp->delayed_acks++;
 		kfree_skb(skb);
 		return;
 	}
@@ -1453,6 +1456,16 @@ static void tcp_data_queue(struct sock *sk, struct sk_buff *skb)
 
 		goto queue_and_out;
 	}
+
+	/* Out of window. F.e. zero window probe.
+	 *
+	 * Note: it is highly possible that we may open window and enqueue
+	 * this segment now. However, this will be known only after we queue
+	 * it, which will result in queue full of successive 1 byte BSD
+	 * window probes, it is SWS in fact. So, always reject it and send ACK.
+	 */
+	if (!before(TCP_SKB_CB(skb)->seq, tp->rcv_nxt+tcp_receive_window(tp)))
+		goto out_of_window;
 
 	/* Ok. This is an out_of_order segment, force an ack. */
 	tp->delayed_acks++;
@@ -1671,6 +1684,9 @@ static void tcp_check_urg(struct sock * sk, struct tcphdr * th)
 	if (after(tp->copied_seq, ptr))
 		return;
 
+	if (before(ptr, tp->rcv_nxt))
+		return;
+
 	/* Do we already have a newer (or duplicate) urgent pointer? */
 	if (tp->urg_data && !after(ptr, tp->urg_seq))
 		return;
@@ -1689,8 +1705,10 @@ static void tcp_check_urg(struct sock * sk, struct tcphdr * th)
 	 * as data, nor can we alter copied_seq until this data arrives
 	 * or we break the sematics of SIOCATMARK (and thus sockatmark())
 	 */
-	if (tp->urg_seq == tp->copied_seq)
-		tp->copied_seq++;	/* Move the copied sequence on correctly */
+	if (tp->urg_seq == tp->copied_seq && tp->urg_data &&
+	    !sk->urginline &&
+	    tp->copied_seq != tp->rcv_nxt)
+		tp->copied_seq++;
 	tp->urg_data = URG_NOTYET;
 	tp->urg_seq = ptr;
 
@@ -1709,7 +1727,7 @@ static inline void tcp_urg(struct sock *sk, struct tcphdr *th, unsigned long len
 
 	/* Do we wait for any urgent data? - normally not... */
 	if (tp->urg_data == URG_NOTYET) {
-		u32 ptr = tp->urg_seq - ntohl(th->seq) + (th->doff*4);
+		u32 ptr = tp->urg_seq - ntohl(th->seq) + (th->doff*4) - th->syn;
 
 		/* Is the urgent pointer pointing into this packet? */	 
 		if (ptr < len) {
@@ -2197,6 +2215,7 @@ int tcp_rcv_state_process(struct sock *sk, struct sk_buff *skb,
 			tp->snd_wnd = htons(th->window);
 			tp->snd_wl1 = TCP_SKB_CB(skb)->seq;
 			tp->snd_wl2 = TCP_SKB_CB(skb)->ack_seq;
+			tp->syn_seq = TCP_SKB_CB(skb)->seq;
 			tp->fin_seq = TCP_SKB_CB(skb)->seq;
 
 			tcp_set_state(sk, TCP_ESTABLISHED);

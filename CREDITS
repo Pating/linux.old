@@ -23,6 +23,12 @@ D: NFS over TCP patches
 S: University of Limerick
 S: Ireland
 
+N: Tigran Aivazian
+E: tigran@veritas.com
+W: http://www.moses.uklinux.net/patches
+D: Intel IA32 microcode update driver
+S: United Kingdom
+
 N: Werner Almesberger
 E: werner.almesberger@lrc.di.epfl.ch
 D: dosfs, LILO, some fd features, various other hacks here and there
@@ -235,8 +241,8 @@ S: Marrickville NSW 2204
 S: Australia
 
 N: Hugh Blemings
-E: hugh@linuxcare.com
-W: http://www.linuxcare.com.au/hugh/
+E: hugh@misc.nu
+W: http://misc.nu/hugh
 D: Author and maintainer of the Keyspan USB to Serial drivers
 S: Po Box 234
 S: Belconnen ACT 2616
@@ -515,13 +521,9 @@ S: 4850 Moresnet
 S: Belgium
 
 N: Cort Dougan
-E: cort@cs.nmt.edu
-W: http://www.cs.nmt.edu/~cort/
+E: cort@fsmlabs.com
+W: http://www.fsmlabs.com/linuxppcbk.html
 D: PowerPC
-S: Computer Science Department
-S: New Mexico Tech
-S: Socorro, New Mexico 87801
-S: USA
 
 N: Oleg Drokin
 E: green@ccssu.crimea.ua
@@ -804,11 +806,11 @@ S: Toronto, Ontario, M4Y 2W4
 S: Canada
 
 N: Richard Günther
-E: richard.guenther@student.uni-tuebingen.de
+E: rguenth@tat.physik.uni-tuebingen.de
+W: http://www.tat.physik.uni-tuebingen.de/~rguenth
 P: 2048/2E829319 2F 83 FC 93 E9 E4 19 E2  93 7A 32 42 45 37 23 57
 D: binfmt_misc
-S: Fichtenweg 3/511
-S: 72076 Tübingen
+S: 72074 Tübingen
 S: Germany
 
 N: Danny ter Haar
@@ -878,13 +880,13 @@ S: Mountain View, California 94043
 S: USA
 
 N: Benjamin Herrenschmidt
-E: bh40@calva.net
+E: benh@kernel.crashing.org
 E: benh@mipsys.com
-D: PowerMac booter (BootX)
+D: PowerMac booters (BootX, yaboot)
 D: Additional PowerBook support
 D: Apple "Core99" machines support (ibook,g4,...)
-S: 22, rue des Marguettes
-S: 75012 Paris
+S: 122, blvd. Baille
+S: 13005 Marseille
 S: France
 
 N: Sebastian Hetze
@@ -966,13 +968,12 @@ S: Wantage, New Jersey 07461
 S: USA
 
 N: Harald Hoyer
-E: HarryH@Royal.Net
-W: http://hot.spotline.de/
-W: http://home.pages.de/~saturn
+E: harald.hoyer@parzelle.de
+W: http://parzelle.de/
 D: ip_masq_quake
 D: md boot support
-S: Alleenstrasse 27
-S: D-71679 Asperg
+S: Hohe Strasse 30
+S: D-70176 Stuttgart
 S: Germany
 
 N: Kenn Humborg
@@ -1335,6 +1336,13 @@ S: 8786 Niwot Road
 S: Niwot, Colorado 80503
 S: USA
 
+N: Robert M. Love
+E: rml@tech9.net
+E: rml@ufl.edu
+D: misc. kernel hacking and debugging
+S: Gainesville, Florida 32608
+S: USA
+
 N: H.J. Lu
 E: hjl@gnu.ai.mit.edu
 D: GCC + libraries hacker
@@ -1371,12 +1379,8 @@ S: 198 00 Praha 9
 S: Czech Republic
 
 N: Paul Mackerras
-E: paulus@linuxcare.com
+E: paulus@samba.org
 D: Linux port for PCI Power Macintosh
-S: Linuxcare, Inc.
-S: 24 Marcus Clarke Street
-S: Canberra ACT 2601
-S: Australia
 
 N: Pat Mackinlay
 E: pat@it.com.au
@@ -1735,15 +1739,15 @@ S: Harrison, Arkansas  72602-1815
 S: USA
 
 N: Kai Petzke
-E: wpp@marie.physik.tu-berlin.de
-W: http://physik.tu-berlin.de/~wpp
-P: 1024/B42868C1 D9 59 B9 98 BB 93 05 38  2E 3E 31 79 C3 65 5D E1 
+E: petzke@teltarif.de
+W: http://www.teltarif.de/
+P: 1024/B42868C1 D9 59 B9 98 BB 93 05 38  2E 3E 31 79 C3 65 5D E1
 D: Driver for Laser Magnetic Storage CD-ROM
 D: Some kernel bug fixes
 D: Port of the database Postgres
-D: "Unix fuer Jedermann" a German introduction to linux (see my web page)
-S: M"ullerstr. 69
-S: 13349 Berlin
+D: Book: "Linux verstehen und anwenden" (Hanser-Verlag)
+S: Triftstra=DFe 55
+S: 13353 Berlin
 S: Germany
 
 N: Ken Pizzini
@@ -1860,8 +1864,8 @@ S: 7000 Stuttgart 50
 S: Germany
 
 N: Stephen Rothwell
-E: sfr@linuxcare.com
-W: http://linuxcare.com.au/sfr
+E: sfr@canb.auug.org.au
+W: http://www.canb.auug.org.au/~sfr
 P: 1024/BD8C7805 CD A4 9D 01 10 6E 7E 3B  91 88 FA D9 C8 40 AA 02
 D: Boot/setup/build work for setup > 2K
 D: Author, APM driver
@@ -2145,7 +2149,7 @@ S: Canada K2L 1S2
 
 N: Andrew Tridgell
 E: tridge@samba.org
-W: http://linuxcare.com.au/tridge/
+W: http://samba.org/tridge/
 D: dosemu, networking, samba
 S: 3 Ballow Crescent
 S: MacGregor A.C.T 2615

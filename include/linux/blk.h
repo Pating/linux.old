@@ -193,6 +193,14 @@ static void floppy_off(unsigned int nr);
 #define DEVICE_ON(device)
 #define DEVICE_OFF(device)
 
+#elif (MAJOR_NR == OSST_MAJOR)
+
+#define DEVICE_NAME "onstream" 
+#define DEVICE_INTR do_osst
+#define DEVICE_NR(device) (MINOR(device) & 0x7f) 
+#define DEVICE_ON(device) 
+#define DEVICE_OFF(device) 
+
 #elif (MAJOR_NR == SCSI_CDROM_MAJOR)
 
 #define DEVICE_NAME "CD-ROM"
@@ -389,7 +397,7 @@ static void floppy_off(unsigned int nr);
 #define LOCAL_END_REQUEST
 #define DEVICE_NAME "dasd"
 #define DEVICE_REQUEST do_dasd_request
-#define DEVICE_NR(device) (MINOR(device) >> PARTN_BITS)
+#define DEVICE_NR(device) (MINOR(device) >> DASD_PARTN_BITS)
 #define DEVICE_ON(device) 
 #define DEVICE_OFF(device)
 
@@ -412,7 +420,7 @@ static void floppy_off(unsigned int nr);
 
 #endif /* MAJOR_NR == whatever */
 
-#if (MAJOR_NR != SCSI_TAPE_MAJOR)
+#if (MAJOR_NR != SCSI_TAPE_MAJOR) && (MAJOR_NR != OSST_MAJOR)
 #if !defined(IDE_DRIVER)
 
 #ifndef CURRENT

@@ -101,7 +101,11 @@ if [ "$CONFIG_NET_ETHERNET" = "y" ]; then
       tristate 'RealTek 8129/8139 (not 8019/8029!) support' CONFIG_RTL8139
   fi
   if [ "$CONFIG_EXPERIMENTAL" = "y" ]; then
-      tristate 'RealTek 8139too driver support' CONFIG_RTL8139TOO
+      tristate 'Alternative RealTek 8139 driver (8139too) support' CONFIG_RTL8139TOO
+      if [ "$CONFIG_RTL8139TOO" != "n" ]; then
+          bool '  Use PIO instead of MMIO' CONFIG_8139TOO_PIO
+          bool '  Support for automatic channel equalization' CONFIG_8139TOO_TUNE_TWISTER
+      fi
   fi
   bool 'Other ISA cards' CONFIG_NET_ISA
   if [ "$CONFIG_NET_ISA" = "y" ]; then
@@ -132,9 +136,11 @@ if [ "$CONFIG_NET_ETHERNET" = "y" ]; then
   if [ "$CONFIG_NET_EISA" = "y" ]; then
     tristate 'AMD PCnet32 (VLB and PCI) support' CONFIG_PCNET32
     if [ "$CONFIG_EXPERIMENTAL" = "y" ]; then
+      tristate 'Adaptec Starfire support (EXPERIMENTAL)' CONFIG_ADAPTEC_STARFIRE
       tristate 'Ansel Communications EISA 3200 support (EXPERIMENTAL)' CONFIG_AC3200
     fi
     tristate 'Apricot Xen-II on board Ethernet' CONFIG_APRICOT
+    tristate 'LP486E on board Ethernet' CONFIG_LP486E
     tristate 'CS89x0 support' CONFIG_CS89x0
     if [ "$CONFIG_EXPERIMENTAL" = "y" ]; then
       tristate 'DM9102 PCI Fast Ethernet Adapter support (EXPERIMENTAL)' CONFIG_DM9102
@@ -182,7 +188,9 @@ comment 'Ethernet (1000 Mbit)'
       tristate 'Packet Engines GNIC-II (Hamachi) support' CONFIG_HAMACHI
       tristate 'Packet Engines Yellowfin Gigabit-NIC support' CONFIG_YELLOWFIN
     fi
-    tristate 'SysKonnect SK-98xx support' CONFIG_SK98LIN
+    if [ "$CONFIG_PCI" = "y" ]; then
+      tristate 'SysKonnect SK-98xx support' CONFIG_SK98LIN
+    fi
 endmenu
 
 bool 'FDDI driver support' CONFIG_FDDI
@@ -305,7 +313,7 @@ tristate 'LanMedia Corp. SSI/V.35, T1/E1, HSSI, T3 boards' CONFIG_LANMEDIA
 #
 
 tristate 'MultiGate (COMX) synchronous serial boards support' CONFIG_COMX
-   if [ "$CONFIG_COMX" != "n" ]; then
+if [ "$CONFIG_COMX" != "n" ]; then
    dep_tristate '  Support for COMX/CMX/HiCOMX boards' CONFIG_COMX_HW_COMX $CONFIG_COMX
    dep_tristate '  Support for LoCOMX board' CONFIG_COMX_HW_LOCOMX $CONFIG_COMX
    dep_tristate '  Support for MixCOM board' CONFIG_COMX_HW_MIXCOM $CONFIG_COMX
@@ -326,7 +334,7 @@ if [ "$CONFIG_EXPERIMENTAL" = "y" ]; then
     dep_tristate '  SDL RISCom/N2 support' CONFIG_N2 $CONFIG_HDLC
     dep_tristate '  Moxa C101 support' CONFIG_C101 $CONFIG_HDLC
 
-    if [ "$CONFIG_PCI" != "n" ]; then
+    if [ "$CONFIG_PCI" = "y" ]; then
       dep_tristate '  SBE wanXL support' CONFIG_WANXL $CONFIG_HDLC
       dep_tristate '  Cyclades-PC300 support' CONFIG_PC300 $CONFIG_HDLC
       if [ "$CONFIG_PC300" != "n" ]; then
@@ -347,12 +355,13 @@ fi
 #	Wan router core.
 #
 
-if [ "$CONFIG_WAN_ROUTER" != "n" ]; then
+#  CONFIG_WAN_ROUTER is defined only when CONFIG_EXPERIMENTAL=y
+if [ "$CONFIG_EXPERIMENTAL" = "y" -a "$CONFIG_WAN_ROUTER" != "n" ]; then
   bool 'WAN drivers' CONFIG_WAN_DRIVERS 
   if [ "$CONFIG_WAN_DRIVERS" = "y" ]; then
     dep_tristate 'Sangoma WANPIPE(tm) multi-port cards: (select M not Y !)' CONFIG_VENDOR_SANGOMA $CONFIG_WAN_DRIVERS 
     if [ "$CONFIG_INET" != "n" ]; then
-    if [ "$CONFIG_VENDOR_SANGOMA" != "n" ]; then
+      if [ "$CONFIG_VENDOR_SANGOMA" != "n" ]; then
         int  '  Maximum number of cards' CONFIG_WANPIPE_CARDS 1
         #bool '  WANPIPE X.25 support' CONFIG_WANPIPE_X25
         bool '  WANPIPE Frame Relay support' CONFIG_WANPIPE_FR
@@ -366,17 +375,21 @@ fi
 #
 # Xpeed drivers
 #
-tristate 'Xpeed X200/X300 DSL NIC support' CONFIG_XPEED
+if [ "$CONFIG_PCI" = "y" ]; then
+   tristate 'Xpeed X200/X300 DSL NIC support' CONFIG_XPEED
+fi
 
 endmenu
 
 #
 # X.25 network drivers
 #
-if [ "$CONFIG_X25" != "n" ]; then
-if [ "$CONFIG_LAPB" = "y" -o "$CONFIG_LAPB" = "m" ]; then
+
+#  CONFIG_X25 is defined only when CONFIG_EXPERIMENTAL=y
+if [ "$CONFIG_EXPERIMENTAL" = "y" -a "$CONFIG_X25" != "n" ]; then
+  if [ "$CONFIG_LAPB" = "y" -o "$CONFIG_LAPB" = "m" ]; then
     dep_tristate 'LAPB over Ethernet driver' CONFIG_LAPBETHER $CONFIG_LAPB
     dep_tristate 'X.25 async driver' CONFIG_X25_ASY $CONFIG_LAPB
-fi
+  fi
 fi
 tristate 'SBNI12-xx support' CONFIG_SBNI

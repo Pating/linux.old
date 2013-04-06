@@ -1530,7 +1530,7 @@ CONFIG_I2O
   inserted in and removed from the running kernel whenever you want).
   If you want to compile it as a module, say M here and read
   Documentation/modules.txt. You will get modules called i2o_core.o
-  and i20_config.o. 
+  and i2o_config.o. 
 
   If unsure, say N.
 
@@ -1765,7 +1765,7 @@ CONFIG_M386
    - "586" for generic Pentium CPUs, possibly lacking the TSC 
      (time stamp counter) register.
    - "Pentium" for the Intel Pentium/Pentium MMX, AMD K5, K6 and 
-     K6-3D.
+     K6-3D, as well as the Cyrix/VIA CyrixIII
    - "PPro" for the Cyrix/IBM/National Semiconductor 6x86MX, MII and
      Intel Pentium II/Pentium Pro.
 
@@ -2233,7 +2233,7 @@ CONFIG_PARPORT
   The module will be called parport.o. If you have more than one
   parallel port and want to specify which port and IRQ to be used by
   this driver at module load time, read
-  Documentation/networking/net-modules.txt.
+  Documentation/parport.txt.
 
   If unsure, say Y.
 
@@ -3768,6 +3768,24 @@ CONFIG_CHR_DEV_ST
   This driver is also available as a module ( = code which can be
   inserted in and removed from the running kernel whenever you want).
   The module will be called st.o. If you want to compile it as a
+  module, say M here and read Documentation/modules.txt and
+  Documentation/scsi.txt .
+
+OnStream SC-x0 SCSI tape support
+CONFIG_CHR_DEV_OSST
+  The OnStream SC-x0 SCSI tape drives can not be driven by the 
+  standard st driver, but instead need this special osst driver and 
+  use the  /dev/osstX char device nodes (major 206).
+  For more information, you may have a look at the SCSI-HOWTO
+  ftp://metalab.unc.edu/pub/Linux/docs/HOWTO  and
+  drivers/scsi/README.osst  in the kernel source. 
+  Most info may be found on http://linux1.onstream.nl/test/
+  Please also have a look at the standard st docu, as most of it
+  applies to osst as well.
+
+  This driver is also available as a module ( = code which can be
+  inserted in and removed from the running kernel whenever you want).
+  The module will be called osst.o. If you want to compile it as a
   module, say M here and read Documentation/modules.txt and
   Documentation/scsi.txt .
 
@@ -5869,6 +5887,25 @@ CONFIG_COMX_HW_MIXCOM
   If you want to compile this as a module, say M and read
   Documentation/modules.txt. The module will be called comx-hw-mixcom.o.
 
+i810 TCO support
+CONFIG_I810_TCO
+  Hardware driver for the TCO timer built into the Intel i810 and i815
+  chipset family. The TCO (Total Cost of Ownership) timer is a watchdog
+  timer that will reboot the machine after it's second expiration. The
+  expiration time can be configured by commandline argument
+  "i810_margin=<n>" where <n> is the counter initial value. It is
+  decremented every 0.6 secs, the default is 50 which gives a timeout
+  of 30 seconds and one minute until reset.
+
+  On some motherboards the driver may fail to reset the chipset's
+  NO_REBOOT flag which prevents the watchdog from rebooting the machine.
+  If this is the case you will get a kernel message like
+  "i810tco init: failed to reset NO_REBOOT flag".
+
+  If you want to compile this as a module, say M and read
+  Documentation/modules.txt. The module will be called
+  i810-tco.o.
+
 MultiGate Cisco-HDLC and synchronous PPP protocol support
 CONFIG_COMX_PROTO_PPP
   Cisco-HDLC and synchronous PPP protocol driver for all MultiGate boards. 
@@ -6187,6 +6224,37 @@ CONFIG_RTL8139
   say M here and read Documentation/modules.txt. This is recommended.
   The module will be called rtl8139.o.
 
+Alternative RealTek 8139 driver (8139too) support
+CONFIG_RTL8139TOO
+  This is a sophisticated, multi platform driver for RealTek 8139x
+  based Fast Ethernet cards. It tries to work around several not
+  well documented hardware bugs in these chips and is also
+  usually faster than the original driver. However, 8129 is not
+  supported.
+  If you are sure you have a RTL8139-based card, choose this driver.
+  You can find more information in the Ethernet-HOWTO, available by
+  anonymous FTP from ftp://metalab.unc.edu/pub/Linux/docs/HOWTO .
+
+  If you want to compile this driver as a module ( = code which can be
+  inserted in and removed from the running kernel whenever you want),
+  say M here and read Documentation/modules.txt. This is recommended.
+  The module will be called rtl8139too.o .
+
+Use PIO instead of MMIO
+CONFIG_8139TOO_PIO
+  This instructs the driver to use PIO (only on i386 architecture)
+  instead of memory mapped IO. This can possibly solve some problems
+  in case your mainboard has memory consistency issues. If unsure,
+  say n.
+
+Support for automatic channel equalization
+CONFIG_8139TOO_TUNE_TWISTER
+  This implements a function which might come in handy in case
+  you are using low quality on long cabling. It tries to match
+  the transceiver to the cable characteristics. This is experimental
+  since hardly documented by the manufacturer.
+  If unsure, say n.
+
 SiS 900/7016 support
 CONFIG_SIS900
   This is a driver for the Fast Ethernet PCI network cards based on
@@ -6238,6 +6306,18 @@ CONFIG_NET_SB1000
 
   If you don't have this card, of course say N.
 
+Adaptec Starfire support (EXPERIMENTAL)
+CONFIG_ADAPTEC_STARFIRE
+  Say Y here if you have an Adaptec Starfire (or DuraLAN) PCI network
+  adapter. The DuraLAN chip is used on the 64 bit PCI boards from
+  Adaptec e.g. the ANA-6922A. The older 32 bit boards use the tulip
+  driver.
+  
+  If you want to compile this driver as a module ( = code which can be
+  inserted in and removed from the running kernel whenever you want),
+  say M here and read Documentation/modules.txt. This is recommended.
+  The module will be called starfire.o.
+  
 Alteon AceNIC/3Com 3C985/NetGear GA620 Gigabit support
 CONFIG_ACENIC
   Say Y here if you have an Alteon AceNIC or 3Com 3C985 PCI Gigabit
@@ -6789,6 +6869,16 @@ CONFIG_APRICOT
   say M here and read Documentation/modules.txt as well as
   Documentation/networking/net-modules.txt. The module will be called
   apricot.o.
+
+LP486E on board Ethernet
+CONFIG_LP486E
+  If you have an Intel Panther motherboard with on board 82596 network
+  (Ethernet) controller, say Y here.
+  The initialization code tries to guess the ethernet address by looking
+  at the EISA configuration area. Probably it finds precisely one thing
+  that looks like an address, but if this fails use the command
+    ifconfig eth0 hw ether a1:a2:a3:a4:a5:a6
+  to assign the address (revealed by the BIOS Setup) by hand.
 
 Generic DECchip & DIGITAL EtherWORKS PCI/EISA
 CONFIG_DE4X5
@@ -7475,13 +7565,6 @@ CONFIG_QUOTA
   ftp://metalab.unc.edu/pub/Linux/docs/HOWTO/mini. Probably the quota
   support is only useful for multi user systems. If unsure, say N.
 
-Acorn's ADFS filesystem support (read only) (EXPERIMENTAL)
-CONFIG_ADFS_FS
-  The Advanced Disk File System is the filesystem used on floppy and
-  hard disks by Acorn Systems.  Currently in development, as a read-
-  only driver for hard disks.  These should be the first partition
-  (eg. /dev/[sh]d?1) on each of your drives.  If unsure, say N.
-
 Support for USB
 CONFIG_USB
   Universal Serial Bus (USB) is a specification for a serial bus
@@ -7853,6 +7936,16 @@ CONFIG_USB_SERIAL_DIGI_ACCELEPORT
   inserted in and removed from the running kernel whenever you want).
   The module will be called digi_acceleport.o. If you want to compile 
   it as a module, say M here and read Documentation/modules.txt.
+
+USB Empeg empeg-car Mark I/II Driver
+CONFIG_USB_SERIAL_EMPEG
+  Say Y here if you want to connect to your Empeg empeg-car Mark I/II
+  mp3 player via USB.
+
+  This code is also available as a module ( = code which can be
+  inserted in and removed from the running kernel whenever you want).
+  The module will be called empeg.o. If you want to compile it as a
+  module, say M here and read Documentation/modules.txt.
 
 USB Serial Converter verbose debug
 CONFIG_USB_SERIAL_DEBUG
@@ -8423,10 +8516,10 @@ CONFIG_NFSD
   The module is called nfsd.o. If you want to compile it as a module,
   say M here and read Documentation/modules.txt. If unsure, say N.
 
-Provide NFSv3 server support (EXPERIMENTAL)
+Provide NFSv3 server support
 CONFIG_NFSD_V3
   If you would like to include the NFSv3 server as well as the NFSv2
-  server, say Y here.  File locking, via the NLMv4 protocol, is now
+  server, say Y here.  File locking, via the NLMv4 protocol, is also
   supported. If unsure, say N.
 
 OS/2 HPFS filesystem support (read only)
@@ -8729,6 +8822,12 @@ CONFIG_MAC_PARTITION
   Say Y here if you want your Linux system to be able to read the
   partition tables of Macintosh hard drives, and thus use partitions
   on those drives.
+
+Minix subpartition support
+CONFIG_MINIX_SUBPARTITION
+  Minix 2.0.0/2.0.2 subpartition table support for Linux.
+  Say Y here if you want to mount and use Minix 2.0.0/2.0.2
+  subpartitions.
 
 SMB filesystem support (to mount Windows shares etc...)
 CONFIG_SMB_FS
@@ -9262,6 +9361,14 @@ CONFIG_NLS_KOI8_R
   input/output character sets. Say Y here for the preferred Russian
   character set.
 
+nls koi8-ru
+CONFIG_NLS_KOI8_RU
+  If you want to display filenames with native language characters
+  from the Microsoft fat filesystem family or from JOLIET CDROMs
+  correctly on the screen, you need to include the appropriate
+  input/output character sets. Say Y here for the preferred Russian
+  character set.
+
 Virtual terminal
 CONFIG_VT
   If you say Y here, you will get support for terminal devices with
@@ -9653,6 +9760,24 @@ CONFIG_PRINTER
 
   If you have more than 3 printers, you need to increase the LP_NO
   variable in lp.c.
+
+Amiga built-in parallel port support
+CONFIG_PARPORT_AMIGA
+  Say Y here if you need support for the parallel port hardware on
+  Amiga machines. This code is also available as a module (say M),
+  called parport_amiga.o. If in doubt, saying N is the safe plan.
+
+Atari built-in parallel port support
+CONFIG_PARPORT_ATARI
+  Say Y here if you need support for the parallel port hardware on
+  Atari machines. This code is also available as a module (say M),
+  called parport_atari.o. If in doubt, saying N is the safe plan.
+
+Multiface 3 parallel port card support
+CONFIG_PARPORT_MFC3
+  Say Y here if you need parallel port support for the MFC3 card.
+  This code is also available as a module (say M), called
+  parport_mfc3.o. If in doubt, saying N is the safe plan.
 
 Support IEEE1284 status readback
 CONFIG_PRINTER_READBACK
@@ -10411,12 +10536,12 @@ CONFIG_60XX_WDT
  it as a module.  The module will be called sbc60xxwdt.o.
 
 CONFIG_MICROCODE
-  /dev/cpu/microcode - Intel P6 CPU microcode support
+  /dev/cpu/microcode - Intel IA32 CPU microcode support
 
   If you say Y here you will be able to update the microcode on
-  Intel processors in the P6 family, e.g. Pentium Pro, Pentium II,
-  Pentium III, Xeon etc. You will obviously need the actual microcode
-  binary data itself which is not shipped with the Linux kernel.
+  Intel processors in the IA32 family, e.g. Pentium Pro, Pentium II,
+  Pentium III, Xeon, Pentium 4 etc. You will obviously need the actual
+  microcode binary data itself which is not shipped with the Linux kernel.
  
   For latest news and information on obtaining all the required
   ingredients for this driver, check:
@@ -10425,7 +10550,9 @@ CONFIG_MICROCODE
   This driver is also available as a module ( = code which can be
   inserted in and removed from the running kernel whenever you want).
   The module will be called microcode.o. If you want to compile it as
-  a module, say M here and read Documentation/modules.txt.
+  a module, say M here and read Documentation/modules.txt. If you use
+  modprobe or kmod you may also want to add the line
+  'alias char-major-10-184 microcode' to your /etc/modules.conf file.
 
 /dev/cpu/*/msr - Model-specific register support
 CONFIG_X86_MSR
@@ -10476,8 +10603,8 @@ CONFIG_AGP
 
 Intel 440LX/BX/GX support
 CONFIG_AGP_INTEL
-  This option give you AGP support for the GLX component of the
-  "soon to be released" XFree86-4 on Intel 440LX/BX/GX chipsets.
+  This option gives you AGP support for the GLX component of
+  XFree86 4.x on Intel 440LX/BX/GX, 815, and 840 chipsets.
 
   For the moment, most people should say no, unless you want to
   test the GLX component which can be downloaded from
@@ -10485,9 +10612,9 @@ CONFIG_AGP_INTEL
 
 Intel I810/I810 DC100/I810e support
 CONFIG_AGP_I810
-  This option give you AGP support for the Xserver for the intel
-  810 chipset boards. This is required to do any useful video
-  modes.
+  This option gives you AGP support for XFree86 on the Intel 810
+  and 815 chipsets for their on-board integrated graphics. This
+  is required to do any useful video modes with these boards.
 
 VIA VP3/MVP3/Apollo Pro support
 CONFIG_AGP_VIA
@@ -10697,17 +10824,6 @@ CONFIG_JOY_AMIGA
   Say Y here if you have an Amiga with a digital joystick connected
   to it. For more information on how to use the driver please read
   Documentation/joystick.txt
-
-Atomwide Serial Support
-CONFIG_ATOMWIDE_SERIAL
-  If you have an Atomwide Serial card for an Acorn system, say Y to
-  this option. The driver can handle 1, 2, or 3 port cards.
-  If unsure, say N
-
-The Serial Port Dual Serial Port
-CONFIG_DUALSP_SERIAL
-  If you have the Serial Port's dual serial card for an Acorn system,
-  say Y to this option. If unsure, say N
 
 NetWinder Button
 CONFIG_NWBUTTON
@@ -10976,8 +11092,7 @@ CONFIG_TRIX_BOOT_FILE
 Support for OPTi MAD16 and/or Mozart based cards
 CONFIG_SOUND_MAD16
   Answer Y if your card has a Mozart (OAK OTI-601) or MAD16 (OPTi
-  82C928 or 82C929 or 82C931) audio interface chip. For the 82C931,
-  please read drivers/sound/README.C931. These chips are currently
+  82C928 or 82C929 or 82C931) audio interface chip. These chips are 
   quite common so it's possible that many no-name cards have one of
   them. In addition the MAD16 chip is used in some cards made by known
   manufacturers such as Turtle Beach (Tropez), Reveal (some models)
@@ -11377,7 +11492,15 @@ ESS Maestro sound chipsets
 CONFIG_SOUND_MAESTRO
   Say Y or M if you have a sound system driven by ESS's Maestro line
   of PCI sound chips.  These include the Maestro 1, Maestro 2, and
-  Maestro 2E.  See Documentation/sound/Maestro for more details.
+  Maestro 2E, but _does not_ include the Maestro 3 and Allegro 
+  line of chips.  See Documentation/sound/Maestro for more details
+  on the 1/2/2e line.
+
+ESS Maestro3/Allegro sound chipsets
+CONFIG_SOUND_MAESTRO3
+  Say Y or M if you have a sound system driven by ESS's Maestro3 line
+  of PCI sound chips.  This includes the Allegro sound chip that is
+  a lighter version of the Maestro3.
 
 Are you using a crosscompiler
 CONFIG_CROSSCOMPILE
@@ -11560,6 +11683,10 @@ HiSax Support for german 1TR6
 CONFIG_HISAX_1TR6
   Enable this if you have a old german 1TR6 line.
 
+HiSax Support for US NI1
+CONFIG_HISAX_NI1
+  Enable this if you like to use ISDN in US on a NI1 basic rate interface.
+
 Teles 16.0/8.0
 CONFIG_HISAX_16_0
   This enables HiSax support for the Teles ISDN-cards S0-16.0, S0-8
@@ -11688,6 +11815,13 @@ CONFIG_HISAX_NETJET
   See Documentation/isdn/README.HiSax on how to configure it using a
   different D-channel protocol, or non-standard IRQ/port settings.
 
+NETspider U card
+CONFIG_HISAX_NETJET_U
+  This enables HiSax support for the Netspider U interface ISDN card from
+  Traverse Technologies.
+  See Documentation/isdn/README.HiSax on how to configure it using a
+  different D-channel protocol, or non-standard IRQ/port settings.
+
 Niccy PnP/PCI card
 CONFIG_HISAX_NICCY
   This enables HiSax support for the Dr. Neuhaus Niccy PnP or PCI. 
@@ -11776,7 +11910,7 @@ CONFIG_ISDN_DRV_SC
   called sc.o. See Documentation/isdn/README.sc and
   http://www.spellcast.com for more information.
 
-Eicon.Diehl active card support
+Eicon active card support
 CONFIG_ISDN_DRV_EICON
   Say Y here if you have an Eicon active ISDN card. In order to use
   this card, additional firmware is necessary, which has to be loaded
@@ -11784,6 +11918,16 @@ CONFIG_ISDN_DRV_EICON
   latest isdn4k-utils package. Please read the file
   Documentation/isdn/README.eicon for more information.
   
+Eicon legacy driver
+CONFIG_ISDN_DRV_EICON_OLD
+  Say Y here to use your Eicon active ISDN card with ISDN4Linux
+  isdn module.
+
+Eicon Diva Server card support
+CONFIG_ISDN_DRV_EICON_PCI
+  Say Y here if you have an Eicon Diva Server (BRI/PRI/4BRI) ISDN card.
+  Please read Documentation/isdn/README.eicon for more information.
+
 Eicon old-type card support
 CONFIG_ISDN_DRV_EICON_ISA
   Say Y here if you have an old-type Eicon active ISDN card. In order
@@ -11791,6 +11935,14 @@ CONFIG_ISDN_DRV_EICON_ISA
   loaded into the card using the eiconctrl utility which is part of
   the latest isdn4k-utils package. Please read the file
   Documentation/isdn/README.eicon for more information.
+
+Eicon driver type standalone
+CONFIG_ISDN_DRV_EICON_DIVAS
+  Enable this option if you want the eicon driver as standalone
+  version with no interface to the ISDN4Linux isdn module. If you
+  say Y here, the eicon module only supports the Diva Server PCI
+  cards and will provide its own IDI interface. You should say N
+  here.
 
 Support AT-Fax Class 2 commands
 CONFIG_ISDN_TTY_FAX
@@ -11800,22 +11952,19 @@ CONFIG_ISDN_TTY_FAX
   an ISDN-fax-machine. This must be supported by the lowlevel driver
   also. See Documentation/isdn/README.fax for more information.
 
-AVM CAPI2.0 support
-CONFIG_ISDN_DRV_AVMB1
-  This enables support for the AVM B1/T1 ISDN networking cards.In
-  addition, a CAPI (Common ISDN Application Programming Interface, a
-  standard making it easy for programs to access ISDN hardware, see
-  http://www.capi.org/; to browse the WWW, you need to have access to
-  a machine on the Internet that has a program like lynx or netscape)
-  interface for this card is provided. In order to use this card,
-  additional firmware is necessary, which has to be downloaded into
-  the card using a utility which is distributed separately. Please
-  read the file Documentation/isdn/README.avmb1. 
-  
-  This code is also available as a module ( = code which can be
-  inserted in and removed from the running kernel whenever you want).
-  The module will be called avmb1.o. If you want to compile it as a
-  module, say M here and read Documentation/modules.txt.
+CAPI2.0 support
+CONFIG_ISDN_CAPI
+  This option enables a CAPI2.0 (Common ISDN Application Programming
+  Interface), a standard making it easy for programs to access ISDN
+  hardware, see http://www.capi.org/
+
+CAPI2.0 Middleware support
+CONFIG_ISDN_CAPI_MIDDLEWARE
+  This option enables CAPI2.0 Middleware support
+
+CAPI2.0 filesystem support
+CONFIG_ISDN_CAPIFS
+  This option enables CAPI CAPI2.0 filesystem support 
 
 AVM B1 ISA support
 CONFIG_ISDN_DRV_AVMB1_B1ISA
@@ -12764,22 +12913,6 @@ ZOLTRIX I/O port (0x20c or 0x30c)
 CONFIG_RADIO_ZOLTRIX_PORT
   Enter the I/O port of your Zoltrix radio card.
 
-ADS Cadet AM/FM Tuner
-CONFIG_RADIO_CADET
-  Say Y here if this is your AM/FM radio card.
-
-  In order to control your radio card, you will need to use programs
-  that are compatible with the Video for Linux API. Information on 
-  this API and pointers to "v4l" programs may be found on the WWW at
-  http://roadrunner.swansea.uk.linux.org/v4l.shtml; to browse the WWW,
-  you need to have access to a machine on the Internet that has a 
-  program like lynx or netscape.
-
-  If you want to compile this driver as a module ( = code which can be
-  inserted in and removed from the running kernel whenever you want),
-  say M here and read Documentation/modules.txt. The module will be
-  called radio-cadet.o
-
 Miro PCM20 Radio
 CONFIG_RADIO_MIROPCM20
   Choose Y here if you have this FM radio card. You also need to say Y
@@ -13085,6 +13218,10 @@ CONFIG_IRDA
   This support is also available as a module. If you want to compile
   it as a module, say M here and read Documentation/modules.txt. The
   module will be called 
+
+IrDA protocol options
+CONFIG_IRDA_OPTIONS
+  Say Y here if you want to configure any of the following IrDA options.
 
 IrDA Cache last LSAP
 CONFIG_IRDA_CACHE_LAST_LSAP
@@ -13505,6 +13642,20 @@ CONFIG_DISPLAY7SEG
   If you do not have a CompactPCI model CP1400 or CP1500, or 
   another UltraSPARC-IIi-cEngine boardset with digital display,
   you should say N to this option.
+
+CP1XXX Hardware Watchdog support
+CONFIG_WATCHDOG_CP1XXX
+  This is the driver for the hardware watchdog timers present on
+  Sun Microsystems CompactPCI models CP1400 and CP1500.
+
+  This driver is also available as a module ( = code which can be
+  inserted in and removed from the running kernel whenever you want).
+  The module will be called cpwatchdog.o. If you want to compile it
+  as a module, say M here and read Documentation/modules.txt.
+ 
+  If you do not have a CompactPCI model CP1400 or CP1500, or
+  another UltraSPARC-IIi-cEngine boardset with hardware watchdog,
+  you should say N to this option. 
    
 #
 # A couple of things I keep forgetting:

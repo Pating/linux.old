@@ -1,7 +1,7 @@
 VERSION = 2
 PATCHLEVEL = 2
-SUBLEVEL = 18
-EXTRAVERSION =
+SUBLEVEL = 19
+EXTRAVERSION = 
 
 ARCH := $(shell uname -m | sed -e s/i.86/i386/ -e s/sun4u/sparc64/ -e s/arm.*/arm/ -e s/sa110/arm/)
 
@@ -25,7 +25,7 @@ LD	=$(CROSS_COMPILE)ld
 #
 #	foo-bar-gcc for cross builds
 #	gcc272 for Debian's old compiler for kernels
-#	kgcc for Conectiva and Red Hat 7
+#	kgcc for Conectiva, Mandrake and Red Hat 7
 #	otherwise 'cc'
 #
 CC	=$(shell if [ -n "$(CROSS_COMPILE)" ]; then echo $(CROSS_COMPILE)gcc; else \

@@ -253,10 +253,15 @@ int prune_dcache(int d_nr, int i_nr)
 
 		if (tmp == &dentry_unused)
 			break;
-		dentry_stat.nr_unused--;
 		list_del(tmp);
-		INIT_LIST_HEAD(tmp);
 		dentry = list_entry(tmp, struct dentry, d_lru);
+		if (dentry->d_flags & DCACHE_REFERENCED) {
+			dentry->d_flags &= ~DCACHE_REFERENCED;
+			list_add(&dentry->d_lru, &dentry_unused);
+			continue;
+		}
+		dentry_stat.nr_unused--;
+		INIT_LIST_HEAD(tmp);
 		if (!dentry->d_count) {
 			i_nr -= prune_one_dentry(dentry);
 			if (!i_nr)
@@ -475,9 +480,9 @@ void shrink_dcache_parent(struct dentry * parent)
  */
 void shrink_dcache_memory(int priority, unsigned int gfp_mask)
 {
-	if (gfp_mask & __GFP_IO) {
+	if (gfp_mask & __GFP_IO && !current->fs_locks) {
 		int count = 0;
-		if (priority)
+		if (priority > 1)
 			count = dentry_stat.nr_unused / priority;
 		prune_dcache(count, -1);
 	}
@@ -568,7 +573,7 @@ struct dentry * d_alloc_root(struct inode * root_inode, struct dentry *old_root)
 static inline struct list_head * d_hash(struct dentry * parent, unsigned long hash)
 {
 	hash += (unsigned long) parent / L1_CACHE_BYTES;
-	hash = hash ^ (hash >> D_HASHBITS) ^ (hash >> D_HASHBITS*2);
+	hash = hash ^ (hash >> D_HASHBITS);
 	return dentry_hashtable + (hash & D_HASHMASK);
 }
 
@@ -598,6 +603,7 @@ struct dentry * d_lookup(struct dentry * parent, struct qstr * name)
 			if (memcmp(dentry->d_name.name, str, len))
 				continue;
 		}
+		dentry->d_flags |= DCACHE_REFERENCED;
 		return dget(dentry);
 	}
 	return NULL;

@@ -5,7 +5,7 @@
  *
  *		Implementation of the Transmission Control Protocol(TCP).
  *
- * Version:	$Id: tcp_ipv4.c,v 1.175.2.17 2000/10/31 22:42:58 davem Exp $
+ * Version:	$Id: tcp_ipv4.c,v 1.175.2.18 2001/02/02 01:27:08 davem Exp $
  *
  *		IPv4 specific functions
  *
@@ -1109,6 +1109,8 @@ int tcp_chkaddr(struct sk_buff *skb)
 	struct tcphdr *th = (struct tcphdr *)(skb->nh.raw + iph->ihl*4);
 	struct sock *sk;
 
+	if (ntohs(iph->tot_len) - iph->ihl*4 < sizeof(struct tcphdr))
+		return 0;
 	sk = tcp_v4_lookup(iph->saddr, th->source, iph->daddr,
 			   th->dest, skb->dev->ifindex);
 

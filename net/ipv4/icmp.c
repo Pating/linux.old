@@ -3,7 +3,7 @@
  *	
  *		Alan Cox, <alan@redhat.com>
  *
- *	Version: $Id: icmp.c,v 1.52.2.6 2000/08/31 23:49:16 davem Exp $
+ *	Version: $Id: icmp.c,v 1.52.2.7 2001/02/02 01:27:08 davem Exp $
  *
  *	This program is free software; you can redistribute it and/or
  *	modify it under the terms of the GNU General Public License
@@ -989,13 +989,21 @@ extern struct sock *udp_v4_lookup(u32 saddr, u16 sport, u32 daddr, u16 dport, in
 
 int icmp_chkaddr(struct sk_buff *skb)
 {
-	struct icmphdr *icmph=(struct icmphdr *)(skb->nh.raw + skb->nh.iph->ihl*4);
+	unsigned short size = skb->nh.iph->ihl*4;
+	unsigned short clen = ntohs(skb->nh.iph->tot_len) - size;
+	struct icmphdr *icmph=(struct icmphdr *)(skb->nh.raw + size);
 	struct iphdr *iph = (struct iphdr *) (icmph + 1);
-	void (*handler)(struct icmphdr *icmph, struct sk_buff *skb, int len) = icmp_pointers[icmph->type].handler;
+	void (*handler)(struct icmphdr *icmph, struct sk_buff *skb, int len);
 
+	if (clen < sizeof(struct icmphdr)) return 0;
+	handler = icmp_pointers[icmph->type].handler;
 	if (handler == icmp_unreach || handler == icmp_redirect) {
 		struct sock *sk;
-
+		
+		clen -= sizeof(struct icmphdr);
+		if (clen < sizeof(struct iphdr) ||
+			clen < iph->ihl * 4 + sizeof(struct udphdr))
+			return 0;
 		switch (iph->protocol) {
 		case IPPROTO_TCP:
 			{

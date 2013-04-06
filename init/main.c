@@ -80,7 +80,6 @@ static int init(void *);
 extern int bdflush(void *);
 extern int kupdate(void *);
 extern int kswapd(void *);
-extern int kpiod(void *);
 extern void kswapd_setup(void);
 extern unsigned long init_IRQ( unsigned long);
 extern void init_modules(void);
@@ -204,9 +203,6 @@ extern void con3215_setup(char *str, int *ints);
 #ifdef CONFIG_MDISK
 extern void mdisk_setup(char *str, int *ints);
 #endif
-#ifdef CONFIG_DASD
-extern void dasd_setup(char *str, int *ints);
-#endif
 #ifdef CONFIG_BLK_DEV_XPRAM
 extern void xpram_setup(char *str, int *ints);
 #endif
@@ -216,6 +212,7 @@ extern void vmpoff_setup(char *str, int *ints);
 #endif
 extern void floppy_setup(char *str, int *ints);
 extern void st_setup(char *str, int *ints);
+extern void osst_setup(char *str, int *ints);
 extern void st0x_setup(char *str, int *ints);
 extern void advansys_setup(char *str, int *ints);
 extern void tmc8xx_setup(char *str, int *ints);
@@ -624,22 +621,22 @@ static struct dev_name_struct {
        { "dasdh", (DASD_MAJOR << MINORBITS) + (7 << 2) },
        { "dasdi", (DASD_MAJOR << MINORBITS) + (8 << 2) },
        { "dasdj", (DASD_MAJOR << MINORBITS) + (9 << 2) },
-       { "dasdk", (DASD_MAJOR << MINORBITS) + (11 << 2) },
-       { "dasdl", (DASD_MAJOR << MINORBITS) + (12 << 2) },
-       { "dasdm", (DASD_MAJOR << MINORBITS) + (13 << 2) },
-       { "dasdn", (DASD_MAJOR << MINORBITS) + (14 << 2) },
-       { "dasdo", (DASD_MAJOR << MINORBITS) + (15 << 2) },
-       { "dasdp", (DASD_MAJOR << MINORBITS) + (16 << 2) },
-       { "dasdq", (DASD_MAJOR << MINORBITS) + (17 << 2) },
-       { "dasdr", (DASD_MAJOR << MINORBITS) + (18 << 2) },
-       { "dasds", (DASD_MAJOR << MINORBITS) + (19 << 2) },
-       { "dasdt", (DASD_MAJOR << MINORBITS) + (20 << 2) },
-       { "dasdu", (DASD_MAJOR << MINORBITS) + (21 << 2) },
-       { "dasdv", (DASD_MAJOR << MINORBITS) + (22 << 2) },
-       { "dasdw", (DASD_MAJOR << MINORBITS) + (23 << 2) },
-       { "dasdx", (DASD_MAJOR << MINORBITS) + (24 << 2) },
-       { "dasdy", (DASD_MAJOR << MINORBITS) + (25 << 2) },
-       { "dasdz", (DASD_MAJOR << MINORBITS) + (26 << 2) },
+       { "dasdk", (DASD_MAJOR << MINORBITS) + (10 << 2) },
+       { "dasdl", (DASD_MAJOR << MINORBITS) + (11 << 2) },
+       { "dasdm", (DASD_MAJOR << MINORBITS) + (12 << 2) },
+       { "dasdn", (DASD_MAJOR << MINORBITS) + (13 << 2) },
+       { "dasdo", (DASD_MAJOR << MINORBITS) + (14 << 2) },
+       { "dasdp", (DASD_MAJOR << MINORBITS) + (15 << 2) },
+       { "dasdq", (DASD_MAJOR << MINORBITS) + (16 << 2) },
+       { "dasdr", (DASD_MAJOR << MINORBITS) + (17 << 2) },
+       { "dasds", (DASD_MAJOR << MINORBITS) + (18 << 2) },
+       { "dasdt", (DASD_MAJOR << MINORBITS) + (19 << 2) },
+       { "dasdu", (DASD_MAJOR << MINORBITS) + (20 << 2) },
+       { "dasdv", (DASD_MAJOR << MINORBITS) + (21 << 2) },
+       { "dasdw", (DASD_MAJOR << MINORBITS) + (22 << 2) },
+       { "dasdx", (DASD_MAJOR << MINORBITS) + (23 << 2) },
+       { "dasdy", (DASD_MAJOR << MINORBITS) + (24 << 2) },
+       { "dasdz", (DASD_MAJOR << MINORBITS) + (25 << 2) },
 #endif
 #ifdef CONFIG_BLK_DEV_XPRAM
        { "xpram0", (XPRAM_MAJOR << MINORBITS) },
@@ -840,6 +837,9 @@ static struct kernel_param cooked_params[] __initdata = {
 #endif
 #ifdef CONFIG_CHR_DEV_ST
 	{ "st=", st_setup },
+#endif
+#ifdef CONFIG_CHR_DEV_OSST
+	{ "osst=", osst_setup },
 #endif
 #ifdef CONFIG_BUSMOUSE
 	{ "bmouse=", bmouse_setup },
@@ -1107,9 +1107,6 @@ static struct kernel_param raw_params[] __initdata = {
 #endif
 #ifdef CONFIG_MDISK
         { "mdisk=", mdisk_setup },
-#endif
-#ifdef CONFIG_DASD
-        { "dasd=", dasd_setup },
 #endif
 #ifdef CONFIG_BLK_DEV_XPRAM
         { "xpram_parts=", xpram_setup },
@@ -1580,7 +1577,6 @@ static void __init do_basic_setup(void)
 	kernel_thread(kupdate, NULL, CLONE_FS | CLONE_FILES | CLONE_SIGHAND);
 	/* Start the background pageout daemon. */
 	kswapd_setup();
-	kernel_thread(kpiod, NULL, CLONE_FS | CLONE_FILES | CLONE_SIGHAND);
 	kernel_thread(kswapd, NULL, CLONE_FS | CLONE_FILES | CLONE_SIGHAND);
 
 #if CONFIG_AP1000
@@ -1598,6 +1594,9 @@ static void __init do_basic_setup(void)
 	if (initrd_start && mount_initrd) root_mountflags &= ~MS_RDONLY;
 	else mount_initrd =0;
 #endif
+
+	/* Start the event daemon thread */
+	start_context_thread();
 
 	/* Set up devices .. */
 	device_setup();

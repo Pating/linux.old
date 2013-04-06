@@ -79,6 +79,7 @@ extern int last_pid;
 #define TASK_ZOMBIE		4
 #define TASK_STOPPED		8
 #define TASK_SWAPPING		16
+#define TASK_EXCLUSIVE		32
 
 /*
  * Scheduling policies
@@ -118,6 +119,11 @@ extern void trap_init(void);
 #define	MAX_SCHEDULE_TIMEOUT	LONG_MAX
 extern signed long FASTCALL(schedule_timeout(signed long timeout));
 asmlinkage void schedule(void);
+
+extern int schedule_task(struct tq_struct *task);
+extern void flush_scheduled_tasks(void);
+extern int start_context_thread(void);
+extern int current_is_keventd(void);
 
 /*
  * The default fd array needs to be at least BITS_PER_LONG,
@@ -180,7 +186,11 @@ struct mm_struct {
 	atomic_t count;
 	int map_count;				/* number of VMAs */
 	struct semaphore mmap_sem;
+#ifdef __alpha__
+	unsigned long context[NR_CPUS];
+#else
 	unsigned long context;
+#endif
 	unsigned long start_code, end_code, start_data, end_data;
 	unsigned long start_brk, brk, start_stack;
 	unsigned long arg_start, arg_end, env_start, env_end;
@@ -196,12 +206,18 @@ struct mm_struct {
 	void * segments;
 };
 
+#ifdef __alpha__
+#define CONTEXT_INIT	{ 0, }
+#else
+#define CONTEXT_INIT	0
+#endif
+
 #define INIT_MM {					\
 		&init_mmap, NULL, NULL,			\
 		swapper_pg_dir, 			\
 		ATOMIC_INIT(1), 1,			\
 		MUTEX,					\
-		0,					\
+		CONTEXT_INIT,				\
 		0, 0, 0, 0,				\
 		0, 0, 0, 				\
 		0, 0, 0, 0,				\
@@ -251,13 +267,14 @@ struct task_struct {
 	struct task_struct *next_task, *prev_task;
 	struct task_struct *next_run,  *prev_run;
 
+	unsigned int task_exclusive;	/* task wants wake-one semantics in __wake_up() */
 /* task state */
 	struct linux_binfmt *binfmt;
 	int exit_code, exit_signal;
 	int pdeath_signal;  /*  The signal sent when the parent dies  */
 	/* ??? */
 	unsigned long personality;
-	int dumpable:1;
+	unsigned int dumpable:1;
 	int did_exec:1;
 	pid_t pid;
 	pid_t pgrp;
@@ -317,6 +334,9 @@ struct task_struct {
 	struct files_struct *files;
 /* memory management info */
 	struct mm_struct *mm;
+	struct list_head local_pages;
+	int allocation_order, nr_local_pages;
+	int fs_locks;
 
 /* signal handlers */
 	spinlock_t sigmask_lock;	/* Protects signal and blocked */
@@ -349,6 +369,7 @@ struct task_struct {
 #define PF_SIGNALED	0x00000400	/* killed by a signal */
 #define PF_MEMALLOC	0x00000800	/* Allocating memory */
 #define PF_VFORK	0x00001000	/* Wake up parent in mm_release */
+#define PF_FREE_PAGES	0x00002000	/* The current-> */
 
 #define PF_USEDFPU	0x00100000	/* task used FPU this quantum (SMP) */
 #define PF_DTRACE	0x00200000	/* delayed trace (used on m68k, i386) */
@@ -370,6 +391,7 @@ struct task_struct {
 /* counter */	DEF_PRIORITY,DEF_PRIORITY,0, \
 /* SMP */	0,0,0,-1, \
 /* schedlink */	&init_task,&init_task, &init_task, &init_task, \
+/* task_exclusive */ 0, \
 /* binfmt */	NULL, \
 /* ec,brk... */	0,0,0,0,0,0, \
 /* pid etc.. */	0,0,0,0,0, \
@@ -397,7 +419,7 @@ struct task_struct {
 /* tss */	INIT_TSS, \
 /* fs */	&init_fs, \
 /* files */	&init_files, \
-/* mm */	&init_mm, \
+/* mm */	&init_mm, { &init_task.local_pages, &init_task.local_pages}, 0, 0, 0, \
 /* signals */	SPIN_LOCK_UNLOCKED, &init_signals, {{0}}, {{0}}, NULL, &init_task.sigqueue, 0, 0, \
 /* exec cts */	0,0, \
 /* oom */	0, \
@@ -496,8 +518,15 @@ extern long FASTCALL(interruptible_sleep_on_timeout(struct wait_queue ** p,
 						    signed long timeout));
 extern void FASTCALL(wake_up_process(struct task_struct * tsk));
 
-#define wake_up(x)			__wake_up((x),TASK_UNINTERRUPTIBLE | TASK_INTERRUPTIBLE)
-#define wake_up_interruptible(x)	__wake_up((x),TASK_INTERRUPTIBLE)
+#define wake_up(x)			__wake_up((x),TASK_UNINTERRUPTIBLE | TASK_INTERRUPTIBLE | TASK_EXCLUSIVE)
+#define wake_up_interruptible(x)	__wake_up((x),TASK_INTERRUPTIBLE | TASK_EXCLUSIVE)
+
+#define __set_task_state(tsk, state_value)	do { (tsk)->state = state_value; } while (0)
+#ifdef __SMP__
+#define set_task_state(tsk, state_value)	do { __set_task_state(tsk, state_value); mb(); } while (0)
+#else
+#define set_task_state(tsk, state_value)	__set_task_state(tsk, state_value)
+#endif
 
 #define __set_current_state(state_value)	do { current->state = state_value; } while (0)
 #ifdef __SMP__

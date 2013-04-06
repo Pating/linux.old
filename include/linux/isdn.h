@@ -1,4 +1,4 @@
-/* $Id: isdn.h,v 1.107 2000/09/10 20:29:18 detabc Exp $
+/* $Id: isdn.h,v 1.111.6.3 2001/02/10 14:44:10 kai Exp $
 
  * Main header for the Linux ISDN subsystem (linklevel).
  *
@@ -66,9 +66,7 @@
 #undef CONFIG_ISDN_WITH_ABC_CH_EXTINUSE
 #undef CONFIG_ISDN_WITH_ABC_CONN_ERROR
 #undef CONFIG_ISDN_WITH_ABC_RAWIPCOMPRESS
-#undef CONFIG_ISDN_WITH_ABC_FRAME_LIMIT
-#undef CONFIG_ISDN_WITH_ABC_IPV4_RW_SOCKADDR 
-#undef CONFIG_ISDN_WITH_ABC_IPV4_RWUDP_SOCKADDR 
+#undef CONFIG_ISDN_WITH_ABC_IPTABLES_NETFILTER
 
 
 /* New ioctl-codes */
@@ -198,7 +196,7 @@ typedef struct {
 #include <asm/io.h>
 #include <linux/kernel.h>
 #include <linux/signal.h>
-#include <linux/malloc.h>
+#include <linux/slab.h>
 #include <linux/timer.h>
 #include <linux/wait.h>
 #include <linux/tty.h>
@@ -320,7 +318,7 @@ typedef struct {
 typedef struct isdn_net_local_s {
   ulong                  magic;
   char                   name[10];     /* Name of device                   */
-  struct enet_statistics stats;        /* Ethernet Statistics              */
+  struct net_device_stats stats;       /* Ethernet Statistics              */
   int                    isdn_device;  /* Index to isdn-device             */
   int                    isdn_channel; /* Index to isdn-channel            */
   int			 ppp_slot;     /* PPPD device slot number          */
@@ -368,7 +366,6 @@ typedef struct isdn_net_local_s {
   ulong                  sqfull_stamp; /* Start-Time of overload           */
   ulong                  slavedelay;   /* Dynamic bundling delaytime       */
   int                    triggercps;   /* BogoCPS needed for trigger slave */
-  struct device      *srobin;      /* Ptr to Master device for slaves  */
   isdn_net_phone         *phone[2];    /* List of remote-phonenumbers      */
 				       /* phone[0] = Incoming Numbers      */
 				       /* phone[1] = Outgoing Numbers      */
@@ -378,9 +375,15 @@ typedef struct isdn_net_local_s {
   struct isdn_net_local_s *next;       /* Ptr to next link in bundle       */
   struct isdn_net_local_s *last;       /* Ptr to last link in bundle       */
   struct isdn_net_dev_s  *netdev;      /* Ptr to netdev                    */
-  struct sk_buff         *first_skb;   /* Ptr to skb that triggers dialing */
-  struct sk_buff *volatile sav_skb;    /* Ptr to skb, rejected by LL-driver*/
+  struct sk_buff_head    super_tx_queue; /* List of supervisory frames to  */
+	                               /* be transmitted asap              */
+  atomic_t frame_cnt;                  /* number of frames currently       */
+                        	       /* queued in HL driver              */    
                                        /* Ptr to orig. hard_header_cache   */
+  spinlock_t             xmit_lock;    /* used to protect the xmit path of */
+                                       /* a particular channel (including  */
+                                       /* the frame_cnt                    */
+
   int                    (*org_hhc)(
 				    struct neighbour *neigh,
 				    struct hh_cache *hh);
@@ -400,13 +403,17 @@ typedef struct isdn_net_local_s {
   int  cisco_loop;                     /* Loop counter for Cisco-SLARP     */
   ulong cisco_myseq;                   /* Local keepalive seq. for Cisco   */
   ulong cisco_yourseq;                 /* Remote keepalive seq. for Cisco  */
+  struct tq_struct tqueue;
 } isdn_net_local;
 
 /* the interface itself */
 typedef struct isdn_net_dev_s {
   isdn_net_local *local;
-  isdn_net_local *queue;
-  void           *next;                /* Pointer to next isdn-interface   */
+  isdn_net_local *queue;               /* circular list of all bundled
+					  channels, which are currently
+					  online                           */
+  spinlock_t queue_lock;               /* lock to protect queue            */
+  void *next;                          /* Pointer to next isdn-interface   */
   struct device dev;               /* interface to upper levels        */
 #ifdef CONFIG_ISDN_PPP
   ippp_bundle * pb;		/* pointer to the common bundle structure
@@ -531,8 +538,7 @@ typedef struct modem_info {
   atemu                 emu;             /* AT-emulator data               */
   struct termios	normal_termios;  /* For saving termios structs     */
   struct termios	callout_termios;
-  struct wait_queue	*open_wait;
-  struct wait_queue	*close_wait;
+  wait_queue_head_t	open_wait, close_wait;
   struct semaphore      write_sem;
 } modem_info;
 
@@ -583,23 +589,6 @@ typedef struct {
 	char *private;
 } infostruct;
 
-typedef struct isdn_module {
-	struct isdn_module *prev;
-	struct isdn_module *next;
-	char *name;
-	int (*get_free_channel)(int, int, int, int, int);
-	int (*free_channel)(int, int, int);
-	int (*status_callback)(isdn_ctrl *);
-	int (*command)(isdn_ctrl *);
-	int (*receive_callback)(int, int, struct sk_buff *);
-	int (*writebuf_skb)(int, int, int, struct sk_buff *);
-	int (*net_start_xmit)(struct sk_buff *, struct device *);
-	int (*net_receive)(struct device *, struct sk_buff *);
-	int (*net_open)(struct device *);
-	int (*net_close)(struct device *);
-	int priority;
-} isdn_module;
-
 #define DRV_FLAG_RUNNING 1
 #define DRV_FLAG_REJBUS  2
 #define DRV_FLAG_LOADED  4
@@ -610,7 +599,7 @@ typedef struct {
 	ulong               flags;            /* Misc driver Flags                */
 	int                 locks;            /* Number of locks for this driver  */
 	int                 channels;         /* Number of channels               */
-	struct wait_queue  *st_waitq;         /* Wait-Queue for status-read's     */
+	wait_queue_head_t   st_waitq;         /* Wait-Queue for status-read's     */
 	int                 maxbufsize;       /* Maximum Buffersize supported     */
 	unsigned long       pktcount;         /* Until now: unused                */
 	int                 stavail;          /* Chars avail on Status-device     */
@@ -621,8 +610,8 @@ typedef struct {
 	unsigned long      DLEflag;           /* Flags: Insert DLE at next read   */
 #endif
 	struct sk_buff_head *rpqueue;         /* Pointers to start of Rcv-Queue   */
-	struct wait_queue  **rcv_waitq;       /* Wait-Queues for B-Channel-Reads  */
-	struct wait_queue  **snd_waitq;       /* Wait-Queue for B-Channel-Send's  */
+	wait_queue_head_t  *rcv_waitq;       /* Wait-Queues for B-Channel-Reads  */
+	wait_queue_head_t  *snd_waitq;       /* Wait-Queue for B-Channel-Send's  */
 	char               msn2eaz[10][ISDN_MSNLEN];  /* Mapping-Table MSN->EAZ   */
 } driver;
 
@@ -638,7 +627,7 @@ typedef struct isdn_devt {
 	/*  see ISDN_TIMER_..defines  */
 	int               global_flags;
 	infostruct        *infochain;                /* List of open info-devs.    */
-	struct wait_queue *info_waitq;               /* Wait-Queue for isdninfo    */
+	wait_queue_head_t info_waitq;               /* Wait-Queue for isdninfo    */
 	struct timer_list timer;		       /* Misc.-function Timer       */
 	int               chanmap[ISDN_MAX_CHANNELS];/* Map minor->device-channel  */
 	int               drvmap[ISDN_MAX_CHANNELS]; /* Map minor->driver-index    */
@@ -659,43 +648,14 @@ typedef struct isdn_devt {
 	atomic_t          v110use[ISDN_MAX_CHANNELS];/* Usage-Semaphore for stream */
 	isdn_v110_stream  *v110[ISDN_MAX_CHANNELS];  /* V.110 private data         */
 	struct semaphore  sem;                       /* serialize list access*/
-	isdn_module       *modules;
 	unsigned long     global_features;
 } isdn_dev;
 
 extern isdn_dev *dev;
 
 
-
 /* Utility-Macros */
 #define MIN(a,b) ((a<b)?a:b)
 #define MAX(a,b) ((a>b)?a:b)
-/*
- * Tell upper layers that the network device is ready to xmit more frames.
- */
-static void __inline__ netif_wake_queue(struct device * dev)
-{
-	dev->tbusy = 0;
-	mark_bh(NET_BH);
-}
-
-/*
- * called during net_device open()
- */
-static void __inline__ netif_start_queue(struct device * dev)
-{
-	dev->tbusy = 0;
-	/* actually, we never use the interrupt flag at all */
-	dev->interrupt = 0;
-	dev->start = 1;
-}
-
-/*
- * Ask upper layers to temporarily cease passing us more xmit frames.
- */
-static void __inline__ netif_stop_queue(struct device * dev)
-{
-	dev->tbusy = 1;
-}
 #endif /* __KERNEL__ */
 #endif /* isdn_h */

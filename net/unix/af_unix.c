@@ -8,7 +8,7 @@
  *		as published by the Free Software Foundation; either version
  *		2 of the License, or (at your option) any later version.
  *
- * Version:	$Id: af_unix.c,v 1.76.2.5 2000/10/17 09:08:37 davem Exp $
+ * Version:	$Id: af_unix.c,v 1.76.2.6 2001/01/04 05:28:48 davem Exp $
  *
  * Fixes:
  *		Linus Torvalds	:	Assorted bug cures.
@@ -417,7 +417,7 @@ static struct sock * unix_create1(struct socket *sock, int stream)
 {
 	struct sock *sk;
 
-	if (atomic_read(&unix_nr_socks) >= 2*max_files)
+	if (atomic_read(&unix_nr_socks) >= 2*files_stat.max_files)
 		return NULL;
 
 	MOD_INC_USE_COUNT;

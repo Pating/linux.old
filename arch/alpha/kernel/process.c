@@ -249,8 +249,11 @@ void machine_power_off(void)
 	alpha_mv.kill_arch(LINUX_REBOOT_CMD_POWER_OFF, NULL);
 }
 
-void show_regs(struct pt_regs * regs)
+void __show_regs(struct pt_regs * regs)
 {
+	extern void dik_show_trace(unsigned long *);
+
+	printk("\nCPU: %d", smp_processor_id());
 	printk("\nps: %04lx pc: [<%016lx>]\n", regs->ps, regs->pc);
 	printk("rp: [<%016lx>] sp: %p\n", regs->r26, regs+1);
 	printk(" r0: %016lx  r1: %016lx  r2: %016lx  r3: %016lx\n",
@@ -265,6 +268,15 @@ void show_regs(struct pt_regs * regs)
 	       regs->r23, regs->r24, regs->r25, regs->r26);
 	printk("r27: %016lx r28: %016lx r29: %016lx hae: %016lx\n",
 	       regs->r27, regs->r28, regs->gp, regs->hae);
+	dik_show_trace(regs+1);
+}
+
+void show_regs(struct pt_regs * regs)
+{
+	__show_regs(regs);
+#ifdef CONFIG_SMP
+	smp_show_regs();
+#endif
 }
 
 /*
@@ -463,3 +475,29 @@ out:
 	unlock_kernel();
 	return error;
 }
+
+#ifdef __SMP__
+/*
+ * execve() system call for in kernel use.
+ *
+ * Two(user and kernel) execve() have quite different call path and
+ * following function puts lock_kernel() and unlock_kernel() in kernel
+ * execve().  You could put them in unistd.h but you will have to
+ * modify many files to clear compile error -
+ *
+ * soohoon.lee@api-networks.com.  */
+
+asmlinkage int ___kernel_execve(char *filename, char **argp, char **envp,
+	struct pt_regs *regs)
+{
+	int error;
+
+	lock_kernel();
+
+	error = do_execve(filename, argp, envp, regs);
+
+	unlock_kernel();
+
+	return error;
+}
+#endif /* __SMP__ */

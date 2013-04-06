@@ -52,6 +52,7 @@ struct sound_unit
 	struct sound_unit *next;
 };
 
+extern int init_cmpci(void);
 extern int init_sonicvibes(void);
 extern int init_maestro(void);
 extern int init_trident(void);
@@ -63,7 +64,6 @@ extern int msnd_pinnacle_init(void);
 extern int init_solo1(void);
 extern int init_ymf7xxsb_module(void);
 extern int cs_probe(void);
-extern int init_emu10k1(void);
 extern int cs4281_probe(void);
 extern void init_vwsnd(void);
 extern int ymf_probe(void);
@@ -396,6 +396,9 @@ int soundcore_init(void)
 	/*
 	 *	Now init non OSS drivers
 	 */
+#ifdef CONFIG_SOUND_CMPCI
+        init_cmpci();
+#endif
 #ifdef CONFIG_SOUND_VWSND
 	init_vwsnd();
 #endif
@@ -410,6 +413,9 @@ int soundcore_init(void)
 #endif
 #ifdef CONFIG_SOUND_MAESTRO
 	init_maestro();
+#endif
+#ifdef CONFIG_SOUND_MAESTRO3
+    init_maestro3();
 #endif
 #ifdef CONFIG_SOUND_TRIDENT
 	init_trident();
@@ -434,9 +440,6 @@ int soundcore_init(void)
 #endif
 #ifdef CONFIG_SOUND_CS4281
 	cs4281_probe();
-#endif
-#ifdef CONFIG_SOUND_EMU10K1
-	init_emu10k1();
 #endif
 #ifdef CONFIG_SOUND_YMFPCI
 	ymf_probe();

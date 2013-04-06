@@ -517,8 +517,9 @@ int flush_old_exec(struct linux_binprm * bprm)
 
 	current->sas_ss_sp = current->sas_ss_size = 0;
 
+	bprm->dumpable = 0;
 	if (current->euid == current->uid && current->egid == current->gid)
-		current->dumpable = 1;
+		bprm->dumpable = !bprm->priv_change;
 	name = bprm->filename;
 	for (i=0; (ch = *(name++)) != '\0';) {
 		if (ch == '/')
@@ -531,10 +532,10 @@ int flush_old_exec(struct linux_binprm * bprm)
 
 	flush_thread();
 
-	if (bprm->e_uid != current->euid || bprm->e_gid != current->egid || 
-	    permission(bprm->dentry->d_inode,MAY_READ))
-		current->dumpable = 0;
-		
+	if (bprm->e_uid != current->euid || bprm->e_gid != current->egid ||
+	    permission(bprm->dentry->d_inode, MAY_READ))
+		bprm->dumpable = 0;
+
 	current->self_exec_id++;
 
 	flush_signal_handlers(current);
@@ -646,7 +647,8 @@ int prepare_binprm(struct linux_binprm *bprm)
 		}
 	}
 
-	if (id_change || cap_raised) {
+	bprm->priv_change = id_change || cap_raised;
+	if (bprm->priv_change) {
 		/* We can't suid-execute if we're sharing parts of the executable */
 		/* or if we're being traced (or if suid execs are not allowed)    */
 		/* (current->mm->count > 1 is ok, as we'll get a new mm anyway)   */
@@ -704,7 +706,7 @@ void compute_creds(struct linux_binprm *bprm)
         current->sgid = current->egid = current->fsgid = bprm->e_gid;
         if (current->euid != current->uid || current->egid != current->gid ||
 	    !cap_issubset(new_permitted, current->cap_permitted))
-                current->dumpable = 0;
+                bprm->dumpable = 0;
 
         current->keep_capabilities = 0;
 }
@@ -823,6 +825,7 @@ int do_execve(char * filename, char ** argv, char ** envp, struct pt_regs * regs
 {
 	struct linux_binprm bprm;
 	struct dentry * dentry;
+	int was_dumpable;
 	int retval;
 	int i;
 
@@ -851,6 +854,9 @@ int do_execve(char * filename, char ** argv, char ** envp, struct pt_regs * regs
 		return bprm.envc;
 	}
 
+	was_dumpable = current->dumpable;
+	current->dumpable = 0;
+
 	retval = prepare_binprm(&bprm);
 	
 	if (retval >= 0) {
@@ -864,9 +870,12 @@ int do_execve(char * filename, char ** argv, char ** envp, struct pt_regs * regs
 
 	if (retval >= 0)
 		retval = search_binary_handler(&bprm,regs);
-	if (retval >= 0)
+
+	if (retval >= 0) {
 		/* execve success */
+		current->dumpable = bprm.dumpable;
 		return retval;
+	}
 
 	/* Something went wrong, return the inode and free the argument pages*/
 	if (bprm.dentry)
@@ -874,6 +883,8 @@ int do_execve(char * filename, char ** argv, char ** envp, struct pt_regs * regs
 
 	for (i=0 ; i<MAX_ARG_PAGES ; i++)
 		free_page(bprm.page[i]);
+
+	current->dumpable = was_dumpable;
 
 	return retval;
 }

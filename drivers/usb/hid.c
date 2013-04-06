@@ -698,7 +698,7 @@ static __inline__ __s32 snto32(__u32 value, unsigned n)
 static __inline__ __u32 s32ton(__s32 value, unsigned n)
 {
 	__s32 a = value >> (n - 1);
-	if (a && a != -1) return value > 0 ? 1 << (n - 1) : (1 << n) - 1;
+	if (a && a != -1) return value < 0 ? 1 << (n - 1) : (1 << (n - 1)) - 1;
 	return value & ((1 << n) - 1);
 }
 
@@ -856,7 +856,7 @@ static void hid_configure_usage(struct hid_device *device, struct hid_field *fie
 		case HID_UP_CONSUMER:	/* USB HUT v1.1, pages 56-62 */
 			
 			switch (usage->hid & HID_USAGE) {
-
+				case 0x000: usage->code = 0; break; 
 				case 0x034: usage->code = KEY_SLEEP;		break;
 				case 0x036: usage->code = BTN_MISC;		break;
 				case 0x08a: usage->code = KEY_WWW;		break;
@@ -981,6 +981,9 @@ static void hid_process_event(struct input_dev *input, int *quirks, struct hid_f
 		input_event(input, EV_KEY, BTN_TOUCH, value > a + ((b - a) >> 3));
 	}
 
+	if((usage->type == EV_KEY) && (usage->code == 0)) /* Key 0 is "unassigned", not KEY_UKNOWN */
+		return;
+
 	input_event(input, usage->type, usage->code, value);
 
 	if ((field->flags & HID_MAIN_ITEM_RELATIVE) && (usage->type == EV_KEY))
@@ -1013,9 +1016,15 @@ static void hid_input_field(struct hid_device *dev, struct hid_field *field, __u
 	__s32 max = field->logical_maximum;
 	__s32 value[count]; /* WARNING: gcc specific */
    
-	for (n = 0; n < count; n++)
+	for (n = 0; n < count; n++) {
 			value[n] = min < 0 ? snto32(extract(data, offset + n * size, size), size) : 
 						    extract(data, offset + n * size, size);
+			/* Handle the ErrorRollOver code (1) by simply ignoring this report */
+			if (!(field->flags & HID_MAIN_ITEM_VARIABLE)
+			    && value[n] >= min && value[n] <= max
+			    && field->usage[value[n] - min].hid == HID_UP_KEYBOARD + 1)
+				return;
+	}
 
 	for (n = 0; n < count; n++) {
 
@@ -1228,9 +1237,10 @@ static int hid_find_field(struct hid_device *hid, unsigned int type, unsigned in
 
 static int hid_submit_out(struct hid_device *hid)
 {
-	hid->urbout.transfer_buffer_length = hid->out[hid->outtail].dr.length;
+	hid->urbout.transfer_buffer_length = le16_to_cpup(&hid->out[hid->outtail].dr.length);
 	hid->urbout.transfer_buffer = hid->out[hid->outtail].buffer;
 	hid->urbout.setup_packet = (void *) &(hid->out[hid->outtail].dr);
+	hid->urbout.dev = hid->dev;
 
 	if (usb_submit_urb(&hid->urbout)) {
 		err("usb_submit_urb(out) failed");
@@ -1267,8 +1277,8 @@ static int hid_event(struct input_dev *dev, unsigned int type, unsigned int code
 	hid_set_field(field, offset, value);
 	hid_output_report(field->report, hid->out[hid->outhead].buffer);
 
-	hid->out[hid->outhead].dr.value = 0x200 | field->report->id;
-	hid->out[hid->outhead].dr.length = ((field->report->size - 1) >> 3) + 1;
+	hid->out[hid->outhead].dr.value = cpu_to_le16(0x200 | field->report->id);
+	hid->out[hid->outhead].dr.length = cpu_to_le16((field->report->size + 7) >> 3);
 
 	hid->outhead = (hid->outhead + 1) & (HID_CONTROL_FIFO_SIZE - 1);
 
@@ -1288,7 +1298,9 @@ static int hid_open(struct input_dev *dev)
 	if (hid->open++)
 		return 0;
 
-	 if (usb_submit_urb(&hid->urb))
+	hid->urb.dev = hid->dev;
+
+	if (usb_submit_urb(&hid->urb))
 		return -EIO;
 
 	return 0;
@@ -1442,7 +1454,7 @@ static struct hid_device *usb_hid_configure(struct usb_device *dev, int ifnum, c
 	for (n = 0; n < HID_CONTROL_FIFO_SIZE; n++) {
 		hid->out[n].dr.requesttype = USB_TYPE_CLASS | USB_RECIP_INTERFACE;
 		hid->out[n].dr.request = USB_REQ_SET_REPORT;
-		hid->out[n].dr.index = hid->ifnum;
+		hid->out[n].dr.index = cpu_to_le16(hid->ifnum);
 	}
 
 	hid->input.name = hid->name;

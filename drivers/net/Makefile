@@ -742,6 +742,14 @@ else
   endif
 endif
 
+ifeq ($(CONFIG_ADAPTEC_STARFIRE),y)
+L_OBJS += starfire.o
+else
+  ifeq ($(CONFIG_ADAPTEC_STARFIRE),m)
+  M_OBJS += starfire.o
+  endif
+endif
+
 ifeq ($(CONFIG_AC3200),y)
 L_OBJS += ac3200.o
 CONFIG_8390_BUILTIN = y
@@ -774,6 +782,11 @@ else
   ifeq ($(CONFIG_BVME6000_NET),m)
   CONFIG_82596_MODULE = y
   endif
+endif
+
+# This is also a 82596 and should probably be merged
+ifeq ($(CONFIG_LP486E),y)
+L_OBJS += lp486e.o
 endif
 
 ifeq ($(CONFIG_DEC_ELCP),y)

@@ -435,7 +435,7 @@ static void try_to_free_inodes(int goal)
  * This is the externally visible routine for
  * inode memory management.
  */
-void free_inode_memory(int goal)
+void free_inode_memory(void)
 {
 	spin_lock(&inode_lock);
 	free_inodes();
@@ -681,7 +681,7 @@ add_new_inode:
 static inline unsigned long hash(struct super_block *sb, unsigned long i_ino)
 {
 	unsigned long tmp = i_ino | (unsigned long) sb;
-	tmp = tmp + (tmp >> HASH_BITS) + (tmp >> HASH_BITS*2);
+	tmp = tmp + (tmp >> HASH_BITS);
 	return tmp & HASH_MASK;
 }
 

@@ -64,6 +64,7 @@ extern int at1700_probe(struct device *);
 extern int fmv18x_probe(struct device *);
 extern int eth16i_probe(struct device *);
 extern int depca_probe(struct device *);
+extern int lp486e_probe(struct device *);
 extern int i82596_probe(struct device *);
 extern int ewrk3_probe(struct device *);
 extern int de4x5_probe(struct device *);
@@ -126,6 +127,7 @@ extern int lance_probe(struct device *dev);
 extern int rcpci_probe(struct device *);
 extern int dmfe_probe(struct device *);
 extern int sktr_probe(struct device *dev);
+extern int starfire_probe(struct device *dev);
 
 /* Gigabit Ethernet adapters */
 extern int yellowfin_probe(struct device *dev);
@@ -277,9 +279,12 @@ struct devprobe pci_probes[] __initdata = {
 #ifdef CONFIG_VIA_RHINE
 	{via_rhine_probe, 0},
 #endif
-#ifdef CONFI_NET_DM9102
+#ifdef CONFIG_NET_DM9102
 	{dmfe_probe, 0},
-#endif	
+#endif
+#ifdef CONFIG_ADAPTEC_STARFIRE
+	{starfire_probe, 0},
+#endif
 	{NULL, 0},
 };
 
@@ -419,6 +424,9 @@ struct devprobe isa_probes[] __initdata = {
 #endif
 #if defined(CONFIG_APRICOT) || defined(CONFIG_MVME16x_NET) || defined(CONFIG_BVME6000_NET)	/* Intel I82596 */
 	{i82596_probe, 0},
+#endif
+#if defined(CONFIG_LP486E)
+	{lp486e_probe, 0},
 #endif
 #ifdef CONFIG_EL1		/* 3c501 */
 	{el1_probe, 0},
