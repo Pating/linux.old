@@ -5,7 +5,7 @@
  *
  *		Implementation of the Transmission Control Protocol(TCP).
  *
- * Version:	$Id: tcp_output.c,v 1.109 1999/05/14 23:10:13 davem Exp $
+ * Version:	$Id: tcp_output.c,v 1.110 1999/05/27 00:37:45 davem Exp $
  *
  * Authors:	Ross Biro, <bir7@leland.Stanford.Edu>
  *		Fred N. van Kempen, <waltje@uWalt.NL.Mugnet.ORG>
@@ -35,6 +35,8 @@
  */
 
 #include <net/tcp.h>
+
+#include <linux/smp_lock.h>
 
 extern int sysctl_tcp_timestamps;
 extern int sysctl_tcp_window_scaling;
@@ -966,6 +968,7 @@ void tcp_connect(struct sock *sk, struct sk_buff *buff, int mtu)
 	/* Ok, now lock the socket before we make it visible to
 	 * the incoming packet engine.
 	 */
+	unlock_kernel();
 	lock_sock(sk);
 
 	/* Socket identity change complete, no longer
@@ -993,6 +996,7 @@ void tcp_connect(struct sock *sk, struct sk_buff *buff, int mtu)
 
 	/* Now, it is safe to release the socket. */
 	release_sock(sk);
+	lock_kernel();
 }
 
 /* Send out a delayed ack, the caller does the policy checking

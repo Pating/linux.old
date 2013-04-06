@@ -5,7 +5,7 @@
  *	Authors:
  *	Pedro Roque		<roque@di.fc.ul.pt>	
  *
- *	$Id: addrconf.c,v 1.48 1999/03/25 10:04:43 davem Exp $
+ *	$Id: addrconf.c,v 1.49 1999/05/27 00:38:20 davem Exp $
  *
  *	This program is free software; you can redistribute it and/or
  *      modify it under the terms of the GNU General Public License
@@ -982,6 +982,7 @@ static void sit_add_v4_addrs(struct inet6_dev *idev)
 		return;
 	}
 
+	read_lock_bh(&dev_base_lock);
         for (dev = dev_base; dev != NULL; dev = dev->next) {
 		if (dev->ip_ptr && (dev->flags & IFF_UP)) {
 			struct in_device * in_dev = dev->ip_ptr;
@@ -1000,6 +1001,7 @@ static void sit_add_v4_addrs(struct inet6_dev *idev)
 					flag |= IFA_HOST;
 				}
 
+				read_unlock_bh(&dev_base_lock);
 				addrconf_lock();
 				ifp = ipv6_add_addr(idev, &addr, flag);
 				if (ifp) {
@@ -1011,9 +1013,11 @@ static void sit_add_v4_addrs(struct inet6_dev *idev)
 					ipv6_ifa_notify(RTM_NEWADDR, ifp);
 				}
 				addrconf_unlock();
+				read_lock_bh(&dev_base_lock);
 			}
 		}
         }
+	read_unlock_bh(&dev_base_lock);
 }
 
 static void init_loopback(struct device *dev)
@@ -1842,11 +1846,12 @@ __initfunc(void addrconf_init(void))
 	struct device *dev;
 
 	/* This takes sense only during module load. */
-
+	read_lock_bh(&dev_base_lock);
 	for (dev = dev_base; dev; dev = dev->next) {
 		if (!(dev->flags&IFF_UP))
 			continue;
 
+		read_unlock_bh(&dev_base_lock);
 		switch (dev->type) {
 		case ARPHRD_LOOPBACK:	
 			init_loopback(dev);
@@ -1857,7 +1862,9 @@ __initfunc(void addrconf_init(void))
 		default:
 			/* Ignore all other */
 		}
+		read_lock_bh(&dev_base_lock);
 	}
+	read_unlock_bh(&dev_base_lock);
 #endif
 	
 #ifdef CONFIG_PROC_FS

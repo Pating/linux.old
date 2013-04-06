@@ -33,6 +33,8 @@
 #include <linux/poll.h>
 #include <linux/init.h>
 #include <linux/malloc.h>
+#include <linux/config.h>
+#include <linux/module.h>
 
 #include <asm/spinlock.h>
 
@@ -172,6 +174,30 @@ static ssize_t read_mouse(struct file * file, char * buffer, size_t count, loff_
 			buffer++;
 			retval++;
 			state = 0;
+			if (!--count)
+				break;
+		}
+
+		/*
+		 * SUBTLE:
+		 *
+		 * The only way to get here is to do a read() of
+		 * more than 3 bytes: if you read a byte at a time
+		 * you will just ever see states 0-2, for backwards
+		 * compatibility.
+		 *
+		 * So you can think of this as a packet interface,
+		 * where you have arbitrary-sized packets, and you
+		 * only ever see the first three bytes when you read
+		 * them in small chunks.
+		 */
+		{ /* fallthrough - dz */
+			int dz = mouse->dz;
+			mouse->dz = 0;
+			put_user(dz, buffer);
+			buffer++;
+			retval++;
+			state = 0;
 		}
 		break;
 		}
@@ -261,6 +287,7 @@ static void mouse_disconnect(struct usb_device *dev)
 
 	/* this might need work */
 	mouse->present = 0;
+	printk("Mouse disconnected\n");
 }
 
 static struct usb_driver mouse_driver = {
@@ -291,3 +318,15 @@ void usb_mouse_cleanup(void)
 	usb_deregister(&mouse_driver);
 	misc_deregister(&usb_mouse);
 }
+
+#ifdef MODULE
+int init_module(void)
+{
+	return usb_mouse_init();
+}
+
+void cleanup_module(void)
+{
+	usb_mouse_cleanup();
+}
+#endif

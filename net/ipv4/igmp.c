@@ -8,7 +8,7 @@
  *	the older version didn't come out right using gcc 2.5.8, the newer one
  *	seems to fall out with gcc 2.6.2.
  *
- *	Version: $Id: igmp.c,v 1.30 1999/03/25 10:04:10 davem Exp $
+ *	Version: $Id: igmp.c,v 1.31 1999/05/27 00:37:59 davem Exp $
  *
  *	Authors:
  *		Alan Cox <Alan.Cox@linux.org>
@@ -656,8 +656,8 @@ int ip_mc_procinfo(char *buffer, char **start, off_t offset, int length, int dum
 	
 	len=sprintf(buffer,"Idx\tDevice    : Count Querier\tGroup    Users Timer\tReporter\n");  
 	
-	for(dev = dev_base; dev; dev = dev->next)
-	{
+	read_lock_bh(&dev_base_lock);
+	for(dev = dev_base; dev; dev = dev->next) {
 		struct in_device *in_dev = dev->ip_ptr;
 		char   *querier = "NONE";
 		
@@ -686,6 +686,8 @@ int ip_mc_procinfo(char *buffer, char **start, off_t offset, int length, int dum
 		}
 	}
 done:
+	read_unlock_bh(&dev_base_lock);
+
 	*start=buffer+(offset-begin);
 	len-=(offset-begin);
 	if(len>length)

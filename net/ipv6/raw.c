@@ -7,7 +7,7 @@
  *
  *	Adapted from linux/net/ipv4/raw.c
  *
- *	$Id: raw.c,v 1.24 1999/04/22 10:07:45 davem Exp $
+ *	$Id: raw.c,v 1.25 1999/05/27 00:38:16 davem Exp $
  *
  *	This program is free software; you can redistribute it and/or
  *      modify it under the terms of the GNU General Public License
@@ -50,11 +50,11 @@ static void raw_v6_hash(struct sock *sk)
 
 	num &= (RAWV6_HTABLE_SIZE - 1);
 	skp = &raw_v6_htable[num];
-	SOCKHASH_LOCK();
+	SOCKHASH_LOCK_WRITE();
 	sk->next = *skp;
 	*skp = sk;
 	sk->hashent = num;
-	SOCKHASH_UNLOCK();
+	SOCKHASH_UNLOCK_WRITE();
 }
 
 static void raw_v6_unhash(struct sock *sk)
@@ -65,7 +65,7 @@ static void raw_v6_unhash(struct sock *sk)
 	num &= (RAWV6_HTABLE_SIZE - 1);
 	skp = &raw_v6_htable[num];
 
-	SOCKHASH_LOCK();
+	SOCKHASH_LOCK_WRITE();
 	while(*skp != NULL) {
 		if(*skp == sk) {
 			*skp = sk->next;
@@ -73,7 +73,7 @@ static void raw_v6_unhash(struct sock *sk)
 		}
 		skp = &((*skp)->next);
 	}
-	SOCKHASH_UNLOCK();
+	SOCKHASH_UNLOCK_WRITE();
 }
 
 static void raw_v6_rehash(struct sock *sk)
@@ -85,7 +85,7 @@ static void raw_v6_rehash(struct sock *sk)
 	num &= (RAWV6_HTABLE_SIZE - 1);
 	skp = &raw_v6_htable[oldnum];
 
-	SOCKHASH_LOCK();
+	SOCKHASH_LOCK_WRITE();
 	while(*skp != NULL) {
 		if(*skp == sk) {
 			*skp = sk->next;
@@ -96,7 +96,7 @@ static void raw_v6_rehash(struct sock *sk)
 	sk->next = raw_v6_htable[num];
 	raw_v6_htable[num] = sk;
 	sk->hashent = num;
-	SOCKHASH_UNLOCK();
+	SOCKHASH_UNLOCK_WRITE();
 }
 
 static __inline__ int inet6_mc_check(struct sock *sk, struct in6_addr *addr)
@@ -631,6 +631,8 @@ static int rawv6_getsockopt(struct sock *sk, int level, int optname,
 
 static void rawv6_close(struct sock *sk, long timeout)
 {
+	bh_lock_sock(sk);
+
 	/* See for explanation: raw_close in ipv4/raw.c */
 	sk->state = TCP_CLOSE;
 	raw_v6_unhash(sk);

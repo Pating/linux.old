@@ -5,7 +5,7 @@
  *
  *		Implementation of the Transmission Control Protocol(TCP).
  *
- * Version:	$Id: tcp.c,v 1.141 1999/05/12 11:24:40 davem Exp $
+ * Version:	$Id: tcp.c,v 1.144 1999/05/27 01:03:37 davem Exp $
  *
  * Authors:	Ross Biro, <bir7@leland.Stanford.Edu>
  *		Fred N. van Kempen, <waltje@uWalt.NL.Mugnet.ORG>
@@ -416,6 +416,7 @@
 #include <linux/fcntl.h>
 #include <linux/poll.h>
 #include <linux/init.h>
+#include <linux/smp_lock.h>
 
 #include <net/icmp.h>
 #include <net/tcp.h>
@@ -432,7 +433,7 @@ kmem_cache_t *tcp_timewait_cachep;
 
 /*
  *	Find someone to 'accept'. Must be called with
- *	the socket locked or with interrupts disabled
+ *	the listening socket locked.
  */
 
 static struct open_request *tcp_find_established(struct tcp_opt *tp, 
@@ -441,10 +442,11 @@ static struct open_request *tcp_find_established(struct tcp_opt *tp,
 	struct open_request *req = tp->syn_wait_queue;
 	struct open_request *prev = (struct open_request *)&tp->syn_wait_queue; 
 	while(req) {
-		if (req->sk && 
-		    ((1 << req->sk->state) &
-		     ~(TCPF_SYN_SENT|TCPF_SYN_RECV)))
-			break;
+		if (req->sk) {
+			if((1 << req->sk->state) &
+			   ~(TCPF_SYN_SENT|TCPF_SYN_RECV))
+				break;
+		}
 		prev = req; 
 		req = req->dl_next;
 	}
@@ -655,7 +657,8 @@ int tcp_ioctl(struct sock *sk, int cmd, unsigned long arg)
 /*
  *	Wait for a socket to get into the connected state
  *
- *	Note: must be called with the socket locked.
+ *	Note: Must be called with the socket locked, and it
+ *	      runs with the kernel fully unlocked.
  */
 static int wait_for_tcp_connect(struct sock * sk, int flags)
 {
@@ -698,6 +701,8 @@ static inline int tcp_memory_free(struct sock *sk)
 
 /*
  *	Wait for more memory for a socket
+ *
+ * NOTE: This runs with the kernel fully unlocked.
  */
 static void wait_for_tcp_memory(struct sock * sk)
 {
@@ -744,6 +749,7 @@ int tcp_do_sendmsg(struct sock *sk, struct msghdr *msg)
 	int mss_now;
 	int err, copied;
 
+	unlock_kernel();
 	lock_sock(sk);
 
 	err = 0;
@@ -896,6 +902,7 @@ int tcp_do_sendmsg(struct sock *sk, struct msghdr *msg)
 					err = -ERESTARTSYS;
 					goto do_interrupted;
 				}
+				tcp_push_pending_frames(sk, tp);
 				wait_for_tcp_memory(sk);
 
 				/* If SACK's were formed or PMTU events happened,
@@ -969,6 +976,7 @@ do_fault2:
 out:
 	tcp_push_pending_frames(sk, tp);
 	release_sock(sk);
+	lock_kernel();
 	return err;
 }
 
@@ -1148,6 +1156,7 @@ int tcp_recvmsg(struct sock *sk, struct msghdr *msg,
 	if (flags & MSG_WAITALL)
 		target=len;
 
+	unlock_kernel();
 	add_wait_queue(sk->sleep, &wait);
 	lock_sock(sk);
 	
@@ -1300,6 +1309,8 @@ int tcp_recvmsg(struct sock *sk, struct msghdr *msg,
 		/*	We now will not sleep again until we are finished
 		 *	with skb. Sorry if you are doing the SMP port
 		 *	but you'll just have to fix it neatly ;)
+		 *
+		 *	Very funny Alan... -DaveM
 		 */
 		atomic_dec(&skb->users);
 
@@ -1344,6 +1355,7 @@ int tcp_recvmsg(struct sock *sk, struct msghdr *msg,
 	/* Clean up data we have read: This will do ACK frames. */
 	cleanup_rbuf(sk, copied);
 	release_sock(sk);
+	lock_kernel();
 	return copied;
 }
 
@@ -1415,16 +1427,15 @@ void tcp_shutdown(struct sock *sk, int how)
 		return;
 
 	/* If we've already sent a FIN, or it's a closed state, skip this. */
+	lock_sock(sk);
 	if ((1 << sk->state) &
 	    (TCPF_ESTABLISHED|TCPF_SYN_SENT|TCPF_SYN_RECV|TCPF_CLOSE_WAIT)) {
-		lock_sock(sk);
 
 		/* Clear out any half completed packets.  FIN if needed. */
 		if (tcp_close_state(sk,0))
 			tcp_send_fin(sk);
-
-		release_sock(sk);
 	}
+	release_sock(sk);
 }
 
 
@@ -1471,13 +1482,6 @@ void tcp_close(struct sock *sk, long timeout)
 	struct sk_buff *skb;
 	int data_was_unread = 0;
 
-	/*
-	 * Check whether the socket is locked ... supposedly
-	 * it's impossible to tcp_close() a locked socket.
-	 */
-	if (atomic_read(&sk->sock_readers))
-		printk("tcp_close: socket already locked!\n");
-
 	/* We need to grab some memory, and put together a FIN,
 	 * and then put it into the queue to be sent.
 	 */
@@ -1490,6 +1494,8 @@ void tcp_close(struct sock *sk, long timeout)
 		sk->dead = 1;
 		return;
 	}
+
+	unlock_kernel();
 
 	/* It is questionable, what the role of this is now.
 	 * In any event either it should be removed, or
@@ -1537,21 +1543,20 @@ void tcp_close(struct sock *sk, long timeout)
 		DECLARE_WAITQUEUE(wait, current);
 
 		add_wait_queue(sk->sleep, &wait);
-		release_sock(sk);
 
 		while (1) {
 			tsk->state = TASK_INTERRUPTIBLE;
 			if (!closing(sk))
 				break;
+			release_sock(sk);
 			timeout = schedule_timeout(timeout);
+			lock_sock(sk);
 			if (signal_pending(tsk) || !timeout)
 				break;
 		}
 
 		tsk->state = TASK_RUNNING;
 		remove_wait_queue(sk->sleep, &wait);
-		
-		lock_sock(sk);
 	}
 
 	/* Now that the socket is dead, if we are in the FIN_WAIT2 state
@@ -1559,13 +1564,16 @@ void tcp_close(struct sock *sk, long timeout)
          */
 	tcp_check_fin_timer(sk);
 
-	release_sock(sk);
 	sk->dead = 1;
+
+	release_sock(sk);
+	lock_kernel();
 }
 
 /*
  *	Wait for an incoming connection, avoid race
- *	conditions. This must be called with the socket locked.
+ *	conditions. This must be called with the socket locked,
+ *	and without the kernel lock held.
  */
 static struct open_request * wait_for_connect(struct sock * sk,
 					      struct open_request **pprev)
@@ -1578,9 +1586,6 @@ static struct open_request * wait_for_connect(struct sock * sk,
 	 * one process gets woken up, not the 'whole herd'.
 	 * Since we do not 'race & poll' for established sockets
 	 * anymore, the common case will execute the loop only once.
-	 *
-	 * Or rather, it _would_ execute only once if it wasn't for
-	 * some extraneous wakeups that currently happen.
 	 *
 	 * Subtle issue: "add_wait_queue_exclusive()" will be added
 	 * after any current non-exclusive waiters, and we know that
@@ -1620,6 +1625,7 @@ struct sock *tcp_accept(struct sock *sk, int flags)
 	struct sock *newsk = NULL;
 	int error;
 
+	unlock_kernel();
 	lock_sock(sk); 
 
 	/* We need to make sure that this socket is listening,
@@ -1650,16 +1656,17 @@ struct sock *tcp_accept(struct sock *sk, int flags)
 	sk->ack_backlog--; 
 	if(sk->keepopen)
 		tcp_inc_slow_timer(TCP_SLT_KEEPALIVE);
-
 	release_sock(sk);
+	lock_kernel();
 	return newsk;
 
 out:
 	/* sk should be in LISTEN state, thus accept can use sk->err for
-	 * internal purposes without stomping one anyone's feed.
+	 * internal purposes without stomping on anyone's feed.
 	 */ 
 	sk->err = error; 
 	release_sock(sk);
+	lock_kernel();
 	return newsk;
 }
 
@@ -1782,6 +1789,8 @@ extern void __skb_cb_too_small_for_tcp(int, int);
 void __init tcp_init(void)
 {
 	struct sk_buff *skb = NULL;
+	unsigned long goal;
+	int order;
 
 	if(sizeof(struct tcp_skb_cb) > sizeof(skb->cb))
 		__skb_cb_too_small_for_tcp(sizeof(struct tcp_skb_cb),
@@ -1807,4 +1816,37 @@ void __init tcp_init(void)
 						NULL, NULL);
 	if(!tcp_timewait_cachep)
 		panic("tcp_init: Cannot alloc tcp_tw_bucket cache.");
+
+	/* Size and allocate the main established and bind bucket
+	 * hash tables.
+	 *
+	 * The methodology is similar to that of the buffer cache.
+	 */
+	goal = num_physpages >> (20 - PAGE_SHIFT);
+	for(order = 5; (1UL << order) < goal; order++)
+		;
+	do {
+		tcp_ehash_size = (1UL << order) * PAGE_SIZE /
+			sizeof(struct sock *);
+		tcp_ehash = (struct sock **)
+			__get_free_pages(GFP_ATOMIC, order);
+	} while (tcp_ehash == NULL && --order > 4);
+
+	if (!tcp_ehash)
+		panic("Failed to allocate TCP established hash table\n");
+	memset(tcp_ehash, 0, tcp_ehash_size * sizeof(struct sock *));
+
+	do {
+		tcp_bhash_size = (1UL << order) * PAGE_SIZE /
+			sizeof(struct tcp_bind_bucket *);
+		tcp_bhash = (struct tcp_bind_bucket **)
+			__get_free_pages(GFP_ATOMIC, order);
+	} while (tcp_bhash == NULL && --order > 4);
+
+	if (!tcp_bhash)
+		panic("Failed to allocate TCP bind hash table\n");
+	memset(tcp_bhash, 0, tcp_bhash_size * sizeof(struct tcp_bind_bucket *));
+
+	printk("TCP: Hash tables configured (established %d bind %d)\n",
+	       tcp_ehash_size, tcp_bhash_size);
 }

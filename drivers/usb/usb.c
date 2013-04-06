@@ -36,84 +36,124 @@
  * 6		wLength		2	Count		Bytes for data
  */
 
+#include <linux/config.h>
 #include <linux/string.h>
 #include <linux/bitops.h>
 #include <linux/malloc.h>
 
 #include "usb.h"
 
-#ifdef CONFIG_USB_UHCI
-int uhci_init(void);
-#endif
-#ifdef CONFIG_USB_OHCI
-int ohci_init(void);
-#endif
-#ifdef CONFIG_USB_OHCI_HCD
-int ohci_hcd_init(void);
-#endif
-
-int usb_init(void)
-{
-#ifdef CONFIG_USB_UHCI
-	uhci_init();
-#endif
-#ifdef CONFIG_USB_OHCI
-	ohci_init();
-#endif
-#ifdef CONFIG_USB_OHCI_HCD
-	ohci_hcd_init(); 
-#endif
-#ifdef CONFIG_USB_MOUSE
-	usb_mouse_init();
-#endif
-#ifdef CONFIG_USB_KBD
-	usb_kbd_init();
-#endif
-#ifdef CONFIG_USB_AUDIO
-	usb_audio_init();
-#endif
-#ifdef CONFIG_USB_ACM
-	usb_acm_init();
-#endif
-#ifdef CONFIG_USB_CPIA
-	usb_cpia_init();
-#endif
-
-	usb_hub_init();
-	return 0;
-}
-
-void cleanup_drivers(void)
-{
-	hub_cleanup();
-#ifdef CONFIG_USB_MOUSE
-	usb_mouse_cleanup();
-#endif
-}
-
 /*
  * We have a per-interface "registered driver" list.
  */
 static LIST_HEAD(usb_driver_list);
+static LIST_HEAD(usb_bus_list);
 
 int usb_register(struct usb_driver *new_driver)
 {
+	struct list_head *tmp = usb_bus_list.next;
 	/* Add it to the list of known drivers */
 	list_add(&new_driver->driver_list, &usb_driver_list);
 
 	/*
-	 * We should go through all existing devices, and see if any of
-	 * them would be acceptable to the new driver.. Let's do that
-	 * in version 2.0.
+         * We go through all existing devices, and see if any of them would
+         * be acceptable to the new driver.. This is done using a depth-first
+         * search for devices without a registered driver already, then 
+	 * running 'probe' with each of the drivers registered on every one 
+	 * of these.
 	 */
+        while (tmp!= &usb_bus_list) {
+		struct usb_bus * bus = list_entry(tmp,struct
+			usb_bus,bus_list);
+	        tmp=tmp->next;  
+		usb_check_support(bus->root_hub);
+        }
 	return 0;
 }
 
 void usb_deregister(struct usb_driver *driver)
 {
+      struct list_head *tmp = usb_bus_list.next;
+      /*first we remove the driver, to be sure it doesn't get used by
+       *another thread while we are stepping through removing entries
+       */
 	list_del(&driver->driver_list);
+      printk("usbcore: deregistering driver\n");
+      while (tmp!= &usb_bus_list) {
+              struct usb_bus * bus = list_entry(tmp,struct 
+            		usb_bus,bus_list);
+              tmp=tmp->next;
+              usb_driver_purge(driver,bus->root_hub);
+      }
 }
 
+/* This function is part of a depth-first search down the device tree,
+ * removing any instances of a device driver.
+ */
+void usb_driver_purge(struct usb_driver *driver,struct usb_device *dev)
+{
+       int i;
+       if (dev==NULL){
+               printk("null device being passed in!!!\n");
+               return;
+       }
+       for (i=0;i<USB_MAXCHILDREN;i++)
+               if (dev->children[i]!=NULL)
+                       usb_driver_purge(driver,dev->children[i]);
+       /*now we check this device*/
+       if(dev->driver==driver) {
+               /*
+                * Note: this is not the correct way to do this, this
+                * uninitializes and reinitializes EVERY driver
+                */
+               printk("disconnecting driverless device\n");
+               dev->driver->disconnect(dev);
+               dev->driver=NULL;
+               /* This will go back through the list looking for a driver
+                * that can handle the device
+		*/
+               usb_device_descriptor(dev);
+      }
+}
+
+/*
+ * New functions for (de)registering a controller
+ */
+void usb_register_bus(struct usb_bus *new_bus)
+{
+      /* Add it to the list of buses */
+      list_add(&new_bus->bus_list, &usb_bus_list);
+      printk("New bus registered");
+}
+
+void usb_deregister_bus(struct usb_bus *bus)
+{
+        /* NOTE: make sure that all the devices are removed by the
+         * controller code, as well as having it call this when cleaning
+	 * itself up
+         */
+	list_del(&bus->bus_list);
+}
+
+/*
+ * This function is for doing a depth-first search for devices which
+ * have support, for dynamic loading of driver modules.
+ */
+void usb_check_support(struct usb_device *dev)
+{
+      int i;
+      if (dev==NULL)
+      {
+              printk("null device being passed in!!!\n");
+              return;
+      }
+      for (i=0;i<USB_MAXCHILDREN;i++)
+              if ((dev->children[i]!=NULL)&&
+                      (dev->children[i]->driver==NULL))
+                      usb_check_support(dev->children[i]);
+      /*now we check this device*/
+      usb_device_descriptor(dev);
+}
 /*
  * This entrypoint gets called for each new device.
  *
@@ -121,25 +161,24 @@ void usb_deregister(struct usb_driver *driver)
  * looking for one that will accept this device as
  * his..
  */
-void usb_device_descriptor(struct usb_device *dev)
+int usb_device_descriptor(struct usb_device *dev)
 {
 	struct list_head *tmp = usb_driver_list.next;
 
 	while (tmp != &usb_driver_list) {
-		struct usb_driver *driver = list_entry(tmp, struct usb_driver, driver_list);
+		struct usb_driver *driver = list_entry(tmp, struct usb_driver,
+						       driver_list);
 		tmp = tmp->next;
 		if (driver->probe(dev))
 			continue;
 		dev->driver = driver;
-		return;
+		return 1;
 	}
-
 	/*
 	 * Ok, no driver accepted the device, so show the info
 	 * for debugging..
 	 */
-	printk("Unknown new USB device:\n");
-	usb_show_device(dev);
+	return 0;
 }
 
 /*
@@ -370,6 +409,7 @@ void usb_destroy_configuration(struct usb_device *dev)
 	
 	if(dev->config==NULL)
 		return;
+
 	for(c=0;c<dev->descriptor.bNumConfigurations;c++)
 	{
 		cf=&dev->config[c];
@@ -385,6 +425,11 @@ void usb_destroy_configuration(struct usb_device *dev)
 		kfree(cf->interface);
 	}
 	kfree(dev->config);
+
+	if (dev->stringindex)
+		kfree(dev->stringindex);
+	if (dev->stringtable)
+		kfree(dev->stringtable);
 }
 			
 void usb_init_root_hub(struct usb_device *dev)
@@ -462,6 +507,8 @@ int usb_set_address(struct usb_device *dev)
 int usb_get_descriptor(struct usb_device *dev, unsigned char type, unsigned char index, void *buf, int size)
 {
 	devrequest dr;
+	int i = 5;
+	int result;
 
 	dr.requesttype = 0x80;
 	dr.request = USB_REQ_GET_DESCRIPTOR;
@@ -469,7 +516,30 @@ int usb_get_descriptor(struct usb_device *dev, unsigned char type, unsigned char
 	dr.index = 0;
 	dr.length = size;
 
-	return dev->bus->op->control_msg(dev, usb_rcvctrlpipe(dev,0), &dr, buf, size);
+	while (i--) {
+		if (!(result = dev->bus->op->control_msg(dev, usb_rcvctrlpipe(dev,0), &dr, buf, size)))
+			break;
+	}
+	return result;
+}
+
+int usb_get_string(struct usb_device *dev, unsigned short langid, unsigned char index, void *buf, int size)
+{
+	devrequest dr;
+	int i = 5;
+	int result;
+
+	dr.requesttype = 0x80;
+	dr.request = USB_REQ_GET_DESCRIPTOR;
+	dr.value = (USB_DT_STRING << 8) + index;
+	dr.index = langid;
+	dr.length = size;
+
+	while (i--) {
+		if (!(result = dev->bus->op->control_msg(dev, usb_rcvctrlpipe(dev,0), &dr, buf, size)))
+			break;
+	}
+	return result;
 }
 
 int usb_get_device_descriptor(struct usb_device *dev)
@@ -593,6 +663,24 @@ int usb_set_idle(struct usb_device *dev,  int duration, int report_id)
 	return 0;
 }
 
+static void usb_set_maxpacket(struct usb_device *dev)
+{
+	struct usb_endpoint_descriptor *ep;
+	struct usb_interface_descriptor *ip = dev->actconfig->interface;
+	int i;
+
+	for (i=0; i<dev->actconfig->bNumInterfaces; i++) {
+		if (dev->actconfig->interface[i].bInterfaceNumber == dev->ifnum) {
+			ip = &dev->actconfig->interface[i];
+			break;
+		}
+	}
+	ep = ip->endpoint;
+	for (i=0; i<ip->bNumEndpoints; i++) {
+		dev->epmaxpacket[ep[i].bEndpointAddress & 0x0f] = ep[i].wMaxPacketSize;
+	}
+}
+
 int usb_set_interface(struct usb_device *dev, int interface, int alternate)
 {
 	devrequest dr;
@@ -606,6 +694,8 @@ int usb_set_interface(struct usb_device *dev, int interface, int alternate)
 	if (dev->bus->op->control_msg(dev, usb_sndctrlpipe(dev, 0), &dr, NULL, 0))
 		return -1;
 
+	dev->ifnum = interface;
+	usb_set_maxpacket(dev);
 	return 0;
 }
 
@@ -613,16 +703,31 @@ int usb_set_interface(struct usb_device *dev, int interface, int alternate)
 int usb_set_configuration(struct usb_device *dev, int configuration)
 {
 	devrequest dr;
-
+	int i;
+	struct usb_config_descriptor *cp = NULL;
+	
 	dr.requesttype = 0;
 	dr.request = USB_REQ_SET_CONFIGURATION;
 	dr.value = configuration;
 	dr.index = 0;
 	dr.length = 0;
 
+	for (i=0; i<dev->descriptor.bNumConfigurations; i++) {
+		if (dev->config[i].bConfigurationValue == configuration) {
+			cp = &dev->config[i];
+			break;
+		}
+	}
+	if (!cp) {
+		printk(KERN_INFO "usb: selecting invalid configuration %d\n", configuration);
+		return -1;
+	}
 	if (dev->bus->op->control_msg(dev, usb_sndctrlpipe(dev, 0), &dr, NULL, 0))
 		return -1;
 
+	dev->actconfig = cp;
+	dev->toggle = 0;
+	usb_set_maxpacket(dev);
 	return 0;
 }
 
@@ -671,6 +776,61 @@ int usb_get_configuration(struct usb_device *dev)
 	return usb_parse_configuration(dev, buffer, bufptr - buffer);
 }
 
+int usb_get_stringtable(struct usb_device *dev)
+{
+	int i;
+	int maxindex;
+	int langid;
+	unsigned char buffer[256];
+	int totalchars;
+	struct usb_string_descriptor *sd = (struct usb_string_descriptor *)buffer;
+	char *string;
+	__u8 bLengths[USB_MAXSTRINGS+1];
+	int j;
+
+	dev->maxstring = 0;
+	if(usb_get_string(dev, 0, 0, buffer, 2) ||
+	   usb_get_string(dev, 0, 0, buffer, sd->bLength))
+		return -1;
+	/* we are going to assume that the first ID is good */
+	langid = sd->wData[0];
+
+	/* whip through and find total length and max index */
+	for (maxindex = 1, totalchars = 0; maxindex<=USB_MAXSTRINGS; maxindex++) {
+		if(usb_get_string(dev, langid, maxindex, buffer, 2))
+			break;
+		totalchars += (sd->bLength - 2)/2 + 1;
+		bLengths[maxindex] = sd->bLength;
+	}
+	if (--maxindex <= 0)
+		return -1;
+
+	/* get space for strings and index */
+	dev->stringindex = kmalloc(sizeof(char *)*maxindex, GFP_KERNEL);
+	if (!dev->stringindex)
+		return -1;
+	dev->stringtable = kmalloc(totalchars, GFP_KERNEL);
+	if (!dev->stringtable) {
+		kfree(dev->stringindex);
+		dev->stringindex = NULL;
+		return -1;
+	}
+
+	/* fill them in */
+	memset(dev->stringindex, 0, sizeof(char *)*maxindex);
+	for (i=1, string = dev->stringtable; i <= maxindex; i++) {
+		if (usb_get_string(dev, langid, i, buffer, bLengths[i]))
+			continue;
+		dev->stringindex[i] = string;
+		for (j=0; j < (bLengths[i] - 2)/2; j++) {
+			*string++ =  sd->wData[j];
+		}
+		*string++ = '\0';
+	}
+	dev->maxstring = maxindex;
+	return 0;
+}
+
 /*
  * By the time we get here, the device has gotten a new device ID
  * and is in the default state. We need to identify the thing and
@@ -684,10 +844,12 @@ void usb_new_device(struct usb_device *dev)
 		dev->devnum);
 
 	dev->maxpacketsize = 0;		/* Default to 8 byte max packet size */
+        dev->epmaxpacket[0] = 8;
 
 	addr = dev->devnum;
 	dev->devnum = 0;
 
+#if 1
 	/* Slow devices */
 	for (i = 0; i < 5; i++) {
 		if (!usb_get_descriptor(dev, USB_DT_DEVICE, 0, &dev->descriptor, 8))
@@ -700,10 +862,12 @@ void usb_new_device(struct usb_device *dev)
 		printk("giving up\n");
 		return;
 	}
+#endif
 
 #if 0
 	printk("maxpacketsize: %d\n", dev->descriptor.bMaxPacketSize0);
 #endif
+	dev->epmaxpacket[0] = dev->descriptor.bMaxPacketSize0;
 	switch (dev->descriptor.bMaxPacketSize0) {
 		case 8: dev->maxpacketsize = 0; break;
 		case 16: dev->maxpacketsize = 1; break;
@@ -716,11 +880,15 @@ void usb_new_device(struct usb_device *dev)
 
 	dev->devnum = addr;
 
+#if 1
 	if (usb_set_address(dev)) {
 		printk("Unable to set address\n");
 		/* FIXME: We should disable the port */
 		return;
 	}
+#else
+	usb_set_address(dev);
+#endif
 
 	wait_ms(10);	/* Let the SET_ADDRESS settle */
 
@@ -734,12 +902,30 @@ void usb_new_device(struct usb_device *dev)
 		return;
 	}
 
+	usb_get_stringtable(dev);
+
+	dev->actconfig = dev->config;
+	dev->ifnum = 0;
+	usb_set_maxpacket(dev);
+
+	usb_show_string(dev, "Manufacturer", dev->descriptor.iManufacturer);
+	usb_show_string(dev, "Product", dev->descriptor.iProduct);
+	usb_show_string(dev, "SerialNumber", dev->descriptor.iSerialNumber);
+
 #if 0
 	printk("Vendor: %X\n", dev->descriptor.idVendor);
 	printk("Product: %X\n", dev->descriptor.idProduct);
 #endif
 
-	usb_device_descriptor(dev);
+	if (usb_device_descriptor(dev)==0)
+	{
+		/*
+		 * Ok, no driver accepted the device, so show the info for
+		 * debugging
+		 */
+		printk ("Unknown new USB device:\n");
+		usb_show_device(dev);
+	}
 }
 
 int usb_request_irq(struct usb_device *dev, unsigned int pipe, usb_device_irq handler, int period, void *dev_id)

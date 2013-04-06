@@ -129,8 +129,9 @@ const char *if_port_text[] = {
  *		86DD	IPv6
  */
 
-struct packet_type *ptype_base[16];		/* 16 way hashed list */
-struct packet_type *ptype_all = NULL;		/* Taps */
+static struct packet_type *ptype_base[16];		/* 16 way hashed list */
+static struct packet_type *ptype_all = NULL;		/* Taps */
+static rwlock_t ptype_lock = RW_LOCK_UNLOCKED;
 
 /*
  *	Device list lock. Setting it provides that interface
@@ -199,6 +200,7 @@ void dev_add_pack(struct packet_type *pt)
 		dev_clear_fastroute(pt->dev);
 	}
 #endif
+	write_lock_bh(&ptype_lock);
 	if(pt->type==htons(ETH_P_ALL))
 	{
 		netdev_nit++;
@@ -211,6 +213,7 @@ void dev_add_pack(struct packet_type *pt)
 		pt->next = ptype_base[hash];
 		ptype_base[hash] = pt;
 	}
+	write_unlock_bh(&ptype_lock);
 }
 
 
@@ -228,19 +231,21 @@ void dev_remove_pack(struct packet_type *pt)
 	}
 	else
 		pt1=&ptype_base[ntohs(pt->type)&15];
+	write_lock_bh(&ptype_lock);
 	for(; (*pt1)!=NULL; pt1=&((*pt1)->next))
 	{
 		if(pt==(*pt1))
 		{
 			*pt1=pt->next;
-			synchronize_bh();
 #ifdef CONFIG_NET_FASTROUTE
 			if (pt->data)
 				netdev_fastroute_obstacles--;
 #endif
+			write_unlock_bh(&ptype_lock);
 			return;
 		}
 	}
+	write_unlock_bh(&ptype_lock);
 	printk(KERN_WARNING "dev_remove_pack: %p not found.\n", pt);
 }
 
@@ -258,37 +263,43 @@ struct device *dev_get(const char *name)
 {
 	struct device *dev;
 
-	for (dev = dev_base; dev != NULL; dev = dev->next) 
-	{
+	read_lock_bh(&dev_base_lock);
+	for (dev = dev_base; dev != NULL; dev = dev->next) {
 		if (strcmp(dev->name, name) == 0)
-			return(dev);
+			goto out;
 	}
-	return NULL;
+out:
+	read_unlock_bh(&dev_base_lock);
+	return dev;
 }
 
 struct device * dev_get_by_index(int ifindex)
 {
 	struct device *dev;
 
-	for (dev = dev_base; dev != NULL; dev = dev->next) 
-	{
+	read_lock_bh(&dev_base_lock);
+	for (dev = dev_base; dev != NULL; dev = dev->next) {
 		if (dev->ifindex == ifindex)
-			return(dev);
+			goto out;
 	}
-	return NULL;
+out:
+	read_unlock_bh(&dev_base_lock);
+	return dev;
 }
 
 struct device *dev_getbyhwaddr(unsigned short type, char *ha)
 {
 	struct device *dev;
 
-	for (dev = dev_base; dev != NULL; dev = dev->next) 
-	{
+	read_lock_bh(&dev_base_lock);
+	for (dev = dev_base; dev != NULL; dev = dev->next) {
 		if (dev->type == type &&
 		    memcmp(dev->dev_addr, ha, dev->addr_len) == 0)
-			return(dev);
+			goto out;
 	}
-	return(NULL);
+out:
+	read_unlock_bh(&dev_base_lock);
+	return dev;
 }
 
 /*
@@ -376,6 +387,9 @@ int dev_open(struct device *dev)
 	if (dev->flags&IFF_UP)
 		return 0;
 
+	/* Setup the lock before we open the faucet. */
+	spin_lock_init(&dev->xmit_lock);
+
 	/*
 	 *	Call device private open method
 	 */
@@ -438,8 +452,13 @@ void dev_clear_fastroute(struct device *dev)
 	if (dev) {
 		dev_do_clear_fastroute(dev);
 	} else {
-		for (dev = dev_base; dev; dev = dev->next)
+		read_lock_bh(&dev_base_lock);
+		for (dev = dev_base; dev; dev = dev->next) {
+			read_unlock_bh(&dev_base_lock);
 			dev_do_clear_fastroute(dev);
+			read_lock_bh(&dev_base_lock);
+		}
+		read_unlock_bh(&dev_base_lock);
 	}
 }
 #endif
@@ -512,6 +531,7 @@ void dev_queue_xmit_nit(struct sk_buff *skb, struct device *dev)
 	struct packet_type *ptype;
 	get_fast_time(&skb->stamp);
 
+	read_lock(&ptype_lock);
 	for (ptype = ptype_all; ptype!=NULL; ptype = ptype->next) 
 	{
 		/* Never send packets back to the socket
@@ -552,6 +572,7 @@ void dev_queue_xmit_nit(struct sk_buff *skb, struct device *dev)
 			ptype->func(skb2, skb->dev, ptype);
 		}
 	}
+	read_unlock(&ptype_lock);
 }
 
 /*
@@ -583,12 +604,12 @@ int dev_queue_xmit(struct sk_buff *skb)
 	NET_PROFILE_ENTER(dev_queue_xmit);
 #endif
 
-	start_bh_atomic();
+	spin_lock_bh(&dev->xmit_lock);
 	q = dev->qdisc;
 	if (q->enqueue) {
 		q->enqueue(skb, q);
 		qdisc_wakeup(dev);
-		end_bh_atomic();
+		spin_unlock_bh(&dev->xmit_lock);
 
 #ifdef CONFIG_NET_PROFILE
 	        NET_PROFILE_LEAVE(dev_queue_xmit);
@@ -610,7 +631,7 @@ int dev_queue_xmit(struct sk_buff *skb)
 		if (netdev_nit) 
 			dev_queue_xmit_nit(skb,dev);
 		if (dev->hard_start_xmit(skb, dev) == 0) {
-			end_bh_atomic();
+			spin_unlock_bh(&dev->xmit_lock);
 
 #ifdef CONFIG_NET_PROFILE
 			NET_PROFILE_LEAVE(dev_queue_xmit);
@@ -622,7 +643,7 @@ int dev_queue_xmit(struct sk_buff *skb)
 		if (net_ratelimit())
 			printk(KERN_DEBUG "Virtual device %s asks to queue packet!\n", dev->name);
 	}
-	end_bh_atomic();
+	spin_unlock_bh(&dev->xmit_lock);
 
 	kfree_skb(skb);
 
@@ -732,9 +753,9 @@ static void dev_clear_backlog(struct device *dev)
 			curr=curr->next;
 			if ( curr->prev->dev == dev ) {
 				prev = curr->prev;
-				spin_lock_irqsave(&skb_queue_lock, flags);
+				spin_lock_irqsave(&backlog.lock, flags);
 				__skb_unlink(prev, &backlog);
-				spin_unlock_irqrestore(&skb_queue_lock, flags);
+				spin_unlock_irqrestore(&backlog.lock, flags);
 				kfree_skb(prev);
 			}
 		}
@@ -939,6 +960,7 @@ void net_bh(void)
 		 */
 
 		pt_prev = NULL;
+		read_lock(&ptype_lock);
 		for (ptype = ptype_all; ptype!=NULL; ptype=ptype->next)
 		{
 			if (!ptype->dev || ptype->dev == skb->dev) {
@@ -992,6 +1014,7 @@ void net_bh(void)
 		else {
 			kfree_skb(skb);
 		}
+		read_unlock(&ptype_lock);
   	}	/* End of queue loop */
   	
   	/*
@@ -1113,7 +1136,9 @@ static int dev_ifconf(char *arg)
 	 */
 
 	total = 0;
+	read_lock_bh(&dev_base_lock);
 	for (dev = dev_base; dev != NULL; dev = dev->next) {
+		read_unlock_bh(&dev_base_lock);
 		for (i=0; i<NPROTO; i++) {
 			if (gifconf_list[i]) {
 				int done;
@@ -1122,12 +1147,15 @@ static int dev_ifconf(char *arg)
 				} else {
 					done = gifconf_list[i](dev, pos+total, len-total);
 				}
-				if (done<0)
+				if (done<0) {
 					return -EFAULT;
+				}
 				total += done;
 			}
 		}
+		read_lock_bh(&dev_base_lock);
   	}
+	read_unlock_bh(&dev_base_lock);
 
 	/*
 	 *	All done.  Write the updated control block back to the caller. 
@@ -1199,20 +1227,20 @@ int dev_get_info(char *buffer, char **start, off_t offset, int length, int dummy
 	len+=size;
 	
 
-	for (dev = dev_base; dev != NULL; dev = dev->next) 
-	{
+	read_lock_bh(&dev_base_lock);
+	for (dev = dev_base; dev != NULL; dev = dev->next) {
 		size = sprintf_stats(buffer+len, dev);
 		len+=size;
 		pos=begin+len;
 				
-		if(pos<offset)
-		{
+		if(pos<offset) {
 			len=0;
 			begin=pos;
 		}
 		if(pos>offset+length)
 			break;
 	}
+	read_unlock_bh(&dev_base_lock);
 	
 	*start=buffer+(offset-begin);	/* Start of wanted data */
 	len-=(offset-begin);		/* Start slop */
@@ -1314,20 +1342,20 @@ int dev_get_wireless_info(char * buffer, char **start, off_t offset,
 	pos+=size;
 	len+=size;
 
-	for(dev = dev_base; dev != NULL; dev = dev->next) 
-	{
+	read_lock_bh(&dev_base_lock);
+	for(dev = dev_base; dev != NULL; dev = dev->next) {
 		size = sprintf_wireless_stats(buffer+len, dev);
 		len+=size;
 		pos=begin+len;
 
-		if(pos < offset)
-		{
+		if(pos < offset) {
 			len=0;
 			begin=pos;
 		}
 		if(pos > offset + length)
 			break;
 	}
+	read_unlock_bh(&dev_base_lock);
 
 	*start = buffer + (offset - begin);	/* Start of wanted data */
 	len -= (offset - begin);		/* Start slop */
@@ -1751,12 +1779,16 @@ int register_netdevice(struct device *dev)
 		printk(KERN_INFO "early initialization of device %s is deferred\n", dev->name);
 
 		/* Check for existence, and append to tail of chain */
+		write_lock_bh(&dev_base_lock);
 		for (dp=&dev_base; (d=*dp) != NULL; dp=&d->next) {
-			if (d == dev || strcmp(d->name, dev->name) == 0)
+			if (d == dev || strcmp(d->name, dev->name) == 0) {
+				write_unlock_bh(&dev_base_lock);
 				return -EEXIST;
+			}
 		}
 		dev->next = NULL;
 		*dp = dev;
+		write_unlock_bh(&dev_base_lock);
 		return 0;
 	}
 
@@ -1767,16 +1799,22 @@ int register_netdevice(struct device *dev)
 		return -EIO;
 
 	/* Check for existence, and append to tail of chain */
+	write_lock_bh(&dev_base_lock);
 	for (dp=&dev_base; (d=*dp) != NULL; dp=&d->next) {
-		if (d == dev || strcmp(d->name, dev->name) == 0)
+		if (d == dev || strcmp(d->name, dev->name) == 0) {
+			write_unlock_bh(&dev_base_lock);
 			return -EEXIST;
+		}
 	}
 	dev->next = NULL;
 	dev_init_scheduler(dev);
+	*dp = dev;
+	write_unlock_bh(&dev_base_lock);
+
+	dev->ifindex = -1;
 	dev->ifindex = dev_new_index();
 	if (dev->iflink == -1)
 		dev->iflink = dev->ifindex;
-	*dp = dev;
 
 	/* Notify protocols, that a new device appeared. */
 	notifier_call_chain(&netdev_chain, NETDEV_REGISTER, dev);
@@ -1820,17 +1858,19 @@ int unregister_netdevice(struct device *dev)
 	}
 
 	/* And unlink it from device chain. */
+	write_lock_bh(&dev_base_lock);
 	for (dp = &dev_base; (d=*dp) != NULL; dp=&d->next) {
 		if (d == dev) {
 			*dp = d->next;
-			synchronize_bh();
 			d->next = NULL;
+			write_unlock_bh(&dev_base_lock);
 
 			if (dev->destructor)
 				dev->destructor(dev);
 			return 0;
 		}
 	}
+	write_unlock_bh(&dev_base_lock);
 	return -ENODEV;
 }
 
@@ -1976,26 +2016,25 @@ __initfunc(int net_dev_init(void))
 	 */
 
 	dp = &dev_base;
-	while ((dev = *dp) != NULL)
-	{
+	write_lock_bh(&dev_base_lock);
+	while ((dev = *dp) != NULL) {
 		dev->iflink = -1;
-		if (dev->init && dev->init(dev)) 
-		{
+		if (dev->init && dev->init(dev)) {
 			/*
 			 *	It failed to come up. Unhook it.
 			 */
 			*dp = dev->next;
-			synchronize_bh();
-		} 
-		else
-		{
+		} else {
 			dp = &dev->next;
+			write_unlock_bh(&dev_base_lock);
 			dev->ifindex = dev_new_index();
+			write_lock_bh(&dev_base_lock);
 			if (dev->iflink == -1)
 				dev->iflink = dev->ifindex;
 			dev_init_scheduler(dev);
 		}
 	}
+	write_unlock_bh(&dev_base_lock);
 
 #ifdef CONFIG_PROC_FS
 	proc_net_register(&proc_net_dev);

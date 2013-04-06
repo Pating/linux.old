@@ -5,7 +5,7 @@
  *	Authors:
  *	Pedro Roque		<roque@di.fc.ul.pt>	
  *
- *	$Id: mcast.c,v 1.19 1999/03/25 10:04:50 davem Exp $
+ *	$Id: mcast.c,v 1.20 1999/05/27 00:38:23 davem Exp $
  *
  *	Based on linux/ipv4/igmp.c and linux/ipv4/ip_sockglue.c 
  *
@@ -615,6 +615,7 @@ static int igmp6_read_proc(char *buffer, char **start, off_t offset,
 	int len=0;
 	struct device *dev;
 	
+	read_lock_bh(&dev_base_lock);
 	for (dev = dev_base; dev; dev = dev->next) {
 		struct inet6_dev *idev;
 
@@ -647,6 +648,8 @@ static int igmp6_read_proc(char *buffer, char **start, off_t offset,
 	*eof = 1;
 
 done:
+	read_unlock_bh(&dev_base_lock);
+
 	*start=buffer+(offset-begin);
 	len-=(offset-begin);
 	if(len>length)

@@ -40,6 +40,13 @@ extern atomic_t global_bh_count;
 
 extern void synchronize_bh(void);
 
+/*
+ * This is suboptimal. We only need to disable bh's locally
+ * on this CPU...
+ */
+#define local_bh_disable()	atomic_inc(&global_bh_lock)
+#define local_bh_enable()	atomic_dec(&global_bh_lock)
+
 static inline void start_bh_atomic(void)
 {
 	atomic_inc(&global_bh_lock);
@@ -83,6 +90,9 @@ extern inline void end_bh_atomic(void)
 	barrier();
 	local_bh_count[smp_processor_id()]--;
 }
+
+#define local_bh_disable()	(local_bh_count[smp_processor_id()]++)
+#define local_bh_enable()	(local_bh_count[smp_processor_id()]--)
 
 /* These are for the irq's testing the lock */
 #define softirq_trylock(cpu)	(local_bh_count[cpu] ? 0 : (local_bh_count[cpu]=1))
