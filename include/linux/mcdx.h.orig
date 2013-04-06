@@ -1,7 +1,7 @@
 /*
  * Definitions for the Mitsumi CDROM interface
- * Copyright (C) 1995 1996 Heiko Schlittermann <heiko@lotte.sax.de>
- * VERSION: @VERSION@
+ * (H) Hackright 1996 by Marcin Dalecki <dalecki@namu03.gwdg.de>
+ * VERSION: 2.5
  * 
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
