@@ -7878,22 +7878,26 @@ CONFIG_USB_UHCI
   The Universal Host Controller Interface is a standard by Intel for
   accessing the USB hardware in the PC (which is also called the USB
   host controller). If your USB host controller conforms to this
-  standard, say Y. All recent boards with Intel PCI chipsets conform
-  to this standard. If unsure, say Y.
+  standard, say Y. All recent boards with Intel PCI chipsets (like
+  intel 430TX, 440FX, 440LX, 440BX, i810, i820) conform to this standard.
+  Also all VIA PCI chipsets (like VIA VP2, VP3, MVP3, Apollo Pro, Apollo
+  Pro II or Apollo Pro 133).
+  If unsure, say Y.
 
   This code is also available as a module ( = code which can be
   inserted in and removed from the running kernel whenever you want).
   The module will be called usb-uhci.o. If you want to compile it as a
   module, say M here and read Documentation/modules.txt.
   
-OHCI-HCD (Compaq, iMacs, OPTi, SiS, and others) support?
+OHCI-HCD (Compaq, iMacs, OPTi, SiS, ALi, and others) support?
 CONFIG_USB_OHCI_HCD
   The Open Host Controller Interface is a standard by
   Compaq/Microsoft/National for accessing the USB PC hardware (also
   called USB host controller). If your USB host controller conforms
   to this standard, say Y. The USB host controllers on most
-  non-Intel architectures and on several x86 compatibles with
-  non-Intel chipsets conform to this standard.
+  non-Intel architectures and on several x86 compatibles  with non-Intel
+  chipsets - like SiS (aktual 610, 610 and so on) or ALi (ALi IV, ALi V,
+  Aladin Pro..) - conform to this standard.
 
   You may want to read the file drivers/usb/README.ohci_hcd.
 
@@ -7902,15 +7906,62 @@ CONFIG_USB_OHCI_HCD
   The module will be called usb-ohci-hcd.o. If you want to compile it
   as a module, say M here and read Documentation/modules.txt.
 
-USB mouse support
-CONFIG_USB_MOUSE
-  Say Y here if you want to connect a USB mouse to your computer's USB
-  port.
+USB Human Interface Device (HID) support
+CONFIG_USB_HID
+  Say Y here if you want to connect a keyboard, mouse, joystick,
+  graphic tablet, UPS or any other HID based devices to your computer
+  via USB.
 
-  This code is also available as a module ( = code which can be
-  inserted in and removed from the running kernel whenever you want).
-  The module will be called mouse.o. If you want to compile it as a
-  module, say M here and read Documentation/modules.txt.
+USB HIDBP Keyboard support
+CONFIG_USB_KBD
+  Say Y here if you don't want to use the generic HID driver for your
+  USB keyboard and prefer to use the keyboard in its limited Boot
+  Protocol mode. This driver is much smaller than the HID one.
+
+USB HIDBP Mouse support
+CONFIG_USB_MOUSE
+  Say Y here if you don't want to use the generic HID driver for your
+  USB mouse and prefer to use the mouse in its limited Boot Protocol
+  mode. This driver is much smaller than the HID one.
+
+Keyboard support
+CONFIG_INPUT_KEYBDEV
+  Say Y here if you want your USB HID keyboard to be able to serve as
+  a system keyboard.
+
+Mouse support
+CONFIG_INPUT_MOUSEDEV
+  Say Y here if you want your USB HID mouse to be accessible as
+  misc devices 32+ under /dev/, as an emulated PS/2 mouse.
+
+Mix all mice into one device
+CONFIG_INPUT_MOUSEDEV_MIX
+  Say Y here if you want input from all your USB HID mice to be mixed
+  into one misc device. If you say N, you'll have a separate
+  device for each your USB mouse.
+
+Joystick support
+CONFIG_INPUT_JOYDEV
+  Say Y here if you want your USB HID joystick or gamepad to be
+  accessible as /dev/js device. You can't use a normal joystick
+  if you select this.
+
+Event interface support
+CONFIG_INPUT_EVDEV
+  Say Y here if you want your USB HID device events be accessible
+  under /dev/inputX (misc 64+) in a generic way.
+  This is the future ...
+
+USB HID debug output
+CONFIG_USB_HID_DEBUG
+  Say Y here if you want to see what the HID driver is doing,
+  perhaps it's doing something wrong with your device.
+
+USB HID lots of debug output
+CONFIG_USB_HID_DEBUG_LOTS
+  Say Y here if you don't fear to read all the HID dumps the
+  HID driver will generate when you switch this on. Really LOTS
+  of debug output.
 
 USB scanner support
 CONFIG_USB_SCANNER
@@ -7922,16 +7973,6 @@ CONFIG_USB_SCANNER
   inserted in and removed from the running kernel whenever you want).
   The module will be called hp_scanner.o. If you want to compile it as
   a module, say M here and read Documentation/modules.txt.
-
-USB keyboard support
-CONFIG_USB_KBD
-  Say Y here if you want to connect a USB keyboard to your computer's
-  USB port.
-
-  This code is also available as a module ( = code which can be
-  inserted in and removed from the running kernel whenever you want).
-  The module will be called usb-keyboard.o. If you want to compile it
-  as a module, say M here and read Documentation/modules.txt.
 
 USB audio parsing support
 CONFIG_USB_AUDIO
@@ -7957,9 +7998,9 @@ CONFIG_USB_ACM
 USB serial converter support
 CONFIG_USB_SERIAL
   Say Y here if you want to connect a Connect Tech WhiteHEAT 
-  multi-port USB to serial converter, or a Belkin, Peracom, or eTek
-  single port USB to serial converter.
-  
+  multi-port USB to serial converter; a Belkin, Peracom, or eTek
+  single port USB to serial converter; or a Handspring Visor.
+
   This code is also available as a module ( = code which can be
   inserted in and removed from the running kernel whenever you want).
   The module will be called usb-serial.o. If you want to compile it 
@@ -7983,6 +8024,20 @@ CONFIG_USB_CPIA
   This code is also available as a module ( = code which can be
   inserted in and removed from the running kernel whenever you want).
   The module will be called cpia.o. If you want to compile it as a
+  module, say M here and read Documentation/modules.txt.
+
+USB OV511 Camera support
+CONFIG_USB_OV511
+  Say Y here if you want to connect this type of camera to your
+  computer's USB port. See drivers/usb/README.ov511 for more
+  information and for a list of supported cameras.
+  
+  NOTE: This code is experimental and you will not get video with it
+  yet.
+
+  This code is also available as a module ( = code which can be
+  inserted in and removed from the running kernel whenever you want).
+  The module will be called ov511.o. If you want to compile it as a
   module, say M here and read Documentation/modules.txt.
 
 USB Kodak DC-2xx Camera support
@@ -12621,6 +12676,25 @@ CONFIG_BLK_CPQ_DA
    boards supported by this driver, and for further information 
    on the use of this driver. 
 
+QuickNet Internet LineJack/PhoneJack support
+CONFIG_PHONE_IXJ
+  Say M if you have a telephony card manufactured by Quicknet
+  Technologies, Inc.  These include the Internet PhoneJACK and
+  Internet LineJACK Telephony Cards.
+
+  For the ISA versions of these products, you can configure the
+  cards using the isapnp tools (pnpdump/isapnp) or you can use the
+  isapnp support.  Please read:
+
+  /usr/src/linux/Documentation/telephony/ixj.txt.
+
+  For more information on these cards, see Quicknet's website at:
+  http://www.quicknet.net/
+
+  If you do not have any Quicknet telephony cards, you can safely
+  ignore this option.
+ 
+
 #
 # ARM options
 #
@@ -13474,4 +13548,4 @@ CONFIG_I2C_CHARDEV
 # LocalWords:  adbmouse DRI DRM dlabs GMX PLCs Applicom fieldbus applicom int
 # LocalWords:  VWSND eg ESSSOLO CFU CFNR scribed eiconctrl eicon hylafax KFPU
 # LocalWords:  EXTRAPREC fpu mainboards KHTTPD kHTTPd khttpd Xcelerator
-# LocalWords:  LOGIBUSMOUSE
+# LocalWords:  LOGIBUSMOUSE OV511 ov511

@@ -225,6 +225,13 @@ EXPORT_SYMBOL(page_readlink);
 EXPORT_SYMBOL(page_follow_link);
 EXPORT_SYMBOL(block_symlink);
 
+/* for stackable file systems (lofs, wrapfs, etc.) */
+EXPORT_SYMBOL(add_to_page_cache);
+EXPORT_SYMBOL(filemap_nopage);
+EXPORT_SYMBOL(filemap_swapout);
+EXPORT_SYMBOL(filemap_sync);
+EXPORT_SYMBOL(remove_inode_page);
+
 #if !defined(CONFIG_NFSD) && defined(CONFIG_NFSD_MODULE)
 EXPORT_SYMBOL(do_nfsservctl);
 #endif
@@ -410,10 +417,7 @@ EXPORT_SYMBOL(clear_inode);
 EXPORT_SYMBOL(nr_async_pages);
 EXPORT_SYMBOL(___strtok);
 EXPORT_SYMBOL(init_special_inode);
-EXPORT_SYMBOL(init_fifo);
 EXPORT_SYMBOL(fifo_inode_operations);
-EXPORT_SYMBOL(chrdev_inode_operations);
-EXPORT_SYMBOL(blkdev_inode_operations);
 EXPORT_SYMBOL(read_ahead);
 EXPORT_SYMBOL(get_hash_table);
 EXPORT_SYMBOL(get_empty_inode);
@@ -450,4 +454,5 @@ EXPORT_SYMBOL(get_fast_time);
 /* library functions */
 EXPORT_SYMBOL(strnicmp);
 
+/* init task, for moving kthread roots - ought to export a function ?? */
 EXPORT_SYMBOL(init_task_union);

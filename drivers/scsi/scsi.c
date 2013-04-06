@@ -265,6 +265,7 @@ static struct dev_info device_list[] =
 	{"YAMAHA", "CDR102", "1.00", BLIST_NOLUN},		/* Locks up if polled for lun != 0  
 								 * extra reset */
 	{"RELISYS", "Scorpio", "*", BLIST_NOLUN},		/* responds to all LUN */
+	{"MICROTEK", "ScanMaker II", "5.61", BLIST_NOLUN},	/* responds to all LUN */
 
 /*
  * Other types of devices that have special flags.
@@ -292,8 +293,8 @@ static struct dev_info device_list[] =
  	{"MATSHITA","PD-2 LF-D100","*", BLIST_GHOST},
  	{"HITACHI", "GF-1050","*", BLIST_GHOST},  /* Hitachi SCSI DVD-RAM */
  	{"TOSHIBA","CDROM","*", BLIST_ISROM},
-	{"Toshiba","DVD-RAM SD-W1101","*", BLIST_GHOST},
-	{"Toshiba","DVD-RAM SD-W1111","*", BLIST_GHOST},
+	{"TOSHIBA","DVD-RAM SD-W1101","*", BLIST_GHOST},
+	{"TOSHIBA","DVD-RAM SD-W1111","*", BLIST_GHOST},
 
 	/*
 	 * Must be at end of list...

@@ -46,6 +46,7 @@
 #include <linux/delay.h>
 #include <linux/proc_fs.h>
 #include <linux/compile.h>
+#include <linux/pci.h>
 #include <asm/system.h>
 #include <asm/irq.h>
 
@@ -58,6 +59,7 @@
 #include <pcmcia/cistpl.h>
 #include <pcmcia/cisreg.h>
 #include <pcmcia/bus_ops.h>
+
 #include "cs_internal.h"
 #include "rsrc_mgr.h"
 
@@ -131,7 +133,7 @@ MODULE_PARM(io_speed, "i");
 
 /*====================================================================*/
 
-static socket_state_t dead_socket = {
+socket_state_t dead_socket = {
     0, SS_DETECT, 0, 0, 0
 };
 
@@ -276,29 +278,16 @@ static int set_mem_map(socket_info_t *s, struct pccard_mem_map *mem)
 	return s->ss_entry->set_mem_map(s->sock, mem);
 }
 
-/*======================================================================
-
-    Reset a socket to the default state
-    
-======================================================================*/
-
-static void init_socket(socket_info_t *s)
+static int suspend_socket(socket_info_t *s)
 {
-    int i;
-    pccard_io_map io = { 0, 0, 0, 0, 1 };
-    pccard_mem_map mem = { 0, 0, 0, 0, 0, 0 };
+	s->socket = dead_socket;
+	return s->ss_entry->suspend(s->sock);
+}
 
-    mem.sys_stop = s->cap.map_size;
-    s->socket = dead_socket;
-    set_socket(s, &s->socket);
-    for (i = 0; i < 2; i++) {
-	io.map = i;
-	set_io_map(s, &io);
-    }
-    for (i = 0; i < 5; i++) {
-	mem.map = i;
-	set_mem_map(s, &mem);
-    }
+static int init_socket(socket_info_t *s)
+{
+	s->socket = dead_socket;
+	return s->ss_entry->init(s->sock);
 }
 
 /*====================================================================*/
@@ -704,7 +693,7 @@ static int handle_apm_event(apm_event_t event)
 	    if ((s->state & SOCKET_PRESENT) &&
 		!(s->state & SOCKET_SUSPEND)){
 		send_event(s, CS_EVENT_PM_SUSPEND, CS_EVENT_PRI_LOW);
-		set_socket(s, &dead_socket);
+		suspend_socket(s);
 		s->state |= SOCKET_SUSPEND;
 	    }
 	}
@@ -1007,7 +996,7 @@ int pcmcia_get_configuration_info(client_handle_t handle,
 	config->Function = fn;
 	config->Vcc = s->socket.Vcc;
 	config->Vpp1 = config->Vpp2 = s->socket.Vpp;
-	config->Option = s->cap.cardbus;
+	config->Option = s->cap.cb_dev->subordinate->number;
 	if (s->cb_config) {
 	    config->Attributes = CONF_VALID_CLIENT;
 	    config->IntType = INT_CARDBUS;
@@ -1972,7 +1961,7 @@ int pcmcia_suspend_card(client_handle_t handle, client_req_t *req)
 
     DEBUG(1, "cs: suspending socket %d\n", i);
     send_event(s, CS_EVENT_PM_SUSPEND, CS_EVENT_PRI_LOW);
-    set_socket(s, &dead_socket);
+    suspend_socket(s);
     s->state |= SOCKET_SUSPEND;
 
     return CS_SUCCESS;

@@ -52,8 +52,7 @@ typedef struct socket_cap_t {
     u_int	irq_mask;
     u_int	map_size;
     u_char	pci_irq;
-    u_char	cardbus;
-    struct pci_bus *cb_bus;
+    struct pci_dev *cb_dev;
     struct bus_operations *bus;
 } socket_cap_t;
 
@@ -71,6 +70,8 @@ typedef struct socket_state_t {
     u_char	Vcc, Vpp;
     u_char	io_irq;
 } socket_state_t;
+
+extern socket_state_t dead_socket;
 
 /* Socket configuration flags */
 #define SS_PWR_AUTO	0x0010
@@ -118,6 +119,8 @@ typedef struct cb_bridge_map {
  * Socket operations.
  */
 struct pccard_operations {
+	int (*init)(unsigned int sock);
+	int (*suspend)(unsigned int sock);
 	int (*register_callback)(unsigned int sock, void (*handler)(void *, unsigned int), void * info);
 	int (*inquire_socket)(unsigned int sock, socket_cap_t *cap);
 	int (*get_status)(unsigned int sock, u_int *value);
@@ -127,8 +130,6 @@ struct pccard_operations {
 	int (*set_io_map)(unsigned int sock, struct pccard_io_map *io);
 	int (*get_mem_map)(unsigned int sock, struct pccard_mem_map *mem);
 	int (*set_mem_map)(unsigned int sock, struct pccard_mem_map *mem);
-	int (*get_bridge)(unsigned int sock, struct cb_bridge_map *m);
-	int (*set_bridge)(unsigned int sock, struct cb_bridge_map *m);
 	void (*proc_setup)(unsigned int sock, struct proc_dir_entry *base);
 };
 

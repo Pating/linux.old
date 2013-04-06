@@ -376,8 +376,6 @@ extern inline void free_pages(unsigned long addr, unsigned long order)
 
 extern void show_free_areas(void);
 extern void show_free_areas_node(int nid);
-extern struct page * put_dirty_page(struct task_struct * tsk, struct page *page,
-	unsigned long address);
 
 extern void clear_page_tables(struct mm_struct *, unsigned long, int);
 
@@ -439,6 +437,15 @@ extern void remove_inode_page(struct page *);
 extern unsigned long page_unuse(struct page *);
 extern int shrink_mmap(int, int);
 extern void truncate_inode_pages(struct inode *, loff_t);
+
+/* generic vm_area_ops exported for stackable file systems */
+extern int filemap_swapout(struct page * page, struct file *file);
+extern pte_t filemap_swapin(struct vm_area_struct * vma,
+			    unsigned long offset, unsigned long entry);
+extern int filemap_sync(struct vm_area_struct * vma, unsigned long address,
+			size_t size, unsigned int flags);
+extern struct page *filemap_nopage(struct vm_area_struct * area,
+				    unsigned long address, int no_share);
 
 /*
  * GFP bitmasks..

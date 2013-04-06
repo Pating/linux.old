@@ -1,4 +1,4 @@
-/* $Id: inode.c,v 1.1 1999/12/20 12:23:44 jj Exp $
+/* $Id: inode.c,v 1.3 2000/01/04 10:02:29 jj Exp $
  * openpromfs.c: /proc/openprom handling routines
  *
  * Copyright (C) 1996-1999 Jakub Jelinek  (jakub@redhat.com)
@@ -1097,6 +1097,7 @@ out_no_root:
 	iput(root_inode);
 	s->s_dev = 0;
 	unlock_super(s);
+	MOD_DEC_USE_COUNT;
 	return NULL;
 }
 
@@ -1107,7 +1108,7 @@ static struct file_system_type openprom_fs_type = {
 	NULL
 };
 
-static int init_openprom_fs(void)
+int init_openprom_fs(void)
 {
 	nodes = (openpromfs_node *)__get_free_pages(GFP_KERNEL, 0);
 	if (!nodes) {

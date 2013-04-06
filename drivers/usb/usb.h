@@ -44,6 +44,7 @@
 #define USB_DT_ENDPOINT_SIZE		7
 #define USB_DT_ENDPOINT_AUDIO_SIZE	9	/* Audio extension */
 #define USB_DT_HUB_NONVAR_SIZE		7
+#define USB_DT_HID_SIZE			9
 
 /*
  * USB Request Type and Endpoint Directions
@@ -168,9 +169,6 @@ struct usb_proc_setinterface {
 #define USB_PROC_SETINTERFACE      _IOR('U', 4, struct usb_proc_setinterface)
 #define USB_PROC_SETCONFIGURATION  _IOR('U', 5, unsigned int)
 
-
-
-
 #ifdef __KERNEL__
 
 #include <linux/config.h>
@@ -179,19 +177,10 @@ struct usb_proc_setinterface {
 
 #define USB_MAJOR 180
 
-extern int usb_hub_init(void);
-extern int usb_kbd_init(void);
-extern int usb_cpia_init(void);
-extern int usb_dc2xx_init(void);
-extern int usb_mouse_init(void);
-extern int usb_printer_init(void);
-
-extern void usb_hub_cleanup(void);
-extern void usb_mouse_cleanup(void);
-
 /* for 2.2-kernels */
  
 #if LINUX_VERSION_CODE < KERNEL_VERSION(2,3,0)
+
 static __inline__ void list_add_tail(struct list_head *new, struct list_head *head)
 {
 	__list_add(new, head->prev, head);
@@ -742,18 +731,27 @@ static inline unsigned int __default_pipe(struct usb_device *dev)
  */
 int usb_new_device(struct usb_device *dev);
 int usb_set_address(struct usb_device *dev);
-int usb_get_descriptor(struct usb_device *dev, unsigned char desctype, unsigned
-char descindex, void *buf, int size);
+int usb_get_descriptor(struct usb_device *dev, unsigned char desctype,
+	unsigned char descindex, void *buf, int size);
+int usb_get_class_descriptor(struct usb_device *dev, unsigned char desctype,
+	unsigned char descindex, unsigned char ifnum, void *buf, int size);
 int usb_get_device_descriptor(struct usb_device *dev);
+int __usb_get_extra_descriptor(char *buffer, unsigned size, unsigned char type, void **ptr);
 int usb_get_status (struct usb_device *dev, int type, int target, void *data);
 int usb_get_protocol(struct usb_device *dev);
 int usb_set_protocol(struct usb_device *dev, int protocol);
 int usb_set_interface(struct usb_device *dev, int interface, int alternate);
 int usb_set_idle(struct usb_device *dev, int duration, int report_id);
 int usb_set_configuration(struct usb_device *dev, int configuration);
-int usb_get_report(struct usb_device *dev, unsigned char type, unsigned char id, unsigned char index, void *buf, int size);
+int usb_get_report(struct usb_device *dev, unsigned char type,
+	unsigned char id, unsigned char index, void *buf, int size);
+int usb_set_report(struct usb_device *dev, unsigned char type,
+	unsigned char id, unsigned char index, void *buf, int size);
 char *usb_string(struct usb_device *dev, int index);
 int usb_clear_halt(struct usb_device *dev, int endp);
+
+#define usb_get_extra_descriptor(ifpoint,type,ptr)\
+	__usb_get_extra_descriptor((ifpoint)->extra,(ifpoint)->extralen,type,(void**)ptr)
 
 /*
  * Some USB bandwidth allocation constants.
