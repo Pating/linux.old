@@ -158,6 +158,8 @@ extern void rs285_console_init(void);
 extern void sa1100_rs_console_init(void);
 extern void sgi_serial_console_init(void);
 extern void sci_console_init(void);
+extern void tx3912_console_init(void);
+extern void tx3912_rs_init(void);
 
 #ifndef MIN
 #define MIN(a,b)	((a) < (b) ? (a) : (b))
@@ -267,6 +269,8 @@ int tty_register_ldisc(int disc, struct tty_ldisc *new_ldisc)
 	
 	return 0;
 }
+
+EXPORT_SYMBOL(tty_register_ldisc);
 
 /* Set the discipline of a tty line. */
 static int tty_set_ldisc(struct tty_struct *tty, int ldisc)
@@ -442,8 +446,6 @@ void do_tty_hangup(void *data)
 	file_list_lock();
 	for (l = tty->tty_files.next; l != &tty->tty_files; l = l->next) {
 		struct file * filp = list_entry(l, struct file, f_list);
-		if (!filp->f_dentry)
-			continue;
 		if (filp->f_dentry->d_inode->i_rdev == CONSOLE_DEV ||
 		    filp->f_dentry->d_inode->i_rdev == SYSCONS_DEV) {
 			cons_filp = filp;
@@ -2021,7 +2023,7 @@ void tty_register_devfs (struct tty_driver *driver, unsigned int flags, unsigned
 			break;
 		default:
 			if (driver->major == PTY_MASTER_MAJOR)
-				flags |= DEVFS_FL_AUTO_OWNER;
+				mode |= S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH;
 			break;
 	}
 	if ( (minor <  driver->minor_start) || 
@@ -2184,6 +2186,9 @@ void __init console_init(void)
 #ifdef CONFIG_VT
 	con_init();
 #endif
+#ifdef CONFIG_AU1000_SERIAL_CONSOLE
+	au1000_serial_console_init();
+#endif
 #ifdef CONFIG_SERIAL_CONSOLE
 #if (defined(CONFIG_8xx) || defined(CONFIG_8260))
 	console_8xx_init();
@@ -2225,8 +2230,14 @@ void __init console_init(void)
 #ifdef CONFIG_SERIAL_SA1100_CONSOLE
 	sa1100_rs_console_init();
 #endif
+#ifdef CONFIG_ARC_CONSOLE
+	arc_console_init();
+#endif
 #ifdef CONFIG_SERIAL_AMBA_CONSOLE
 	ambauart_console_init();
+#endif
+#ifdef CONFIG_SERIAL_TX3912_CONSOLE
+	tx3912_console_init();
 #endif
 }
 
@@ -2314,6 +2325,9 @@ void __init tty_init(void)
 #endif
 #if defined(CONFIG_MVME162_SCC) || defined(CONFIG_BVME6000_SCC) || defined(CONFIG_MVME147_SCC)
 	vme_scc_init();
+#endif
+#ifdef CONFIG_SERIAL_TX3912
+	tx3912_rs_init();
 #endif
 #ifdef CONFIG_COMPUTONE
 	ip2_init();

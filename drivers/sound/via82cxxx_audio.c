@@ -90,10 +90,6 @@
 
 #define VIA_MIN_FRAG_NUMBER		2	
 
-#ifndef AC97_PCM_LR_ADC_RATE
-#  define AC97_PCM_LR_ADC_RATE AC97_PCM_LR_DAC_RATE
-#endif
-
 /* 82C686 function 5 (audio codec) PCI configuration registers */
 #define VIA_ACLINK_CTRL		0x41
 #define VIA_FUNC_ENABLE		0x42
@@ -862,6 +858,7 @@ static void via_chan_pcm_fmt (struct via_channel *chan, int reset)
 
 /**
  *	via_chan_clear - Stop DMA channel operation, and reset pointers
+ *	@card: the chip to accessed
  *	@chan: Channel to be cleared
  *
  *	Call via_chan_stop to halt DMA operations, and then resets

@@ -32,7 +32,6 @@
 #define development_version (LINUX_VERSION_CODE & 0x100)
 
 extern void die(char *, struct pt_regs *, unsigned long write);
-extern int console_loglevel;
 
 /*
  * Macro for exception fixup code to access integer registers.
@@ -63,7 +62,7 @@ extern spinlock_t timerlist_lock;
 
 /*
  * Unlock any spinlocks which will prevent us from getting the
- * message out (timerlist_lock is aquired through the
+ * message out (timerlist_lock is acquired through the
  * console unblank code)
  */
 void bust_spinlocks(int yes)
@@ -71,12 +70,11 @@ void bust_spinlocks(int yes)
 	spin_lock_init(&timerlist_lock);
 	if (yes) {
 		oops_in_progress = 1;
-#ifdef CONFIG_SMP
-		global_irq_lock = 0;	/* Many serial drivers do __global_cli() */
-#endif
 	} else {
 		int loglevel_save = console_loglevel;
+#ifdef CONFIG_VT
 		unblank_screen();
+#endif
 		oops_in_progress = 0;
 		/*
 		 * OK, the message is on the console.  Now we call printk()
