@@ -161,7 +161,7 @@ static int tunnel_xmit(struct sk_buff *skb, struct device *dev)
 	 *  routing tables
 	 */
 	iph = (struct iphdr *) skb->data;
-	if ((rt = ip_rt_route(iph->daddr, 0)) == NULL)
+	if ((rt = ip_rt_route(iph->daddr, 0, skb->sk?skb->sk->bound_device:NULL)) == NULL)
 	{ 
 		/* No route to host */
 		/* Where did the packet come from? */
@@ -194,7 +194,7 @@ static int tunnel_xmit(struct sk_buff *skb, struct device *dev)
 	}
 	ip_rt_put(rt);
 
-	if ((rt = ip_rt_route(target, 0)) == NULL)
+	if ((rt = ip_rt_route(target, 0, skb->sk?skb->sk->bound_device:NULL)) == NULL)
 	{ 
 		/* No route to host */
 		/* Where did the packet come from? */
@@ -267,6 +267,7 @@ printk("Required room: %d, Tunnel hlen: %d\n", max_headroom, TUNL_HLEN);
 
 		/* Tack on our header */
 		new_skb->h.iph = (struct iphdr *) skb_push(new_skb, tunnel_hlen);
+		new_skb->mac.raw = new_skb->ip_hdr;
 
 		/* Free the old packet, we no longer need it */
 		dev_kfree_skb(skb, FREE_WRITE);

@@ -5,7 +5,6 @@ mainmenu_option next_comment
 comment 'Filesystems'
 
 bool	 'Quota support' CONFIG_QUOTA
-bool	 'Mandatory lock support' CONFIG_LOCK_MANDATORY
 tristate 'Minix fs support' CONFIG_MINIX_FS
 tristate 'Extended fs support' CONFIG_EXT_FS
 tristate 'Second extended fs support' CONFIG_EXT2_FS
@@ -38,6 +37,9 @@ fi
 tristate 'ISO9660 cdrom filesystem support' CONFIG_ISO9660_FS
 tristate 'OS/2 HPFS filesystem support (read only)' CONFIG_HPFS_FS
 tristate 'System V and Coherent filesystem support' CONFIG_SYSV_FS
+if [ "$CONFIG_EXPERIMENTAL" = "y" ]; then
+  tristate 'Kernel automounter support (experimental)' CONFIG_AUTOFS_FS
+fi
 if [ "$CONFIG_EXPERIMENTAL" = "y" ]; then
   tristate 'Amiga FFS filesystem support (EXPERIMENTAL)' CONFIG_AFFS_FS
   if [ "$CONFIG_AFFS_FS" != "n" ]; then

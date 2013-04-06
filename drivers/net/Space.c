@@ -41,6 +41,7 @@
 extern int tulip_probe(struct device *dev);
 extern int hp100_probe(struct device *dev);
 extern int ultra_probe(struct device *dev);
+extern int ultra32_probe(struct device *dev);
 extern int wd_probe(struct device *dev);
 extern int el2_probe(struct device *dev);
 extern int ne_probe(struct device *dev);
@@ -49,6 +50,7 @@ extern int hp_plus_probe(struct device *dev);
 extern int znet_probe(struct device *);
 extern int express_probe(struct device *);
 extern int eepro_probe(struct device *);
+extern int eepro100_probe(struct device *);
 extern int el3_probe(struct device *);
 extern int at1500_probe(struct device *);
 extern int at1700_probe(struct device *);
@@ -111,6 +113,9 @@ ethif_probe(struct device *dev)
 #if defined(CONFIG_ULTRA)
 	&& ultra_probe(dev)
 #endif
+#if defined(CONFIG_ULTRA32)
+	&& ultra32_probe(dev)
+#endif
 #if defined(CONFIG_SMC9194)
 	&& smc_init(dev)
 #endif
@@ -158,6 +163,9 @@ ethif_probe(struct device *dev)
 #endif
 #ifdef CONFIG_EEXPRESS_PRO	/* Intel EtherExpress Pro/10 */
 	&& eepro_probe(dev)
+#endif
+#ifdef CONFIG_EEXPRESS_PRO100B	/* Intel EtherExpress Pro100B */
+	&& eepro100_probe(dev)
 #endif
 #ifdef CONFIG_DEPCA		/* DEC DEPCA */
 	&& depca_probe(dev)

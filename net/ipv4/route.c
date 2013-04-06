@@ -42,7 +42,11 @@
  *		Bjorn Ekwall	:	Kerneld route support.
  *		Alan Cox	:	Multicast fixed (I hope)
  * 		Pavel Krauz	:	Limited broadcast fixed
+ *              Elliot Poger    :       Added support for SO_BINDTODEVICE.
+ *		Andi Kleen	:	Don't send multicast addresses to
+ *					kerneld.	
  *
+ *	Juan Jose Ciarlante     :	Added ip_rt_dev 
  *		This program is free software; you can redistribute it and/or
  *		modify it under the terms of the GNU General Public License
  *		as published by the Free Software Foundation; either version
@@ -127,9 +131,9 @@ static struct fib_info 	*fib_info_list;
  * Backlogging.
  */
 
-#define RT_BH_REDIRECT		0
-#define RT_BH_GARBAGE_COLLECT 	1
-#define RT_BH_FREE	 	2
+#define RT_BH_REDIRECT		1
+#define RT_BH_GARBAGE_COLLECT 	2
+#define RT_BH_FREE	 	4
 
 struct rt_req
 {
@@ -203,6 +207,7 @@ static void fib_free_node(struct fib_node * f)
 			fi->fib_prev->fib_next = fi->fib_next;
 		if (fi == fib_info_list)
 			fib_info_list = fi->fib_next;
+		kfree_s(fi, sizeof(struct fib_info));
 	}
 	kfree_s(f, sizeof(struct fib_node));
 }
@@ -225,10 +230,9 @@ static struct fib_node * fib_lookup_gateway(__u32 dst)
 		
 		for ( ; f; f = f->fib_next)
 		{
-			if ((dst ^ f->fib_dst) & fz->fz_mask)
+			if (((dst ^ f->fib_dst) & fz->fz_mask) ||
+			    (f->fib_info->fib_flags & RTF_GATEWAY))
 				continue;
-			if (f->fib_info->fib_flags & RTF_GATEWAY)
-				return NULL;
 			return f;
 		}
 	}
@@ -247,9 +251,11 @@ static struct fib_node * fib_lookup_gateway(__u32 dst)
  *	  Host 193.233.7.129 is locally unreachable,
  *	  but old (<=1.3.37) code will send packets destined for it to eth1.
  *
+ * Calling routine can specify a particular interface by setting dev.  If dev==NULL,
+ * any interface will do.
  */
 
-static struct fib_node * fib_lookup_local(__u32 dst)
+static struct fib_node * fib_lookup_local(__u32 dst, struct device *dev)
 {
 	struct fib_zone * fz;
 	struct fib_node * f;
@@ -266,6 +272,8 @@ static struct fib_node * fib_lookup_local(__u32 dst)
 		for ( ; f; f = f->fib_next)
 		{
 			if ((dst ^ f->fib_dst) & fz->fz_mask)
+				continue;
+			if ( (dev != NULL) && (dev != f->fib_info->fib_dev) )
 				continue;
 			if (!(f->fib_info->fib_flags & RTF_GATEWAY))
 				return f;
@@ -289,7 +297,7 @@ static struct fib_node * fib_lookup_local(__u32 dst)
  *		route add -host 193.233.7.255 eth0
  */
 
-static struct fib_node * fib_lookup(__u32 dst)
+static struct fib_node * fib_lookup(__u32 dst, struct device *dev)
 {
 	struct fib_zone * fz;
 	struct fib_node * f;
@@ -304,6 +312,8 @@ static struct fib_node * fib_lookup(__u32 dst)
 		for ( ; f; f = f->fib_next)
 		{
 			if ((dst ^ f->fib_dst) & fz->fz_mask)
+				continue;
+			if ( (dev != NULL) && (dev != f->fib_info->fib_dev) )
 				continue;
 			return f;
 		}
@@ -915,6 +925,8 @@ static __inline__ void rt_kick_free_queue(void)
 {
 	struct rtable *rt, **rtp;
 
+	ip_rt_bh_mask &= ~RT_BH_FREE;
+
 	rtp = &rt_free_queue;
 
 	while ((rt = *rtp) != NULL)
@@ -1254,7 +1266,7 @@ void ip_rt_redirect(__u32 src, __u32 dst, __u32 gw, struct device *dev)
 	struct rt_req * rtr;
 	struct rtable * rt;
 
-	rt = ip_rt_route(dst, 0);
+	rt = ip_rt_route(dst, 0, NULL);
 	if (!rt)
 		return;
 
@@ -1323,7 +1335,7 @@ static void rt_cache_add(unsigned hash, struct rtable * rth)
 		if (rth->rt_gateway != daddr)
 		{
 			ip_rt_fast_unlock();
-			rtg = ip_rt_route(rth->rt_gateway, 0);
+			rtg = ip_rt_route(rth->rt_gateway, 0, NULL);
 			ip_rt_fast_lock();
 		}
 
@@ -1395,7 +1407,7 @@ static void rt_cache_add(unsigned hash, struct rtable * rth)
    
  */
 
-struct rtable * ip_rt_slow_route (__u32 daddr, int local)
+struct rtable * ip_rt_slow_route (__u32 daddr, int local, struct device *dev)
 {
 	unsigned hash = ip_rt_hash_code(daddr)^local;
 	struct rtable * rth;
@@ -1415,9 +1427,9 @@ struct rtable * ip_rt_slow_route (__u32 daddr, int local)
 	}
 
 	if (local)
-		f = fib_lookup_local(daddr);
+		f = fib_lookup_local(daddr, dev);
 	else
-		f = fib_lookup (daddr);
+		f = fib_lookup (daddr, dev);
 
 	if (f)
 	{
@@ -1436,6 +1448,8 @@ struct rtable * ip_rt_slow_route (__u32 daddr, int local)
 		ip_rt_unlock();
 		kfree_s(rth, sizeof(struct rtable));
 #ifdef CONFIG_KERNELD		
+		if (MULTICAST(daddr)) 
+			return NULL; 
 		daddr=ntohl(daddr);
 		sprintf(wanted_route, "%d.%d.%d.%d",
 			(int)(daddr >> 24) & 0xff, (int)(daddr >> 16) & 0xff,
@@ -1490,7 +1504,15 @@ struct rtable * ip_rt_slow_route (__u32 daddr, int local)
 		rth->rt_gateway = rth->rt_dst;
 
 	if (ip_rt_lock == 1)
-		rt_cache_add(hash, rth);
+	{
+		/* Don't add this to the rt_cache if a device was specified,
+		 * because we might have skipped better routes which didn't
+		 * point at the right device. */
+		if (dev != NULL)
+			rth->rt_flags |= RTF_NOTCACHED;
+		else
+			rt_cache_add(hash, rth);
+	}
 	else
 	{
 		rt_free(rth);
@@ -1507,9 +1529,28 @@ void ip_rt_put(struct rtable * rt)
 {
 	if (rt)
 		atomic_dec(&rt->rt_refcnt);
+	
+	/* If this rtable entry is not in the cache, we'd better free it once the
+	 * refcnt goes to zero, because nobody else will... */
+	if ( rt && (rt->rt_flags & RTF_NOTCACHED) && (!rt->rt_refcnt) )
+		rt_free(rt);
 }
 
-struct rtable * ip_rt_route(__u32 daddr, int local)
+/*
+ *	Return routing dev for given address.
+ *	Called by ip_alias module to avoid using ip_rt_route and
+ *	generating hhs.
+ */
+struct device * ip_rt_dev(__u32 addr)
+{
+	struct fib_node *f;
+	f = fib_lookup(addr, NULL);
+	if (f) 
+		return f->fib_info->fib_dev;
+	return NULL;
+}
+
+struct rtable * ip_rt_route(__u32 daddr, int local, struct device *dev)
 {
 	struct rtable * rth;
 
@@ -1517,7 +1558,8 @@ struct rtable * ip_rt_route(__u32 daddr, int local)
 
 	for (rth=ip_rt_hash_table[ip_rt_hash_code(daddr)^local]; rth; rth=rth->rt_next)
 	{
-		if (rth->rt_dst == daddr)
+		/* If a network device is specified, make sure this route points to it. */
+		if ( (rth->rt_dst == daddr) && ((dev==NULL) || (dev==rth->rt_dev)) )
 		{
 			rth->rt_lastuse = jiffies;
 			atomic_inc(&rth->rt_use);
@@ -1526,7 +1568,7 @@ struct rtable * ip_rt_route(__u32 daddr, int local)
 			return rth;
 		}
 	}
-	return ip_rt_slow_route (daddr, local);
+	return ip_rt_slow_route (daddr, local, dev);
 }
 
 /*

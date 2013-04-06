@@ -206,9 +206,9 @@ extern inline int port_match(unsigned short *portptr,int nports,unsigned short p
 int ip_fw_chk(struct iphdr *ip, struct device *rif, __u16 *redirport, struct ip_fw *chain, int policy, int mode)
 {
 	struct ip_fw *f;
-	struct tcphdr		*tcp=(struct tcphdr *)((unsigned long *)ip+ip->ihl);
-	struct udphdr		*udp=(struct udphdr *)((unsigned long *)ip+ip->ihl);
-	struct icmphdr		*icmp=(struct icmphdr *)((unsigned long *)ip+ip->ihl);
+	struct tcphdr		*tcp=(struct tcphdr *)((__u32 *)ip+ip->ihl);
+	struct udphdr		*udp=(struct udphdr *)((__u32 *)ip+ip->ihl);
+	struct icmphdr		*icmp=(struct icmphdr *)((__u32 *)ip+ip->ihl);
 	__u32			src, dst;
 	__u16			src_port=0xFFFF, dst_port=0xFFFF, icmp_type=0xFF;
 	unsigned short		f_prt=0, prt;
@@ -895,6 +895,14 @@ int ip_autofw_add(struct ip_autofw * af)
 	struct ip_autofw * newaf;
 	init_timer(&af->timer);
 	newaf = kmalloc( sizeof(struct ip_autofw), GFP_ATOMIC );
+	if ( newaf == NULL ) 
+	{
+#ifdef DEBUG_IP_FIREWALL
+		printk("ip_autofw_add:  malloc said no\n");
+#endif
+		return( ENOMEM );
+	}
+
 	memcpy(newaf, af, sizeof(struct ip_autofw));
 	newaf->timer.data = (unsigned long) newaf;
 	newaf->timer.function = ip_autofw_expire;
@@ -1183,7 +1191,7 @@ static int ip_chain_procinfo(int stage, char *buffer, char **start,
 			ntohl(i->fw_dst.s_addr),ntohl(i->fw_dmsk.s_addr),
 			(i->fw_vianame)[0] ? i->fw_vianame : "-",
 			ntohl(i->fw_via.s_addr),i->fw_flg);
-		len+=sprintf(buffer+len,"%u %u %-9lu %-9lu",
+		len+=sprintf(buffer+len,"%u %u %-10lu %-10lu",
 			i->fw_nsp,i->fw_ndp, i->fw_pcnt,i->fw_bcnt);
 		for (p = 0; p < IP_FW_MAX_PORTS; p++)
 			len+=sprintf(buffer+len, " %u", i->fw_pts[p]);

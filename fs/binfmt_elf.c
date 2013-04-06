@@ -549,8 +549,10 @@ do_load_elf_binary(struct linux_binprm * bprm, struct pt_regs * regs)
 		}
 	}
 	
+	if (flush_old_exec(bprm))
+		return -ENOMEM;
+
 	/* OK, This is the point of no return */
-	flush_old_exec(bprm);
 
 	current->mm->end_data = 0;
 	current->mm->end_code = 0;
@@ -880,7 +882,7 @@ static int dump_seek(struct file *file, off_t off)
  */
 static inline int maydump(struct vm_area_struct *vma)
 {
-	if (!(vma->vm_flags & (VM_READ|VM_WRITE|VM_EXEC)))
+	if (!(vma->vm_flags & (VM_READ|VM_EXEC)))
 		return 0;
 #if 1
 	if (vma->vm_flags & (VM_WRITE|VM_GROWSUP|VM_GROWSDOWN))
@@ -1140,7 +1142,7 @@ static int elf_core_dump(long signr, struct pt_regs * regs)
 		set_fs(fs);
 		
 		len = current->mm->arg_end - current->mm->arg_start;
-		len = len >= ELF_PRARGSZ ? ELF_PRARGSZ : len;
+		len = (len >= ELF_PRARGSZ-1) ? ELF_PRARGSZ-1 : len;
 		memcpy_fromfs(&psinfo.pr_psargs,
 			      (const char *)current->mm->arg_start, len);
 		for(i = 0; i < len; i++)

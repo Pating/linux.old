@@ -124,18 +124,18 @@ CONFIG_BLK_DEV_LOOP
   nothing to do with the loopback device used for network connections
   from the machine to itself.  Most users will answer N here.
 
-Enhanced IDE/MFM/RLL disk/cdrom/tape support
+Enhanced IDE/MFM/RLL disk/cdrom/tape/floppy support
 CONFIG_BLK_DEV_IDE 
-  This will use the full-featured IDE driver to control up to four IDE
-  interfaces, for a combination of up to eight IDE disk/cdrom/tape
-  drives.  Useful information about large (>540MB) IDE disks,
-  soundcard IDE ports, and other topics, is all contained in
-  Documentation/ide.txt.  If you have one or more IDE drives, say Y
-  here.  If your system has no IDE drives, or if memory requirements
-  are really tight, you could say N here, and select the Old harddisk
-  driver instead to save about 13kB of memory in the kernel.  To
-  fine-tune IDE drive/interface parameters for improved performance,
-  look for the hdparm package at
+  This will use the full-featured IDE driver to control up to four
+  IDE interfaces, for a combination of up to eight IDE
+  disk/cdrom/tape/floppy drives.  Useful information about large
+  (>540MB) IDE disks, soundcard IDE ports, and other topics, is all
+  contained in Documentation/ide.txt.  If you have one or more IDE
+  drives, say Y here.  If your system has no IDE drives, or if memory
+  requirements are really tight, you could say N here, and select
+  the Old harddisk driver instead to save about 13kB of memory in
+  the kernel.  To fine-tune IDE drive/interface parameters for
+  improved performance, look for the hdparm package at
   sunsite.unc.edu:/pub/Linux/kernel/patches/diskdrives/
 
 Old harddisk (MFM/RLL/IDE) driver
@@ -190,8 +190,31 @@ CONFIG_BLK_DEV_IDETAPE
   ATAPI is a new protocol used by IDE TAPE and ATAPI drives,
   similar to the SCSI protocol.  At boot time, the TAPE drive will
   be identified along with other IDE devices, as "hdb" or "hdc",
-  or something similar.  Be sure to consult the drivers/block/ide-tape.c
+  or something similar, and will be mapped to a character device
+  such as "ht0".  Be sure to consult the drivers/block/ide-tape.c
   and Documentation/ide.txt files for usage information.
+
+Include IDE/ATAPI FLOPPY support (new)
+CONFIG_BLK_DEV_IDEFLOPPY
+  If you have an IDE floppy which uses the ATAPI protocol, say Y.
+  ATAPI is a new protocol used by IDE cdrom/tape/floppy drives,
+  similar to the SCSI protocol.  IDE floppy drives include the
+  LS-120 and the ATAPI ZIP (ATAPI PD-CD drives are not supported
+  by this driver; support for PD-CD drives is available through
+  the SCSI emulation).  At boot time, the FLOPPY drive will be
+  identified along with other IDE devices, as "hdb" or "hdc", or
+  something similar.
+
+SCSI emulation support
+CONFIG_BLK_DEV_IDESCSI
+  This will provide SCSI host adapter emulation for IDE ATAPI devices,
+  and will allow you to use a SCSI device driver instead of a native
+  ATAPI driver. This is useful if you have an ATAPI device for which
+  no native driver has been written (for example, an ATAPI PD-CD
+  drive); you can then use this emulation together with an appropriate
+  SCSI device driver. If both this SCSI emulation and native ATAPI
+  support are compiled into the kernel, the native support will be
+  used.  Normally, say N.
 
 Support removable IDE interfaces (PCMCIA)
 CONFIG_BLK_DEV_IDE_PCMCIA
@@ -449,7 +472,10 @@ CONFIG_SYN_COOKIES
   the same end. SYN cookies use less space than RST cookies,
   but have a small probability of introducing an non timed-out
   failure to connect in the remote TCP. You can use both options
-  simultatenously.
+  simultatenously.  If you are SYN flooded, the source address
+  reported by the kernel is likely to have been forged by the attacker.
+  The source address is reported as an aid in tracing the packets to 
+  their actual source.  
 
 SYN flood protection
 CONFIG_RST_COOKIES
@@ -463,7 +489,10 @@ CONFIG_RST_COOKIES
   The SYN_COOKIES option provides an alternative method to accomplish
   the same end. RST cookies use more space than SYN cookies on your
   machine, but never increase the probability of a frozen connection
-  in a remote TCP. You can use both options simultatenously.
+  in a remote TCP. You can use both options simultatenously.  If you 
+  are SYN flooded, the source address reported by the kernel is likely 
+  to have been forged by the attacker.  The source address is reported 
+  as an aid in tracing the packets to their actual source.  
 
 Sun floppy controller support
 CONFIG_BLK_DEV_SUNFD
@@ -589,10 +618,11 @@ CONFIG_PCI_OPTIMIZE
 Intel 82371 PIIX (Triton I/II) DMA support
 CONFIG_BLK_DEV_TRITON
   If your PCI system uses an IDE harddrive (as opposed to SCSI, say)
-  and includes the Intel 430FX PCI Triton chipset, you will want to
-  enable this option to allow use of bus-mastering DMA data transfers.
-  Read the comments at the beginning of drivers/block/triton.c.  Check
-  the file Documentation/Changes for location and latest version of
+  and includes the Intel Triton I/II IDE interface chipset (i82371FB,
+  i82371SB or i82371AB), you will want to enable this option to allow
+  use of bus-mastering DMA data transfers. Read the comments at the
+  beginning of drivers/block/triton.c and Documentation/ide.txt.
+  Check the file Documentation/Changes for location and latest version of
   the hdparm utility. It is safe to say Y to this question.
 
 System V IPC
@@ -947,12 +977,14 @@ CONFIG_IP_MASQUERADE
   If you want this, say Y.
 
 IP: ipautofw masquerade support
-CONFIG_IP_MASQUERADE_IPAUTOFW
+CONFIG_IP_MASQUERADE_IPAUTOFW (Experimental)
   ipautofw is a program by Richard Lynch allowing additional
   support for masquerading protocols which do not (as yet)
   have additional protocol helpers.  
   Information and source for ipautofw is available from
   ftp://ftp.netis.com/pub/members/rlynch/
+  The ipautofw code is still under development and so is currently
+  marked EXPERIMENTAL.
   If you want this, say Y.
 
 IP: ICMP masquerading
@@ -1528,24 +1560,41 @@ CONFIG_SCSI_NCR53C8XX
   of PCI-SCSI controllers. This driver supports parity checking,
   tagged command queuing, fast scsi II transfer up to 10 MB/s with
   narrow scsi devices and 20 MB/s with wide scsi devices.
-  This driver has been tested OK with linux/i386 and is currently
-  untested under linux/Alpha. If you intend to use this driver under
-  linux/Alpha, just try it first with read-only or mounted read-only
-  devices.  Memory mapped io is currently not supported under
-  linux/Alpha. Please read drivers/scsi/README.ncr53c8xx for more
-  information. 
+  Support of Ultra SCSI data transfers with NCR53C860 and NCR53C875 
+  controllers has been recently added to the driver.
+  Please read drivers/scsi/README.ncr53c8xx for more information.
+  Linux/i386 and Linux/Alpha are supported by this driver.
 
-force normal IO
+synchronous data transfers frequency
+CONFIG_SCSI_NCR53C8XX_SYNC
+  SCSI-2 specifications allow scsi devices to negotiate a synchronous 
+  transfer period of 25 nano-seconds or more.
+  The transfer period value is 4 times the agreed transfer period.
+  So, data can be transferred at a 10 MHz frequency, allowing 10
+  MB/second throughput with 8 bits scsi-2 devices and 20 MB/second
+  with wide16 devices.  This frequency can be used safely with
+  differential devices but may cause problems with singled-ended
+  devices.
+  Specify 0 if you want to only use asynchronous data transfers.
+  Otherwise, specify a value between 5 and 10.  Commercial O/Ses
+  generally use 5 Mhz frequency for synchronous transfers.  It is a
+  reasonable default value.
+  However, a flawless singled-ended scsi bus supports 10 MHz data
+  transfers.  Regardless the value chosen in the Linux configuration,
+  the synchronous period can be changed after boot-up through the
+  /proc/scsi file system. The generic command is:
+      echo "setsync #target period" >/proc/scsi/ncr53c8xx/0
+  Use a 25 ns period for 10 Mhz synchronous data transfers.
+  If you don't know what to do now, go with the default.
+
+use normal IO
 CONFIG_SCSI_NCR53C8XX_IOMAPPED
-  Under linux/Alpha only normal io is currently supported.
-  Under linux/i386, this option allows you to force the driver to use
-  normal IO.  Memory mapped IO has less latency than normal IO.
-  During the initialization phase, the driver first tries to use
-  memory mapped io.  If nothing seems wrong, it will use memory mapped
-  io.  If a flaw is detected, it will use normal io.  However, it's
-  possible that memory mapped does not work properly for you and the
-  driver has not detected the problem; then you would want to say Y
-  here.  The normal answer therefore is N.
+  This option allows you to force the driver to use normal IO.
+  Memory mapped IO has less latency than normal IO and works for most 
+  Intel-based hardware.
+  Under Linux/Alpha only normal IO is currently supported by the driver 
+  and so, this option has no effect.
+  The normal answer therefore is N.
 
 not allow targets to disconnect
 CONFIG_SCSI_NCR53C8XX_NO_DISCONNECT
@@ -1570,36 +1619,51 @@ CONFIG_SCSI_NCR53C8XX_TAGGED_QUEUE
   The safe answer therefore is N.
   The normal answer therefore is Y.
 
-force asynchronous transfer mode
-CONFIG_SCSI_NCR53C8XX_FORCE_ASYNCHRONOUS
-  This option allows you to force asynchronous transfer mode for all
-  devices at linux startup. You can enable synchronous negotiation
-  with the "setsync" control command after boot-up, for example:
-     echo "setsync 2 25" >/proc/scsi/ncr53c8xx/0
-  asks the driver to set the period to 25 ns (10MB/sec) for target 2
-  of controller 0 (please read drivers/scsi/README.ncr53c8xx for more
-  information). The safe answer therefore is Y.  The normal answer
-  therefore is N.
- 
-force synchronous negotiation
-CONFIG_SCSI_NCR53C8XX_FORCE_SYNC_NEGO
-  Some scsi-2 devices support synchronous negotiations but do not
-  report this feature in byte 7 of inquiry data.
-  Answer Y only if you suspect some device to be so humble.
-  The normal answer therefore is N.
- 
-disable master parity checking
-CONFIG_SCSI_NCR53C8XX_DISABLE_MPARITY_CHECK
-  Some hardware may have problems with parity during master cycles on
-  PCI bus.  Only seen once. Answer Y if you suspect such problem.  The
-  normal answer therefore is N.
+maximum number of queued commands
+CONFIG_SCSI_NCR53C8XX_MAX_TAGS
+  This option allows you to specify the maximum number of commands
+  that can be queued to a device, when tagged command queuing is
+  possible.  The default value is 4. Minimum is 2, maximum is 12.  The
+  normal answer therefore is the default one.
 
-disable scsi parity checking
-CONFIG_SCSI_NCR53C8XX_DISABLE_PARITY_CHECK
-  Parity on scsi bus is a system option. If one device checks parity,
-  then all devices on the scsi bus must generate parity.  However, the
-  parity can be ignored by the scsi devices.  Answer Y only if you
-  know what you are doing.  The normal answer therefore is N.
+detect and read serial NVRAM
+CONFIG_SCSI_NCR53C8XX_NVRAM_DETECT
+  Enable support for reading the serial NVRAM data on Symbios and
+  some Symbios compatible cards, and Tekram DC390W/U/F cards. Useful for
+  systems with more than one Symbios compatible controller where at least
+  one has a serial NVRAM, or for a system with a mixture of Symbios and
+  Tekram cards. Enables setting the boot order of host adaptors
+  to something other than the default order or "reverse probe" order. 
+  Also enables Symbios and Tekram cards to be distinguished so
+  CONFIG_SCSI_NCR53C8XX_SYMBIOS_COMPAT may be set in a system with a
+  mixture of Symbios and Tekram cards so the Symbios cards can make use of
+  the full range of Symbios features, differential, led pin, without
+  causing problems for the Tekram card(s).
+      (added by Richard Waltham: dormouse@farsrobt.demon.co.uk)
+  Also enables setting host and targets SCSI features as defined in the 
+  user setup for each host using a serial NVRAM (added by the maintainer).
+  The default answer is N, the normal answer should be Y.
+  Read drivers/scsi/README.ncr53c8xx for more information.
+
+assume boards are SYMBIOS compatible
+CONFIG_SCSI_NCR53C8XX_SYMBIOS_COMPAT
+  This option allows you to enable some features depending on GPIO
+  wiring.  These General Purpose Input/Output pins can be used for
+  vendor specific features or implementation of the standard SYMBIOS
+  features.  Genuine SYMBIOS boards use GPIO0 in output for controller
+  LED and GPIO3 bit as a flag indicating singled-ended/differential
+  interface.
+  If all the boards of your system are genuine SYMBIOS boards or use
+  BIOS and drivers from SYMBIOS, you would want to enable this option.
+  The driver behaves correctly on my system with this option enabled.
+  (SDMS 4.0 + Promise SCSI ULTRA 875 rev 0x3 + ASUS SC200 810A rev
+  0x12).  This option must be set to N if your system has at least one
+  53C8XX based scsi board with a vendor-specific BIOS (example: Tekram
+  DC-390/U/W/F).  If unsure, say N.
+  However, if all your non Symbios compatible boards have NvRAM, setting 
+  option CONFIG_SCSI_NCR53C8XX_NVRAM_DETECT allows the driver to 
+  distinguish Symbios compatible boards from other ones.
+  So, you can answer Y if all non Symbios compatible boards have NVRAM.
 
 Always IN2000 SCSI support
 CONFIG_SCSI_IN2000
@@ -1716,12 +1780,28 @@ CONFIG_SCSI_NCR53C406A
   and removed from the running kernel whenever you want), say M here
   and read Documentation/modules.txt.
 
+Tekram DC390(T) (AMD PCscsi) SCSI support
+CONFIG_SCSI_DC390T
+  This driver supports the Tekram DC390(T) PCI SCSI Hostadapter with
+  the Am53C974A chip, and perhaps other cards using the same chip.
+  This driver does _not_ support the DC390W/U/F adaptor with the 
+  NCR/Symbios chips.
+
 AM53/79C974 PCI SCSI support
 CONFIG_SCSI_AM53C974
   This is support for the AM53/79C974 SCSI host adapters. Please read
   drivers/scsi/README.AM53C974 for details. Also, the SCSI-HOWTO,
   available via ftp (user: anonymous) at
   sunsite.unc.edu:/pub/Linux/docs/HOWTO, is for you.
+
+GDT SCSI Disk Array Controller support
+CONFIG_SCSI_GDTH
+  This is a driver for all SCSI Disk Array Controllers (EISA/ISA/PCI) 
+  manufactured by ICP vortex. It is documented in the kernel source in
+  drivers/scsi/gdth.c and drivers/scsi/gdth.h. This driver is also
+  available as a module ( = code which can be inserted in and removed
+  from the running kernel whenever you want). If you want to compile 
+  it as a module, say M here and read Documentation/modules.txt. 	
 
 IOMEGA Parallel Port ZIP drive SCSI support
 CONFIG_SCSI_PPA
@@ -2096,6 +2176,20 @@ CONFIG_ULTRA
   mixing an SMC Ultra and an Adaptec AHA1542 SCSI card causes corruption
   problems with many operating systems.
 
+SMC Ultra32 support
+CONFIG_ULTRA32
+  This is support for the SMC Ultra32 EISA card in shared memory mode.
+  If you have a network (ethernet) card of this type, say Y and read
+  the Ethernet-HOWTO, available via ftp (user: anonymous) in
+  sunsite.unc.edu:/pub/Linux/docs/HOWTO.  This driver is also
+  available as a module ( = code which can be inserted in and removed
+  from the running kernel whenever you want). If you want to compile
+  it as a module, say M here and read Documentation/modules.txt as
+  well as Documentation/networking/net-modules.txt. If you plan to use
+  more than one network card under linux, read the
+  Multiple-Ethernet-mini-HOWTO, available from
+  sunsite.unc.edu:/pub/Linux/docs/HOWTO/mini.
+
 SMC 9194 Support
 CONFIG_SMC9194
   This is support for the SMC9xxx based Ethernet cards.  Choose this
@@ -2348,6 +2442,12 @@ CONFIG_FMV18X
   FMV-184 and it is not working, you may need to disable Plug & Play
   mode of the card.
 
+Intel EtherExpress/Pro 100B support'
+CONFIG_EEXPRESS_PRO100B
+  If you have an Intel EtherExpress Pro 100 10/100Mbps PCI Ethernet
+  card, answer yes.  As of kernel release 2.0.31 this driver was
+  still experimental.
+
 EtherExpressPro support
 CONFIG_EEXPRESS_PRO
   If you have a network (ethernet) card of this type, say Y and read
@@ -2417,19 +2517,18 @@ CONFIG_PT
 
 AT&T WaveLAN & DEC RoamAbout DS support
 CONFIG_WAVELAN
-  These are cards for wireless ethernet-like networking. Supported are
-  AT&T GIS and NCR WaveLAN cards. If you want to use a card of this
-  type under Linux, say Y and read the Ethernet-HOWTO, available via
-  ftp (user: anonymous) in sunsite.unc.edu:/pub/Linux/docs/HOWTO. Some
-  more specific information is contained in
-  drivers/net/README.wavelan. This driver is also available as a
-  module ( = code which can be inserted in and removed from the
-  running kernel whenever you want). If you want to compile it as a
-  module, say M here and read Documentation/modules.txt as well as
-  Documentation/networking/net-modules.txt. If you plan to use more
-  than one network card under linux, read the
-  Multiple-Ethernet-mini-HOWTO, available from
-  sunsite.unc.edu:/pub/Linux/docs/HOWTO/mini.
+    The Lucent Wavelan (formerly NCR and AT&T ; or DEC RoamAbout DS)
+  is a Radio LAN (wireless ethernet-like) at 900 MHz and 2.4 GHz.
+    This driver support the ISA version of the Wavelan. A driver for
+  the pcmcia hardware is available in David Hinds's pcmcia package.
+    This driver is fairly stable and may be compiled as a module
+  (wavelan.o). It implements many nice feature and the Wireless
+  Extensions (you must get the Wireless tools from the net).
+    For documentation, refer to :
+      o the wavelan man page, wireless tools man pages
+      o wavelan.p.h and the source code
+      o Ethernet-HOWTO, Multiple-Ethernet-mini-HOWTO, Module-HOWTO
+      o More documentation to come when I will have the time :-)
 
 HP PCLAN+ (27247B and 27252A) support
 CONFIG_HPLAN_PLUS
@@ -3111,6 +3210,17 @@ CONFIG_SYSV_FS
   whenever you want), say M here and read
   Documentation/modules.txt. If you haven't heard about all of this
   before, it's safe to say N.
+
+Kernel automounter support (experimental)
+CONFIG_AUTOFS_FS
+  The automounter is a tool to automatically mount remote filesystems
+  on demand.  This implementation is partially kernel-based to reduce
+  overhead in the already-mounted case; this is unlike the BSD
+  automounter (amd), which is only in user space.  To use the
+  automounter you also need the user-space tools from
+  ftp.kernel.org:/pub/linux/daemons/autofs.  If you are not a part of
+  a fairly large, distributed network, you probably do not need an
+  automounter, and can say N here.
 
 BSD UFS filesystem support (read only)
 CONFIG_UFS_FS
@@ -3805,8 +3915,8 @@ CONFIG_ISDN_AUDIO
   (mgetty+sendfax by gert@greenie.muc.de with an extension, available
   with the ISDN utility package for example), you will be able
   to use your Linux box as an ISDN-answering machine. Of course, this
-  must be supported by the lowlevel driver also. Currently, the Teles
-  driver is the only voice-supporting one. See
+  must be supported by the lowlevel driver also. Currently HiSax 
+  driver is the only voice-supporting drivers. See
   Documentation/isdn/README.audio for more information.
 
 ICN 2B and 4B support
@@ -3819,14 +3929,89 @@ CONFIG_ISDN_DRV_ICN
   separately.  See Documentation/isdn/README and README.icn for more
   information.
 
-Teles, NICCY1016PC, Creatix support
-CONFIG_ISDN_DRV_TELES
-  This enables support for the Teles ISDN-cards S0-16.0, S0-16.3, S0-8
-  and many compatibles. By default, the driver is configured to
-  support a 16.0-type using EDSS1-protocol. See
-  Documentation/isdn/README on how to configure it using 16.3, a
-  different D-channel protocol, or non-standard irq/port/shmem
-  settings.
+HiSax SiemensChipSet driver support
+CONFIG_ISDN_DRV_HISAX
+  This driver replaces the old Teles driver. It supports the Siemens
+  chipset in a more general way. This chipset is used on various
+  ISDN-cards (like AVM A1, Elsa ISDN cards, Teles S0-16.0,
+  Teles S0-16.3, Teles S0-8, Teles/Creatix PnP, ITK micro ix1 and 
+  many compatibles). It's a complete rewrite of the original Teles 
+  driver.
+  See Documentation/isdn/README.HiSax for further informations on
+  using this driver.
+
+HiSax Support for Teles 16.0/8.0
+CONFIG_HISAX_16_0
+  This enables HiSax support for the Teles ISDN-cards S0-16.0,
+  S0-8 and many compatibles.
+  See Documentation/isdn/README.HiSax on how to configure it 
+  using the different cards, a different D-channel protocol, or
+  non-standard irq/port/shmem settings.
+
+HiSax Support for Teles 16.3 or PNP or PCMCIA
+CONFIG_HISAX_16_3
+  This enables HiSax support for the Teles ISDN-cards S0-16.3
+  the Teles/Creatix PnP and the Teles PCMCIA.
+  See Documentation/isdn/README.HiSax on how to configure it 
+  using the different cards, a different D-channel protocol, or
+  non-standard irq/port/shmem settings.
+
+HiSax Support for AVM A1 (Fritz)
+CONFIG_HISAX_AVM_A1
+  This enables HiSax support for the AVM A1 (aka "Fritz").
+  See Documentation/isdn/README.HiSax on how to configure it
+  using the different cards, a different D-channel protocol, or
+  non-standard irq/port/shmem settings.
+
+HiSax Support for Elsa ISA cards
+CONFIG_HISAX_ELSA_PCC
+  This enables HiSax support for the Elsa Mircolink cards and
+  for the Elsa Quickstep series cards for the ISA bus.
+  You don't have to select "HiSax Support for Elsa PCMCIA card"
+  at the same time.
+  See Documentation/isdn/README.HiSax on how to configure it 
+  using the different cards, a different D-channel protocol, or
+  non-standard irq/port/shmem settings.
+
+HiSax Support for Elsa PCMCIA card
+CONFIG_HISAX_ELSA_PCMCIA
+  This enables HiSax support for the Elsa PCMCIA card.
+  You don't have to select "HiSax Support for Elsa ISA cards" at
+  the same time.
+  See Documentation/isdn/README.HiSax on how to configure it 
+  using the different cards, a different D-channel protocol, or
+  non-standard irq/port/shmem settings.
+
+HiSax Support for ITK ix1-micro Revision 2
+CONFIG_HISAX_IX1MICROR2
+  This enables HiSax support for the ITK ix1-micro Revision 2 card.
+  See Documentation/isdn/README.HiSax on how to configure it 
+  using the different cards, a different D-channel protocol, or
+  non-standard irq/port/shmem settings.
+
+HiSax Support for EURO/DSS1
+CONFIG_HISAX_EURO
+  You should choose your D-channel protocol your local
+  telephone service provider uses here by saying Y or N.
+  NOTE: This is mutually exclusive with HiSax Support for
+  german 1TR6 and US/NI-1 if you have only one ISDN card
+  installed.
+
+HiSax Support for US/NI-1
+CONFIG_HISAX_NI1
+  You should choose your D-channel protocol your local
+  telephone service provider uses here by saying Y or N.
+  NOTE: This is mutually exclusive with HiSax Support for
+  german 1TR6 and EURO/DSS1 if you have only one ISDN card
+  installed. (not working yet, under developement)
+
+HiSax Support for german 1TR6
+CONFIG_HISAX_1TR6
+  You should choose your D-channel protocol your local
+  telephone service provider uses here by saying Y or N.
+  NOTE: This is mutually exclusive with HiSax Support for
+  EURO/DSS1 and US/NI-1 if you have only one ISDN card
+  installed.
 
 PCBIT-D support
 CONFIG_ISDN_DRV_PCBIT
@@ -3836,6 +4021,21 @@ CONFIG_ISDN_DRV_PCBIT
   using a utility which is distributed separately.  See
   Documentation/isdn/README and Documentation/isdn/README.pcbit for
   more information.
+
+Spellcaster support (EXPERIMENTAL)
+CONFIG_ISDN_DRV_SC
+  This enables support for the Spellcaster BRI boards. This driver
+  currently builds in a modularized version only.
+  See Documentation/isdn/README.sc and http://www.spellcast.com
+  for more information.
+
+AVM-B1 with CAPI2.0 support
+CONFIG_ISDN_DRV_AVMB1
+  This enables support for the AVM B1 card and also adds a CAPI2.0
+  interface for this card. For running this card, additional firmware
+  is necessary, which has to be downloaded into the card using a
+  utility which is distributed separately.
+  See Documentation/isdn/README.avmb1 for more information.
 
 Support for AP1000 multicomputer
 CONFIG_AP1000

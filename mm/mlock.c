@@ -124,9 +124,9 @@ static int mlock_fixup(struct vm_area_struct * vma,
 			pages = -pages;
 		vma->vm_mm->locked_vm += pages;
 
-		if (newflags & VM_LOCKED)
+		if ((newflags & VM_LOCKED) && (newflags & VM_READ))
 			while (start < end) {
-				char c = get_user((char *) start);
+				int c = get_user((int *) start);
 				__asm__ __volatile__("": :"r" (c));
 				start += PAGE_SIZE;
 			}
@@ -202,7 +202,7 @@ asmlinkage int sys_mlock(unsigned long start, size_t len)
 
 	/* we may lock at most half of physical memory... */
 	/* (this check is pretty bogus, but doesn't hurt) */
-	if (locked > MAP_NR(high_memory)/2)
+	if (locked > (MAP_NR(high_memory) >> 1))
 		return -ENOMEM;
 
 	return do_mlock(start, len, 1);
@@ -259,7 +259,7 @@ asmlinkage int sys_mlockall(int flags)
 
 	/* we may lock at most half of physical memory... */
 	/* (this check is pretty bogus, but doesn't hurt) */
-	if (current->mm->total_vm > MAP_NR(high_memory)/2)
+	if (current->mm->total_vm > (MAP_NR(high_memory) >> 1))
 		return -ENOMEM;
 
 	return do_mlockall(flags);

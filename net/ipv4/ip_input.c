@@ -297,14 +297,16 @@ int ip_rcv(struct sk_buff *skb, struct device *dev, struct packet_type *pt)
 
 	/*
 	 *	Try to select closest <src,dst> alias device, if any.
-	 *	net_alias_dev_rcv_sel32 returns main device if it 
+	 *	net_alias_dev_rx32 returns main device if it 
 	 *	fails to found other.
+ 	 *  	If successful, also incr. alias rx count.
+	 *
+	 *	Only makes sense for unicasts - Thanks ANK.
 	 */
 
 #ifdef CONFIG_NET_ALIAS
-	if (iph->daddr != skb->dev->pa_addr && net_alias_has(skb->dev)) {
-		if (ip_chk_addr(iph->daddr) == IS_MYADDR)
-			skb->dev = dev = net_alias_dev_rcv_sel32(skb->dev, AF_INET, iph->saddr, iph->daddr);
+	if (skb->pkt_type == PACKET_HOST && iph->daddr != skb->dev->pa_addr && net_alias_has(skb->dev)) {
+		skb->dev = dev = net_alias_dev_rx32(skb->dev, AF_INET, iph->saddr, iph->daddr);
 	}
 #endif
 

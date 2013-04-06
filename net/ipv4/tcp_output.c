@@ -32,6 +32,8 @@
  *				  thus the outgoing device does as well, when
  *				  skb's are on the retransmit queue which still
  *				  refer to the old obsolete destination.
+ *              Elliot Poger    : Added support for SO_BINDTODEVICE.
+ *	Juan Jose Ciarlante	: Added sock dynamic source address rewriting
  */
 
 #include <linux/config.h>
@@ -50,22 +52,10 @@
  *  RECV.NEXT + RCV.WIN fixed until:
  *  RCV.BUFF - RCV.USER - RCV.WINDOW >= min(1/2 RCV.BUFF, MSS)"
  *
- * Experiments against BSD and Solaris machines show that following
- * these rules results in the BSD and Solaris machines making very
- * bad guesses about how much data they can have in flight.
- *
- * Instead we follow the BSD lead and offer a window that gives
- * the size of the current free space, truncated to a multiple
- * of 1024 bytes. If the window is smaller than
- * 	min(sk->mss, MAX_WINDOW/2)
- * then we advertise the window as having size 0, unless this
- * would shrink the window we offered last time.
- * This results in as much as double the throughput as the original
- * implementation.
- *
  * We do BSD style SWS avoidance -- note that RFC1122 only says we
  * must do silly window avoidance, it does not require that we use
- * the suggested algorithm.
+ * the suggested algorithm. Following BSD avoids breaking header
+ * prediction.
  *
  * The "rcvbuf" and "rmem_alloc" values are shifted by 1, because
  * they also contain buffer handling overhead etc, so the window
@@ -73,33 +63,41 @@
  */
 int tcp_new_window(struct sock * sk)
 {
-	unsigned long window;
+	unsigned long window = sk->window;
 	unsigned long minwin, maxwin;
+	unsigned long free_space;
 
 	/* Get minimum and maximum window values.. */
 	minwin = sk->mss;
 	if (!minwin)
 		minwin = sk->mtu;
+	if (!minwin) {
+		printk(KERN_DEBUG "tcp_new_window: mss fell to 0.\n");
+		minwin = 1;
+	}
 	maxwin = sk->window_clamp;
 	if (!maxwin)
 		maxwin = MAX_WINDOW;
+
 	if (minwin > maxwin/2)
 		minwin = maxwin/2;
 
 	/* Get current rcvbuf size.. */
-	window = sk->rcvbuf/2;
-	if (window < minwin) {
+	free_space = sk->rcvbuf/2;
+	if (free_space < minwin) {
 		sk->rcvbuf = minwin*2;
-		window = minwin;
+		free_space = minwin;
 	}
 
 	/* Check rcvbuf against used and minimum window */
-	window -= sk->rmem_alloc/2;
-	if ((long)(window - minwin) < 0)		/* SWS avoidance */
-		window = 0;
+	free_space -= sk->rmem_alloc/2;
+	if ((long)(free_space - minwin) < 0)		/* SWS avoidance */
+		return 0;
 
-	if (window > 1023)
-		window &= ~1023;
+	/* Try to avoid the divide and multiply if we can */
+        if (window <= free_space - minwin || window > free_space)
+                window = (free_space/minwin)*minwin;
+
 	if (window > maxwin)
 		window = maxwin;
 	return window;
@@ -166,8 +164,10 @@ void tcp_send_skb(struct sock *sk, struct sk_buff *skb)
 	 * anything for a long time, in which case we have no reason to
 	 * believe that our congestion window is still correct.
 	 */
-	if (sk->send_head == 0 && (jiffies - sk->idletime) > sk->rto)
+	if (sk->send_head == 0 && (jiffies - sk->idletime) > sk->rto) {
 		sk->cong_window = 1;
+		sk->cong_count = 0;
+	}
 
 	/*
 	 *	Actual processing.
@@ -175,7 +175,7 @@ void tcp_send_skb(struct sock *sk, struct sk_buff *skb)
 
 	tcp_statistics.TcpOutSegs++;  
 	skb->seq = ntohl(th->seq);
-	skb->end_seq = skb->seq + size - 4*th->doff;
+	skb->end_seq = skb->seq + size - 4*th->doff + th->fin;
 
 	/*
 	 *	We must queue if
@@ -441,6 +441,7 @@ void tcp_do_retransmit(struct sock *sk, int all)
 		struct tcphdr *th;
 		struct iphdr *iph;
 		int size;
+		unsigned long flags;
 
 		dev = skb->dev;
 		IS_SKB(skb);
@@ -456,8 +457,18 @@ void tcp_do_retransmit(struct sock *sk, int all)
 		/*		   effect is that we'll send some unnecessary data, */
 		/*		   but the alternative is disastrous...	    */
 		
-		if (skb_device_locked(skb))
+		save_flags(flags);
+		cli();
+
+		if (skb_device_locked(skb)) {
+			restore_flags(flags);
 			break;
+		}
+
+		/* Unlink from any chain */
+		skb_unlink(skb);
+
+		restore_flags(flags);
 
 		/*
 		 *	Discard the surplus MAC header
@@ -491,7 +502,8 @@ void tcp_do_retransmit(struct sock *sk, int all)
 			/* ANK: UGLY, but the bug, that was here, should be fixed.
 			 */
 			struct options *  opt = (struct options*)skb->proto_priv;
-			rt = ip_check_route(&sk->ip_route_cache, opt->srr?opt->faddr:iph->daddr, skb->localroute);
+			rt = ip_check_route(&sk->ip_route_cache, opt->srr?opt->faddr:iph->daddr,
+					    skb->localroute, sk->bound_device);
 	        }
 
 		iph->id = htons(ip_id_count++);
@@ -534,6 +546,9 @@ void tcp_do_retransmit(struct sock *sk, int all)
 				struct sk_buff *skb2 = sk->write_queue.next;
 				while (skb2 && skb2->dev == skb->dev) {
 					skb2->raddr=rt->rt_gateway;
+                                        if (sk->state == TCP_SYN_SENT && sysctl_ip_dynaddr)
+                                                ip_rewrite_addrs (sk, skb2, dev);
+					skb_pull(skb2,((unsigned char *)skb2->ip_hdr)-skb2->data);
 					skb2->dev = dev;
 					skb2->arp=1;
 					if (rt->rt_hh)
@@ -557,6 +572,8 @@ void tcp_do_retransmit(struct sock *sk, int all)
 				}
 			}
 			skb->raddr=rt->rt_gateway;
+                        if (skb->dev !=dev && sk->state == TCP_SYN_SENT && sysctl_ip_dynaddr)
+                                ip_rewrite_addrs(sk, skb, dev);
 			skb->dev=dev;
 			skb->arp=1;
 #ifdef CONFIG_FIREWALL
@@ -617,14 +634,15 @@ void tcp_do_retransmit(struct sock *sk, int all)
 				 *	We still add up the counts as the round trip time wants
 				 *	adjusting.
 				 */
-				if (sk && !skb_device_locked(skb))
+				if (!skb_device_locked(skb))
 				{
-					/* Remove it from any existing driver queue first! */
-					skb_unlink(skb);
 					/* Now queue it */
 					ip_statistics.IpOutRequests++;
 					dev_queue_xmit(skb, dev, sk->priority);
 					sk->packets_out++;
+				} else {
+					/* This shouldn't happen as we skip out above if the buffer is locked */
+				        printk(KERN_WARNING "tcp_do_retransmit: sk_buff (%p) became locked\n", skb);
 				}
 			}
 		}
@@ -875,6 +893,8 @@ void tcp_send_fin(struct sock *sk)
 			return;
 		}
 	}
+
+	clear_delayed_acks(sk);
 	
 	/*
 	 *	We ought to check if the end of the queue is a buffer and
@@ -987,8 +1007,25 @@ void tcp_send_synack(struct sock * newsk, struct sock * sk, struct sk_buff * skb
 	ptr[2] = ((newsk->mtu) >> 8) & 0xff;
 	ptr[3] =(newsk->mtu) & 0xff;
 	buff->csum = csum_partial(ptr, 4, 0);
+#ifdef CONFIG_SYN_COOKIES
+	/* Don't save buff on the newsk chain if we are going to destroy
+	 * newsk anyway in a second, it just delays getting rid of newsk.
+	 */
+ 	if (destroy) {
+		/* BUFF was charged to NEWSK, _this_ is what we want
+		 * to undo so the SYN cookie can be killed now.  SKB
+		 * is charged to SK, below we will undo that when
+		 * we kfree SKB.
+		 */
+		buff->sk = NULL;
+		atomic_sub(buff->truesize, &newsk->wmem_alloc);
+	}
+#endif
 	tcp_send_check(t1, newsk->saddr, newsk->daddr, sizeof(*t1)+4, buff);
-	newsk->prot->queue_xmit(newsk, ndev, buff, destroy);
+	if (destroy)
+		newsk->prot->queue_xmit(NULL, ndev, buff, 1);
+	else
+		newsk->prot->queue_xmit(newsk, ndev, buff, 0);
 
 
 #ifdef CONFIG_SYN_COOKIES
@@ -1212,6 +1249,9 @@ void tcp_write_wakeup(struct sock *sk)
 		win_size = skb->len - (((unsigned char *) th) - skb->data);
 		win_size -= th->doff * 4;
 
+		/* Don't send more than the offered window! */
+		win_size = min(win_size, sk->window_seq - sk->sent_seq);
+
 		/*
 		 *	Grab the data for a temporary frame
 		 */
@@ -1386,7 +1426,9 @@ void tcp_shrink_skb(struct sock *sk, struct sk_buff *skb, u32 ack)
 	/* Update our starting seq number */
 	skb->seq = ack;
 	th->seq = htonl(ack);
+
 	iph->tot_len = htons(ntohs(iph->tot_len)-diff);
+	ip_send_check(iph);
 
 	/* Get the partial checksum for the IP options */
 	if (th->doff*4 - sizeof(*th) > 0)

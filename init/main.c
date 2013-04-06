@@ -59,6 +59,7 @@ extern int console_loglevel;
 static int init(void *);
 extern int bdflush(void *);
 extern int kswapd(void *);
+extern void kswapd_setup(void);
 
 extern void init_IRQ(void);
 extern void init_modules(void);
@@ -88,9 +89,11 @@ extern void generic_NCR5380_setup(char *str, int *intr);
 extern void generic_NCR53C400_setup(char *str, int *intr);
 extern void aha152x_setup(char *str, int *ints);
 extern void aha1542_setup(char *str, int *ints);
+extern void gdth_setup(char *str, int *ints);
 extern void aic7xxx_setup(char *str, int *ints);
 extern void AM53C974_setup(char *str, int *ints);
 extern void BusLogic_Setup(char *str, int *ints);
+extern void ncr53c8xx_setup(char *str, int *ints);
 extern void eata2x_setup(char *str, int *ints);
 extern void u14_34f_setup(char *str, int *ints);
 extern void fdomain_setup(char *str, int *ints);
@@ -146,8 +149,11 @@ static void no_initrd(char *s,int *ints);
 #ifdef CONFIG_ISDN_DRV_ICN
 extern void icn_setup(char *str, int *ints);
 #endif
-#ifdef CONFIG_ISDN_DRV_TELES
-extern void teles_setup(char *str, int *ints);
+#ifdef CONFIG_ISDN_DRV_HISAX
+extern void HiSax_setup(char *str, int *ints);
+#endif
+#ifdef CONFIG_ISDN_DRV_PCBIT
+extern void pcbit_setup(char *str, int *ints);
 #endif
 
 #ifdef CONFIG_ATARIMOUSE
@@ -165,11 +171,11 @@ extern void gvp11_setup (char *str, int *ints);
 #ifdef CONFIG_DIGI
 extern void pcxx_setup(char *str, int *ints);
 #endif
-#ifdef CONFIG_ISDN_DRV_PCBIT
-extern void pcbit_setup(char *str, int *ints);
-#endif
 #ifdef CONFIG_RISCOM8
 extern void riscom8_setup(char *str, int *ints);
+#endif
+#ifdef CONFIG_SPECIALIX
+extern void specialix_setup(char *str, int *ints);
 #endif
 #ifdef CONFIG_BAYCOM
 extern void baycom_setup(char *str, int *ints);
@@ -317,11 +323,17 @@ struct {
 #ifdef CONFIG_SCSI_AHA1542
 	{ "aha1542=", aha1542_setup},
 #endif
+#ifdef CONFIG_SCSI_GDTH
+	{ "gdth=", gdth_setup},
+#endif
 #ifdef CONFIG_SCSI_AIC7XXX
 	{ "aic7xxx=", aic7xxx_setup},
 #endif
 #ifdef CONFIG_SCSI_BUSLOGIC
 	{ "BusLogic=", BusLogic_Setup},
+#endif
+#ifdef CONFIG_SCSI_NCR53C8XX
+	{ "ncr53c8xx=", ncr53c8xx_setup},
 #endif
 #ifdef CONFIG_SCSI_EATA
 	{ "eata=", eata2x_setup},
@@ -392,8 +404,9 @@ struct {
 #ifdef CONFIG_ISDN_DRV_ICN
 	{ "icn=", icn_setup },
 #endif
-#ifdef CONFIG_ISDN_DRV_TELES
-	{ "teles=", teles_setup },
+#ifdef CONFIG_ISDN_DRV_HISAX
+       { "hisax=", HiSax_setup },
+       { "HiSax=", HiSax_setup },
 #endif
 #ifdef CONFIG_ISDN_DRV_PCBIT
 	{ "pcbit=", pcbit_setup },
@@ -419,6 +432,9 @@ struct {
 #endif
 #ifdef CONFIG_RISCOM8
 	{ "riscom8=", riscom8_setup },
+#endif
+#ifdef CONFIG_SPECIALIX
+	{ "specialix=", specialix_setup },
 #endif
 #ifdef CONFIG_BAYCOM
 	{ "baycom=", baycom_setup },
@@ -480,6 +496,10 @@ static int checksetup(char *line)
    still work even if initially too large, it will just take slightly longer */
 unsigned long loops_per_sec = (1<<12);
 
+#if defined(__SMP__) && defined(__i386__)
+unsigned long smp_loops_per_tick = 1000000;
+#endif
+
 /* This is the number of bits of precision for the loops_per_second.  Each
    bit takes on average 1.5/HZ seconds.  This (like the original) is a little
    better than 1% */
@@ -527,6 +547,10 @@ void calibrate_delay(void)
 	printk("ok - %lu.%02lu BogoMIPS\n",
 		(loops_per_sec+2500)/500000,
 		((loops_per_sec+2500)/5000) % 100);
+
+#if defined(__SMP__) && defined(__i386__)
+	smp_loops_per_tick = loops_per_sec / 400;
+#endif
 }
 
 static void parse_root_dev(char * line)
@@ -920,6 +944,7 @@ static int init(void * unused)
 	/* Launch bdflush from here, instead of the old syscall way. */
 	kernel_thread(bdflush, NULL, 0);
 	/* Start the background pageout daemon. */
+	kswapd_setup();
 	kernel_thread(kswapd, NULL, 0);
 
 #ifdef CONFIG_BLK_DEV_INITRD

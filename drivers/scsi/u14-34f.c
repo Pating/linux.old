@@ -1,6 +1,20 @@
 /*
  *      u14-34f.c - Low-level driver for UltraStor 14F/34F SCSI host adapters.
  *
+ *      12 Sep 1997 rev. 3.11 for linux 2.0.30 and 2.1.55
+ *          Use of udelay inside the wait loops to avoid timeout
+ *          problems with fast cpus.
+ *          Removed check about useless calls to the interrupt service
+ *          routine (reported on SMP systems only).
+ *          At initialization time "sorted/unsorted" is displayed instead
+ *          of "linked/unlinked" to reinforce the fact that "linking" is
+ *          nothing but "elevator sorting" in the actual implementation.
+ *
+ *      17 May 1997 rev. 3.10 for linux 2.0.30 and 2.1.38
+ *          Use of serial_number_at_timeout in abort and reset processing.
+ *          Use of the __initfunc and __initdata macro in setup code.
+ *          Minor cleanups in the list_statistics code.
+ *
  *      24 Feb 1997 rev. 3.00 for linux 2.0.29 and 2.1.26
  *          When loading as a module, parameter passing is now supported
  *          both in 2.0 and in 2.1 style.
@@ -220,10 +234,12 @@
  *  between increasing or decreasing by minimizing the seek distance between
  *  the sector of the commands just completed and the sector of the first 
  *  command in the list to be sorted. 
- *  Trivial math assures that if there are (Q-1) outstanding request for
- *  random seeks over S sectors, the unsorted average seek distance is S/2,
- *  while the sorted average seek distance is S/(Q-1). The seek distance is
- *  hence divided by a factor (Q-1)/2.
+ *  Trivial math assures that the unsorted average seek distance when doing
+ *  random seeks over S sectors is S/3.
+ *  When (Q-1) requests are uniformly distributed over S sectors, the average
+ *  distance between two adjacent requests is S/((Q-1) + 1), so the sorted
+ *  average seek distance for (Q-1) random requests over S sectors is S/Q.
+ *  The elevator sorting hence divides the seek distance by a factor Q/3.
  *  The above pure geometric remarks are valid in all cases and the 
  *  driver effectively reduces the seek distance by the predicted factor
  *  when there are Q concurrent read i/o operations on the device, but this
@@ -262,6 +278,7 @@ MODULE_AUTHOR("Dario Ballabio");
 #include <linux/sched.h>
 #include <linux/kernel.h>
 #include <linux/ioport.h>
+#include <linux/delay.h>
 #include <asm/io.h>
 #include <asm/system.h>
 #include <asm/byteorder.h>
@@ -273,8 +290,16 @@ MODULE_AUTHOR("Dario Ballabio");
 #include <asm/dma.h>
 #include <asm/irq.h>
 #include "u14-34f.h"
-#include<linux/stat.h>
-#include<linux/config.h>
+#include <linux/stat.h>
+#include <linux/config.h>
+
+#if LINUX_VERSION_CODE >= LinuxVersionCode(2,1,36)
+#include <linux/init.h>
+#else
+#define __initfunc(A) A
+#define __initdata
+#define __init
+#endif
 
 struct proc_dir_entry proc_scsi_u14_34f = {
     PROC_SCSI_U14_34F, 6, "u14_34f",
@@ -306,6 +331,7 @@ struct proc_dir_entry proc_scsi_u14_34f = {
 #undef  DEBUG_INTERRUPT
 #undef  DEBUG_STATISTICS
 #undef  DEBUG_RESET
+#undef  DEBUG_SMP
 
 #define MAX_ISA 3
 #define MAX_VESA 1 
@@ -334,7 +360,7 @@ struct proc_dir_entry proc_scsi_u14_34f = {
 #define READY    5
 #define ABORTING 6
 #define NO_DMA  0xff
-#define MAXLOOP 200000
+#define MAXLOOP  10000
 
 #define REG_LCL_MASK      0
 #define REG_LCL_INTR      1
@@ -419,7 +445,7 @@ static struct Scsi_Host *sh[MAX_BOARDS + 1];
 static const char *driver_name = "Ux4F";
 static unsigned int irqlist[MAX_IRQ], calls[MAX_IRQ];
 
-static unsigned int io_port[] = { 
+static unsigned int io_port[] __initdata = { 
 
    /* Space for MAX_INT_PARAM ports usable while loading as a module */
    SKIP,    SKIP,   SKIP,   SKIP,   SKIP,   SKIP,   SKIP,   SKIP,
@@ -515,9 +541,9 @@ static void select_queue_depths(struct Scsi_Host *host, Scsi_Device *devlist) {
 
       if (TLDEV(dev->type)) {
          if (linked_comm && dev->queue_depth > 2)
-            link_suffix = ", linked";
+            link_suffix = ", sorted";
          else
-            link_suffix = ", unlinked";
+            link_suffix = ", unsorted";
          }
 
       if (dev->tagged_supported && TLDEV(dev->type) && dev->tagged_queue)
@@ -534,11 +560,12 @@ static void select_queue_depths(struct Scsi_Host *host, Scsi_Device *devlist) {
    return;
 }
 
-static inline int wait_on_busy(unsigned int iobase) {
-   unsigned int loop = MAXLOOP;
+static inline int wait_on_busy(unsigned int iobase, unsigned int loop) {
 
-   while (inb(iobase + REG_LCL_INTR) & BSY_ASSERTED)
+   while (inb(iobase + REG_LCL_INTR) & BSY_ASSERTED) {
+      udelay(1L);
       if (--loop == 0) return TRUE;
+      }
 
    return FALSE;
 }
@@ -556,7 +583,7 @@ static int board_inquiry(unsigned int j) {
    cpp->scsi_cdbs_len = 6;
    cpp->scsi_cdbs[0] = HA_CMD_INQUIRY;
 
-   if (wait_on_busy(sh[j]->io_port)) {
+   if (wait_on_busy(sh[j]->io_port, MAXLOOP)) {
       printk("%s: board_inquiry, adapter busy.\n", BN(j));
       return TRUE;
       }
@@ -574,7 +601,7 @@ static int board_inquiry(unsigned int j) {
 
    sti();
    time = jiffies;
-   while ((jiffies - time) < HZ && limit++ < 100000000);
+   while ((jiffies - time) < HZ && limit++ < 20000) udelay(100L);
    cli();
 
    if (cpp->adapter_status || HD(j)->cp_stat[0] != FREE) {
@@ -586,8 +613,8 @@ static int board_inquiry(unsigned int j) {
    return FALSE;
 }
 
-static inline int port_detect(unsigned int port_base, unsigned int j, 
-                              Scsi_Host_Template *tpnt) {
+__initfunc (static inline int port_detect \
+      (unsigned int port_base, unsigned int j, Scsi_Host_Template *tpnt)) {
    unsigned char irq, dma_channel, subversion, i;
    unsigned char in_byte;
    char *bus_type, dma_name[16];
@@ -748,7 +775,7 @@ static inline int port_detect(unsigned int port_base, unsigned int j,
 	 }
       }
 
-   if (dma_channel == NO_DMA) sprintf(dma_name, "%s", "NO DMA");
+   if (dma_channel == NO_DMA) sprintf(dma_name, "%s", "BMST");
    else                       sprintf(dma_name, "DMA %u", dma_channel);
 
    for (i = 0; i < sh[j]->can_queue; i++)
@@ -781,7 +808,7 @@ static inline int port_detect(unsigned int port_base, unsigned int j,
    return TRUE;
 }
 
-void u14_34f_setup(char *str, int *ints) {
+__initfunc (void u14_34f_setup(char *str, int *ints)) {
    int i, argc = ints[0];
    char *cur = str, *pc;
 
@@ -813,7 +840,7 @@ void u14_34f_setup(char *str, int *ints) {
    return;
 }
 
-int u14_34f_detect(Scsi_Host_Template *tpnt) {
+__initfunc (int u14_34f_detect(Scsi_Host_Template *tpnt)) {
    unsigned long flags;
    unsigned int j = 0, k;
 
@@ -983,12 +1010,12 @@ int u14_34f_queuecommand(Scsi_Cmnd *SCpnt, void (*done)(Scsi_Cmnd *)) {
    if (linked_comm && SCpnt->device->queue_depth > 2
                                      && TLDEV(SCpnt->device->type)) {
       HD(j)->cp_stat[i] = READY;
-      flush_dev(SCpnt->device, 0, j, FALSE);
+      flush_dev(SCpnt->device, SCpnt->request.sector, j, FALSE);
       restore_flags(flags);
       return 0;
       }
 
-   if (wait_on_busy(sh[j]->io_port)) {
+   if (wait_on_busy(sh[j]->io_port, MAXLOOP)) {
       SCpnt->result = DID_ERROR << 16;
       SCpnt->host_scribble = NULL;
       printk("%s: qcomm, target %d.%d:%d, pid %ld, adapter busy, DID_ERROR,"\
@@ -1018,7 +1045,8 @@ int u14_34f_abort(Scsi_Cmnd *SCarg) {
    cli();
    j = ((struct hostdata *) SCarg->host->hostdata)->board_number;
 
-   if (SCarg->host_scribble == NULL) {
+   if (SCarg->host_scribble == NULL
+       || SCarg->serial_number != SCarg->serial_number_at_timeout) {
       printk("%s: abort, target %d.%d:%d, pid %ld inactive.\n",
 	     BN(j), SCarg->channel, SCarg->target, SCarg->lun, SCarg->pid);
       restore_flags(flags);
@@ -1032,7 +1060,7 @@ int u14_34f_abort(Scsi_Cmnd *SCarg) {
    if (i >= sh[j]->can_queue)
       panic("%s: abort, invalid SCarg->host_scribble.\n", BN(j));
 
-   if (wait_on_busy(sh[j]->io_port)) {
+   if (wait_on_busy(sh[j]->io_port, MAXLOOP)) {
       printk("%s: abort, timeout error.\n", BN(j));
       restore_flags(flags);
       return SCSI_ABORT_ERROR;
@@ -1101,13 +1129,19 @@ int u14_34f_reset(Scsi_Cmnd *SCarg, unsigned int reset_flags) {
    if (SCarg->host_scribble == NULL)
       printk("%s: reset, pid %ld inactive.\n", BN(j), SCarg->pid);
 
+   if (SCarg->serial_number != SCarg->serial_number_at_timeout) {
+      printk("%s: reset, pid %ld, reset not running.\n", BN(j), SCarg->pid);
+      restore_flags(flags);
+      return SCSI_RESET_NOT_RUNNING;
+      }
+
    if (HD(j)->in_reset) {
       printk("%s: reset, exit, already in reset.\n", BN(j));
       restore_flags(flags);
       return SCSI_RESET_ERROR;
       }
 
-   if (wait_on_busy(sh[j]->io_port)) {
+   if (wait_on_busy(sh[j]->io_port, MAXLOOP)) {
       printk("%s: reset, exit, timeout error.\n", BN(j));
       restore_flags(flags);
       return SCSI_RESET_ERROR;
@@ -1158,7 +1192,7 @@ int u14_34f_reset(Scsi_Cmnd *SCarg, unsigned int reset_flags) {
       if (SCpnt == SCarg) arg_done = TRUE;
       }
 
-   if (wait_on_busy(sh[j]->io_port)) {
+   if (wait_on_busy(sh[j]->io_port, MAXLOOP)) {
       printk("%s: reset, cannot reset, timeout error.\n", BN(j));
       restore_flags(flags);
       return SCSI_RESET_ERROR;
@@ -1174,7 +1208,7 @@ int u14_34f_reset(Scsi_Cmnd *SCarg, unsigned int reset_flags) {
    HD(j)->in_reset = TRUE;
    sti();
    time = jiffies;
-   while ((jiffies - time) < HZ && limit++ < 100000000);
+   while ((jiffies - time) < (10 * HZ) && limit++ < 200000) udelay(100L);
    cli();
    printk("%s: reset, interrupts disabled, loops %d.\n", BN(j), limit);
 
@@ -1271,7 +1305,7 @@ static inline void reorder(unsigned int j, unsigned long cursec,
    unsigned int rev = FALSE, s = TRUE, r = TRUE;
    unsigned int input_only = TRUE, overlap = FALSE;
    unsigned long sl[n_ready], pl[n_ready], ll[n_ready];
-   unsigned long maxsec = 0, minsec = ULONG_MAX, seek = 0;
+   unsigned long maxsec = 0, minsec = ULONG_MAX, seek = 0, iseek = 0;
 
    static unsigned int flushcount = 0, batchcount = 0, sortcount = 0;
    static unsigned int readycount = 0, ovlcount = 0, inputcount = 0;
@@ -1282,8 +1316,8 @@ static inline void reorder(unsigned int j, unsigned long cursec,
       printk("fc %d bc %d ic %d oc %d rc %d rs %d sc %d re %d"\
              " av %ldK as %ldK.\n", flushcount, batchcount, inputcount,
              ovlcount, readycount, readysorted, sortcount, revcount,
-             seeknosort / (readycount - batchcount + 1), 
-             seeksorted / (readycount - batchcount + 1));
+             seeknosort / (readycount + 1), 
+             seeksorted / (readycount + 1));
 
    if (n_ready <= 1) return;
 
@@ -1311,6 +1345,10 @@ static inline void reorder(unsigned int j, unsigned long cursec,
 
       }
 
+   if (link_statistics) {
+      if (cursec > sl[0]) seek += cursec - sl[0]; else seek += sl[0] - cursec;
+      }
+
    if (cursec > ((maxsec + minsec) / 2)) rev = TRUE;
 
    if (!((rev && r) || (!rev && s))) sort(sl, il, n_ready, rev);
@@ -1328,10 +1366,11 @@ static inline void reorder(unsigned int j, unsigned long cursec,
    if (overlap) sort(pl, il, n_ready, FALSE);
 
    if (link_statistics) {
+      if (cursec > sl[0]) iseek = cursec - sl[0]; else iseek = sl[0] - cursec;
       batchcount++; readycount += n_ready, seeknosort += seek / 1024; 
       if (input_only) inputcount++;
       if (overlap) { ovlcount++; seeksorted += seek / 1024; }
-      else seeksorted += (maxsec - minsec) / 1024;
+      else seeksorted += (iseek + maxsec - minsec) / 1024;
       if (rev && !r)     {  revcount++; readysorted += n_ready; }
       if (!rev && !s)    { sortcount++; readysorted += n_ready; }
       }
@@ -1375,7 +1414,7 @@ static void flush_dev(Scsi_Device *dev, unsigned long cursec, unsigned int j,
    for (n = 0; n < n_ready; n++) {
       k = il[n]; cpp = &HD(j)->cp[k]; SCpnt = cpp->SCpnt;
 
-      if (wait_on_busy(sh[j]->io_port)) {
+      if (wait_on_busy(sh[j]->io_port, MAXLOOP)) {
          printk("%s: %s, target %d.%d:%d, pid %ld, Mbox %d, adapter"\
                 " busy, will abort.\n", BN(j), (ihdlr ? "ihdlr" : "qcomm"),
                 SCpnt->channel, SCpnt->target, SCpnt->lun, SCpnt->pid, k);
@@ -1590,9 +1629,11 @@ static void u14_34f_interrupt_handler(int irq, void *dev_id,
 
    calls[irq]++;
 
+#if defined (DEBUG_SMP)
    if (total_loops == 0) 
      printk("%s: ihdlr, irq %d, no command completed, calls %d.\n",
 	    driver_name, irq, calls[irq]);
+#endif
 
    if (do_trace) printk("%s: ihdlr, exit, irq %d, calls %d.\n",
 			driver_name, irq, calls[irq]);

@@ -69,14 +69,17 @@ extern int max_files, nr_files;
 #define MS_NOEXEC	 8	/* Disallow program execution */
 #define MS_SYNCHRONOUS	16	/* Writes are synced at once */
 #define MS_REMOUNT	32	/* Alter flags of a mounted FS */
+#define MS_MANDLOCK	64	/* Allow mandatory locks on an FS */
 #define S_WRITE		128	/* Write on file/directory/symlink */
 #define S_APPEND	256	/* Append-only file */
 #define S_IMMUTABLE	512	/* Immutable file */
+#define MS_NOATIME	1024	/* Do not update access times. */
+#define S_BAD_INODE	2048	/* Marker for unreadable inodes */
 
 /*
  * Flags that can be altered by MS_REMOUNT
  */
-#define MS_RMT_MASK (MS_RDONLY)
+#define MS_RMT_MASK (MS_RDONLY|MS_NOSUID|MS_NODEV|MS_NOEXEC|MS_SYNCHRONOUS|MS_MANDLOCK|MS_NOATIME)
 
 /*
  * Magic mount flag number. Has to be or-ed to the flag values.
@@ -97,10 +100,18 @@ extern int max_files, nr_files;
 #define IS_NODEV(inode) ((inode)->i_flags & MS_NODEV)
 #define IS_NOEXEC(inode) ((inode)->i_flags & MS_NOEXEC)
 #define IS_SYNC(inode) ((inode)->i_flags & MS_SYNCHRONOUS)
+#define IS_MANDLOCK(inode) ((inode)->i_flags & MS_MANDLOCK)
 
 #define IS_WRITABLE(inode) ((inode)->i_flags & S_WRITE)
 #define IS_APPEND(inode) ((inode)->i_flags & S_APPEND)
 #define IS_IMMUTABLE(inode) ((inode)->i_flags & S_IMMUTABLE)
+#define IS_NOATIME(inode) ((inode)->i_flags & MS_NOATIME)
+
+#define UPDATE_ATIME(inode) \
+	if (!IS_NOATIME(inode) && !IS_RDONLY(inode)) { \
+		inode->i_atime = CURRENT_TIME; \
+		inode->i_dirt = 1; \
+	}
 
 /* the read-only stuff doesn't really belong here, but any other place is
    probably as bad and I don't want to create yet another include file. */
@@ -321,6 +332,11 @@ struct inode {
 	} u;
 };
 
+struct fown_struct {
+	int pid;		/* pid or -pgrp where SIGIO should be sent */
+	uid_t uid, euid;	/* uid/euid of process setting the owner */
+};
+
 struct file {
 	mode_t f_mode;
 	loff_t f_pos;
@@ -328,23 +344,29 @@ struct file {
 	unsigned short f_count;
 	unsigned long f_reada, f_ramax, f_raend, f_ralen, f_rawin;
 	struct file *f_next, *f_prev;
-	int f_owner;		/* pid or -pgrp where SIGIO should be sent */
+	struct fown_struct f_owner;
 	struct inode * f_inode;
 	struct file_operations * f_op;
 	unsigned long f_version;
 	void *private_data;	/* needed for tty driver, and maybe others */
 };
 
+#define FL_POSIX	1
+#define FL_FLOCK	2
+#define FL_BROKEN	4	/* broken flock() emulation */
+#define FL_ACCESS	8	/* for processes suspended by mandatory locking */
+
 struct file_lock {
 	struct file_lock *fl_next;	/* singly linked list for this inode  */
 	struct file_lock *fl_nextlink;	/* doubly linked list of all locks */
 	struct file_lock *fl_prevlink;	/* used to simplify lock removal */
-	struct file_lock *fl_block;
+	struct file_lock *fl_nextblock; /* circular list of blocked processes */
+	struct file_lock *fl_prevblock;
 	struct task_struct *fl_owner;
 	struct wait_queue *fl_wait;
 	struct file *fl_file;
-	char fl_flags;
-	char fl_type;
+	unsigned char fl_flags;
+	unsigned char fl_type;
 	off_t fl_start;
 	off_t fl_end;
 };
@@ -367,27 +389,25 @@ extern int locks_mandatory_area(int read_write, struct inode *inode,
 
 extern inline int locks_verify_locked(struct inode *inode)
 {
-#ifdef CONFIG_LOCK_MANDATORY	 
 	/* Candidates for mandatory locking have the setgid bit set
 	 * but no group execute bit -  an otherwise meaningless combination.
 	 */
-	if ((inode->i_mode & (S_ISGID | S_IXGRP)) == S_ISGID)
+	if (IS_MANDLOCK(inode) &&
+	    (inode->i_mode & (S_ISGID | S_IXGRP)) == S_ISGID)
 		return (locks_mandatory_locked(inode));
-#endif
 	return (0);
 }
 extern inline int locks_verify_area(int read_write, struct inode *inode,
 				    struct file *filp, unsigned int offset,
 				    unsigned int count)
 {
-#ifdef CONFIG_LOCK_MANDATORY	 
 	/* Candidates for mandatory locking have the setgid bit set
 	 * but no group execute bit -  an otherwise meaningless combination.
 	 */
-	if ((inode->i_mode & (S_ISGID | S_IXGRP)) == S_ISGID)
+	if (IS_MANDLOCK(inode) &&
+	    (inode->i_mode & (S_ISGID | S_IXGRP)) == S_ISGID)
 		return (locks_mandatory_area(read_write, inode, filp, offset,
 					     count));
-#endif
 	return (0);
 }
 
@@ -621,6 +641,7 @@ extern struct inode * get_empty_inode(void);
 extern void insert_inode_hash(struct inode *);
 extern void clear_inode(struct inode *);
 extern struct inode * get_pipe_inode(void);
+extern void make_bad_inode(struct inode *);
 extern int get_unused_fd(void);
 extern void put_unused_fd(int);
 extern struct file * get_empty_filp(void);

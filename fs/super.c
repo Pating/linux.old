@@ -277,6 +277,8 @@ static struct proc_fs_info {
 	{ MS_NOSUID, ",nosuid" },
 	{ MS_NODEV, ",nodev" },
 	{ MS_SYNCHRONOUS, ",sync" },
+	{ MS_MANDLOCK, ",mand" },
+	{ MS_NOATIME, ",noatime" },
 #ifdef MS_NOSUB			/* Can't find this except in mount.c */
 	{ MS_NOSUB, ",nosub" },
 #endif
@@ -762,8 +764,7 @@ static int do_remount_sb(struct super_block *sb, int flags, char *data)
 		if (retval)
 			return retval;
 	}
-	sb->s_flags = (sb->s_flags & ~MS_RMT_MASK) |
-		(flags & MS_RMT_MASK);
+	sb->s_flags = (sb->s_flags & ~MS_RMT_MASK) | (flags & MS_RMT_MASK);
 	vfsmnt = lookup_vfsmnt(sb->s_dev);
 	if (vfsmnt)
 		vfsmnt->mnt_flags = sb->s_flags;

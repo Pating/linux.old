@@ -110,6 +110,12 @@ P:	Jean Tourrilhes
 M:	jt@hplb.hpl.hp.com
 S:	Maintained
 
+TOKEN-RING NETWORK DRIVER
+P:      Paul Norton
+M:      pnorton@cts.com
+L:      linux-net@vger.rutgers.edu
+S:      Maintained
+
 APM DRIVER
 P:	Rik Faith & Stephen Rothwell
 M:	faith@cs.unc.edu, Stephen.Rothwell@canb.auug.org.au
@@ -125,6 +131,24 @@ S:	Maintained
 AX.25 NETWORK LAYER
 P:	Jon Naylor
 M:	jsn@cs.nott.ac.uk
+L:	linux-hams@vger.rutgers.edu
+S:	Maintained
+
+IP MASQUERADING (IPV4)
+P:	Nigel Metheringham
+M:	Nigel.Metheringham@ThePLAnet.net
+L:	masq@indyramp.com
+S:	Maintained
+
+AX.25 DAMA SLAVE
+P:	Joerg Reuter
+M:	jreuter@poboxes.com
+L:	linux-hams@vger.rutgers.edu
+S:	Maintained
+
+Z8530 SCC DRIVER FOR AX.25
+P:	Joerg Reuter
+M:	jreuter@poboxes.com
 L:	linux-hams@vger.rutgers.edu
 S:	Maintained
 
@@ -162,6 +186,12 @@ EATA-PIO SCSI DRIVER
 P:	Michael Neuffer
 M:	mike@i-Connect.Net
 L:	linux-eata@i-connect.net, linux-scsi@vger.rutgers.edu
+S:	Maintained
+
+FILE LOCKING (flock() and fcntl()/lockf())
+P:	Andy Walker
+M:	andy@lysaker.kvaerner.no
+L:	linux-kernel@vger.rutgers.edu
 S:	Maintained
 
 FRAME RELAY DLCI/FRAD (Sangoma drivers too)
@@ -203,6 +233,12 @@ S:	Maintained
 IDE/ATAPI CDROM DRIVER 
 P:	Erik Andersen
 M:	andersee@debian.org
+L:	linux-kernel@vger.rutgers.edu
+S:	Maintained
+
+IDE/ATAPI TAPE/FLOPPY DRIVERS
+P:	Gadi Oxman
+M:	Gadi Oxman <gadio@netvision.net.il>
 L:	linux-kernel@vger.rutgers.edu
 S:	Maintained
 
@@ -288,7 +324,7 @@ S:	Maintained
 SVGA HANDLING:
 P:	Martin Mares
 M:	mj@k332.feld.cvut.cz
-L:	linux-kernel@vger.rutgers.edu
+L:	linux-video@atrey.karlin.mff.cuni.cz
 S:	Maintained
 
 VFAT FILESYSTEM:
@@ -310,6 +346,13 @@ M:	begemot@bgm.rosprint.net
 L:	linux-kernel@vger.rutgers.edu
 S:	Maintained
 
+SPECIALIX IO8+ MULTIPORT SERIAL CARD DRIVER
+P:	Roger Wolff
+M:	R.E.Wolff@BitWizard.nl
+M:	io8-linux@specialix.co.uk
+L:	linux-kernel@vger.rutgers.edu ?
+S:	Supported
+
 MOUSE AND MISC DEVICES [GENERAL]
 P:	Alessandro Rubini
 M:	rubini@ipvvis.unipv.it
@@ -318,7 +361,7 @@ S:	Maintained
 
 MENUCONFIG:
 P:	William Roadcap
-M:	roadcapw@cfw.com
+M:	roadcapw@titus.org
 L:	linux-kernel@vger.rutgers.edu
 S:	Maintained
 
@@ -361,6 +404,18 @@ S:	Maintained
 CREDITS FILE
 P:	John A. Martin
 M:	jam@acm.org
+S:	Maintained
+
+KERNEL AUTOMOUNTER (AUTOFS)
+P:	H. Peter Anvin
+M:	hpa@zytor.com
+L:	autofs@linux.kernel.org
+S:	Maintained
+
+DEVICE NUMBER REGISTRY
+P:	H. Peter Anvin
+M:	hpa@zytor.com
+L:	linux-kernel@vger.rutgers.edu
 S:	Maintained
 
 REST:

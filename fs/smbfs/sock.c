@@ -338,6 +338,8 @@ smb_receive(struct smb_server *server)
 		DPRINTK("smb_receive: Increase packet size from %d to %d\n",
 			server->packet_size, len + 4);
 		smb_vfree(server->packet);
+		server->packet = NULL;
+
 		server->packet_size = 0;
 		server->packet = smb_vmalloc(len + 4);
 		if (server->packet == NULL)
@@ -373,7 +375,6 @@ smb_receive_trans2(struct smb_server *server,
 	int total_data = 0;
 	int total_param = 0;
 	int result;
-	unsigned char *inbuf = server->packet;
 	unsigned char *rcv_buf;
 	int buf_len;
 	int data_len = 0;
@@ -389,8 +390,8 @@ smb_receive_trans2(struct smb_server *server,
 		*ldata = *lparam = 0;
 		return 0;
 	}
-	total_data = WVAL(inbuf, smb_tdrcnt);
-	total_param = WVAL(inbuf, smb_tprcnt);
+	total_data = WVAL(server->packet, smb_tdrcnt);
+	total_param = WVAL(server->packet, smb_tprcnt);
 
 	DDPRINTK("smb_receive_trans2: td=%d,tp=%d\n", total_data, total_param);
 
@@ -415,6 +416,8 @@ smb_receive_trans2(struct smb_server *server,
 
 	while (1)
 	{
+		unsigned char *inbuf = server->packet;
+
 		if (WVAL(inbuf, smb_prdisp) + WVAL(inbuf, smb_prcnt)
 		    > total_param)
 		{
@@ -434,8 +437,10 @@ smb_receive_trans2(struct smb_server *server,
 			result = -EIO;
 			goto fail;
 		}
-		DDPRINTK("target: %X\n", *data + WVAL(inbuf, smb_drdisp));
+		DDPRINTK("target: %X\n",
+			 (unsigned int) *data + WVAL(inbuf, smb_drdisp));
 		DDPRINTK("source: %X\n",
+			 (unsigned int)
 			 smb_base(inbuf) + WVAL(inbuf, smb_droff));
 		DDPRINTK("disp: %d, off: %d, cnt: %d\n",
 			 WVAL(inbuf, smb_drdisp), WVAL(inbuf, smb_droff),
@@ -550,7 +555,7 @@ smb_request(struct smb_server *server)
 	}
 	len = smb_len(buffer) + 4;
 
-	DDPRINTK("smb_request: len = %d cmd = 0x%X\n", len, buffer[8]);
+	DPRINTK("smb_request: len = %d cmd = 0x%X\n", len, buffer[8]);
 
 	old_mask = current->blocked;
 	current->blocked |= ~(_S(SIGKILL) | _S(SIGSTOP));
@@ -669,8 +674,8 @@ smb_trans2_request(struct smb_server *server, __u16 trans2_command,
 	unsigned short fs;
 	int result;
 
-	DDPRINTK("smb_trans2_request: com=%d, ld=%d, lp=%d\n",
-		 trans2_command, ldata, lparam);
+	DPRINTK("smb_trans2_request: com=%d, ld=%d, lp=%d\n",
+		trans2_command, ldata, lparam);
 
 	if (server->state != CONN_VALID)
 	{

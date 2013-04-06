@@ -1071,10 +1071,8 @@ random_read(struct inode * inode, struct file * file, char * buf, int nbytes)
 	 * If we gave the user some bytes and we have an inode pointer,
 	 * update the access time.
 	 */
-	if (inode && count != 0) {
-		inode->i_atime = CURRENT_TIME;
-		inode->i_dirt = 1;
-	}
+	if (inode && count != 0)
+		UPDATE_ATIME(inode);
 	
 	return (count ? count : retval);
 }
@@ -1339,8 +1337,13 @@ __u32 secure_tcp_sequence_number(__u32 saddr, __u32 daddr,
 	do_gettimeofday(&tv);
 	seq = tmp[1] + tv.tv_usec+tv.tv_sec*1000000;
 #if 0
-	printk("init_seq(%lx, %lx, %d, %d) = %d\n",
-	       saddr, daddr, sport, dport, seq);
+	/*
+	  ugh...we can only use in_ntoa once per printk, splitting
+	  a single line of info into multiple printk's confuses klogd,
+	  and Linus says in_ntoa sucks anyway :)
+	*/
+	printk("init_seq(%d.%d.%d.%d:%d, %d.%d.%d.%d:%d) = %d\n",
+		NIPQUAD(saddr), sport, NIPQUAD(daddr), dport, seq);
 #endif
 	return (seq);
 }
@@ -1363,7 +1366,7 @@ __u32 secure_tcp_probe_number(__u32 saddr, __u32 daddr,
 
 	/*
 	 * Pick a random secret the first time we open a TCP
-	 * connection, and expire secretes older than 5 minutes.
+	 * connection, and expire secrets older than 5 minutes.
 	 */
 	if (is_init == 0 || jiffies-secret_timestamp[offset] > 600*HZ) {
 		if (is_init == 0) valid_secret[0] = valid_secret[1] = 0;
@@ -1388,14 +1391,14 @@ __u32 secure_tcp_probe_number(__u32 saddr, __u32 daddr,
 	if (!validate) {
 		if (seq == sseq) seq++;
 #if 0
-		printk("init_seq(%lx, %lx, %d, %d, %d) = %d\n",
-		       saddr, daddr, sport, dport, sseq, seq);
+		printk("init_seq(%d.%d.%d.%d:%d %d.%d.%d.%d:%d, %d) = %d\n",
+			NIPQUAD(saddr), sport, NIPQUAD(daddr), dport, sseq, seq);
 #endif
 		return (seq);
 	} else {
 		if (seq == sseq || (seq+1) == sseq) {
-			printk("validated probe(%lx, %lx, %d, %d, %d)\n",
-		       		saddr, daddr, sport, dport, sseq);
+			printk("validated probe(%d.%d.%d.%d:%d, %d.%d.%d.%d:%d, %d)\n",
+				NIPQUAD(saddr), sport, NIPQUAD(daddr), dport, sseq);
 			return 1;
 		}
 		if (jiffies-secret_timestamp[(offset+1)%2] <= 1200*HZ) {
@@ -1407,15 +1410,15 @@ __u32 secure_tcp_probe_number(__u32 saddr, __u32 daddr,
 			seq = tmp[1];
 			if (seq == sseq || (seq+1) == sseq) {
 #ifdef 0
-				printk("validated probe(%lx, %lx, %d, %d, %d)\n",
-		       			saddr, daddr, sport, dport, sseq);
+				printk("validated probe(%d.%d.%d.%d:%d, %d.%d.%d.%d:%d, %d)\n",
+					NIPQUAD(saddr), sport, NIPQUAD(daddr), dport, sseq);
 #endif
 				return 1;
 			}
 		}
 #ifdef 0
-		printk("failed validation on probe(%lx, %lx, %d, %d, %d)\n",
-			saddr, daddr, sport, dport, sseq);
+		printk("failed validation on probe(%d.%d.%d.%d:%d, %d.%d.%d.%d:%d, %d)\n",
+			NIPQUAD(saddr), sport, NIPQUAD(daddr), dport, sseq);
 #endif
 		return 0;
 	}

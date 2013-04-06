@@ -144,6 +144,16 @@ else
   endif
 endif
 
+ifeq ($(CONFIG_ULTRA32),y)
+L_OBJS += smc-ultra32.o
+CONFIG_8390_BUILTIN = y
+else
+  ifeq ($(CONFIG_ULTRA),m)
+  CONFIG_8390_MODULE = y
+  M_OBJS += smc-ultra32.o
+  endif
+endif
+
 ifeq ($(CONFIG_E2100),y)
 L_OBJS += e2100.o
 CONFIG_8390_BUILTIN = y
@@ -309,6 +319,15 @@ else
   M_OBJS += eepro.o
   endif
 endif
+
+ifeq ($(CONFIG_EEXPRESS_PRO100B),y)
+L_OBJS += eepro100.o
+else
+  ifeq ($(CONFIG_EEXPRESS_PRO100B),m)
+  M_OBJS += eepro100.o
+  endif
+endif
+
 
 ifeq ($(CONFIG_WAVELAN),y)
 L_OBJS += wavelan.o

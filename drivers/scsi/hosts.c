@@ -153,6 +153,10 @@
 #include "NCR53c406a.h"
 #endif
 
+#ifdef CONFIG_SCSI_DC390T
+#include "dc390.h"
+#endif
+
 #ifdef CONFIG_SCSI_AM53C974
 #include "AM53C974.h"
 #endif
@@ -163,6 +167,14 @@
 
 #ifdef CONFIG_SCSI_SUNESP
 #include "esp.h"
+#endif
+
+#ifdef CONFIG_BLK_DEV_IDESCSI
+#include "ide-scsi.h"
+#endif
+
+#ifdef CONFIG_SCSI_GDTH
+#include "gdth.h"
 #endif
 
 #ifdef CONFIG_SCSI_DEBUG
@@ -276,6 +288,9 @@ static Scsi_Host_Template builtin_scsi_hosts[] =
 #ifdef CONFIG_SCSI_DTC3280
         DTC3x80,
 #endif
+#ifdef CONFIG_SCSI_DC390T
+    DC390_T,
+#endif
 #ifdef CONFIG_SCSI_NCR53C7xx
     NCR53c7xx,
 #endif
@@ -302,6 +317,12 @@ static Scsi_Host_Template builtin_scsi_hosts[] =
 #endif
 #ifdef CONFIG_SCSI_SUNESP
     SCSI_SPARC_ESP,
+#endif
+#ifdef CONFIG_SCSI_GDTH
+    GDTH,
+#endif
+#ifdef CONFIG_BLK_DEV_IDESCSI
+    IDESCSI,
 #endif
 #ifdef CONFIG_SCSI_DEBUG
     SCSI_DEBUG,

@@ -1704,7 +1704,7 @@ void arp_send(int type, int ptype, u32 dest_ip,
 	skb->arp = 1;
 	skb->dev = dev;
 	skb->free = 1;
-	skb->protocol = htons (ETH_P_IP);
+	skb->protocol = htons (ETH_P_ARP);
 
 	/*
 	 *	Fill the device header for the ARP frame
@@ -1920,16 +1920,15 @@ int arp_rcv(struct sk_buff *skb, struct device *dev, struct packet_type *pt)
 	if (tip != dev->pa_addr && net_alias_has(skb->dev)) 
 	{
 		/*
-		 *	net_alias_dev_rcv_sel32 returns main dev if it fails to found other.
+		 *	net_alias_dev_rx32 returns main dev if it fails to found other.
+		 *  	if successful, also incr. alias rx count.
 		 */
-		if (ip_chk_addr(tip) == IS_MYADDR) {
-			dev = net_alias_dev_rcv_sel32(dev, AF_INET, sip, tip);
+		dev = net_alias_dev_rx32(dev, AF_INET, sip, tip);
 
-			if (dev->type != ntohs(arp->ar_hrd) || dev->flags & IFF_NOARP)
-			{
-				kfree_skb(skb, FREE_READ);
-				return 0;
-			}
+		if (dev->type != ntohs(arp->ar_hrd) || dev->flags & IFF_NOARP)
+		{
+			kfree_skb(skb, FREE_READ);
+			return 0;
 		}
 	}
 #endif
@@ -1975,7 +1974,7 @@ int arp_rcv(struct sk_buff *skb, struct device *dev, struct packet_type *pt)
 				memcpy(ha, proxy_entry->ha, dev->addr_len);
 				arp_unlock();
 
-				rt = ip_rt_route(tip, 0);
+				rt = ip_rt_route(tip, 0, NULL);
 				if (rt  && rt->rt_dev != dev)
 					arp_send(ARPOP_REPLY,ETH_P_ARP,sip,dev,tip,sha,ha,sha);
 				ip_rt_put(rt);
@@ -2048,7 +2047,7 @@ static int arp_req_set(struct arpreq *r, struct device * dev)
 		if (!dev)
 		{
 			struct rtable * rt;
-			rt = ip_rt_route(ip, 0);
+			rt = ip_rt_route(ip, 0, NULL);
 			if (!rt)
 				return -ENETUNREACH;
 			dev = rt->rt_dev;

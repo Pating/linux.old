@@ -42,7 +42,8 @@
 #if     defined(CONFIG_ULTRA)   ||      defined(CONFIG_WD80x3)          || \
         defined(CONFIG_EL2)     ||      defined(CONFIG_NE2000)          || \
         defined(CONFIG_E2100)   ||      defined(CONFIG_HPLAN_PLUS)      || \
-        defined(CONFIG_HPLAN)   ||      defined(CONFIG_AC3200)
+        defined(CONFIG_HPLAN)   ||      defined(CONFIG_AC3200)		|| \
+	defined(CONFIG_ULTRA32)
 #include "../drivers/net/8390.h"
 #endif
 
@@ -99,10 +100,12 @@ static struct symbol_table net_syms = {
 
 	X(init_etherdev),
 	X(ip_rt_route),
+	X(ip_rt_dev),
 	X(icmp_send),
 	X(ip_options_compile),
 	X(ip_rt_put),
 	X(arp_send),
+	X(arp_bind_cache),
 	X(ip_id_count),
 	X(ip_send_check),
 	X(ip_forward),
@@ -111,7 +114,8 @@ static struct symbol_table net_syms = {
 #if	defined(CONFIG_ULTRA)	||	defined(CONFIG_WD80x3)		|| \
 	defined(CONFIG_EL2)	||	defined(CONFIG_NE2000)		|| \
 	defined(CONFIG_E2100)	||	defined(CONFIG_HPLAN_PLUS)	|| \
-	defined(CONFIG_HPLAN)	||	defined(CONFIG_AC3200)
+	defined(CONFIG_HPLAN)	||	defined(CONFIG_AC3200)		|| \
+	defined(CONFIG_ULTRA32)
 	/* If 8390 NIC support is built in, we will need these. */
 	X(ei_open),
 	X(ei_close),

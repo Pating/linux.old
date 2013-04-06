@@ -133,13 +133,7 @@ static int parse_options(char *options, struct iso9660_options * popt)
 			  !strcmp(this_char,"uid") ||
 			  !strcmp(this_char,"gid"))) {
 		  char * vpnt = value;
-		  unsigned int ivalue;
-		  ivalue = 0;
-		  while(*vpnt){
-		    if(*vpnt <  '0' || *vpnt > '9') break;
-		    ivalue = ivalue * 10 + (*vpnt - '0');
-		    vpnt++;
-		  }
+		  unsigned int ivalue = simple_strtoul(vpnt, &vpnt, 0);
 		  if (*vpnt) return 0;
 		  switch(*this_char) {
 		  case 'b':
@@ -193,6 +187,11 @@ static unsigned int isofs_get_last_session(kdev_t dev)
   vol_desc_start=0;
   if (get_blkfops(MAJOR(dev))->ioctl!=NULL)
     {
+      /* Whoops.  We must save the old FS, since otherwise
+       * we would destroy the kernels idea about FS on root
+       * mount in read_super... [chexum]
+       */
+      unsigned long old_fs=get_fs();
       inode_fake.i_rdev=dev;
       ms_info.addr_format=CDROM_LBA;
       set_fs(KERNEL_DS);
@@ -200,7 +199,7 @@ static unsigned int isofs_get_last_session(kdev_t dev)
 				       NULL,
 				       CDROMMULTISESSION,
 				       (unsigned long) &ms_info);
-      set_fs(USER_DS);
+      set_fs(old_fs);
 #if 0 
       printk("isofs.inode: CDROMMULTISESSION: rc=%d\n",i);
       if (i==0)
@@ -476,6 +475,34 @@ int isofs_bmap(struct inode * inode,int block)
 		printk("_isofs_bmap: block<0");
 		return 0;
 	}
+
+	/*
+	 * If we are beyond the end of this file, don't give out any
+	 * blocks.
+	 */
+	if( (block << ISOFS_BUFFER_BITS(inode)) > inode->i_size )
+	  {
+	    off_t	max_legal_read_offset;
+
+	    /*
+	     * If we are *way* beyond the end of the file, print a message.
+	     * Access beyond the end of the file up to the next page boundary
+	     * is normal because of the way the page cache works.
+	     * In this case, we just return 0 so that we can properly fill
+	     * the page with useless information without generating any
+	     * I/O errors.
+	     */
+	    max_legal_read_offset = (inode->i_size + PAGE_SIZE - 1) 
+	      & ~(PAGE_SIZE - 1);
+	    if( (block << ISOFS_BUFFER_BITS(inode)) >= max_legal_read_offset )
+	      {
+
+		printk("_isofs_bmap: block>= EOF(%d, %ld)", block, 
+		       inode->i_size);
+	      }
+	    return 0;
+	  }
+
 	return (inode->u.isofs_i.i_first_extent >> ISOFS_BUFFER_BITS(inode)) + block;
 }
 

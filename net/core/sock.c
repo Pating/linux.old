@@ -71,6 +71,7 @@
  *		Alan Cox	: 	Generic socket allocation to make hooks
  *					easier (suggested by Craig Metz).
  *		Michael Pall	:	SO_ERROR returns positive errno again
+ *              Elliot Poger    :       Added support for SO_BINDTODEVICE.
  *
  * To Fix:
  *
@@ -128,6 +129,7 @@ int sock_setsockopt(struct sock *sk, int level, int optname,
 	int valbool;
 	int err;
 	struct linger ling;
+	struct ifreq req;
 
 	/*
 	 *	Options without arguments
@@ -232,7 +234,37 @@ int sock_setsockopt(struct sock *sk, int level, int optname,
 		case SO_BSDCOMPAT:
 			sk->bsdism = valbool;
 			return 0;
-			
+
+#ifdef CONFIG_NET	
+ 	        case SO_BINDTODEVICE:
+ 			/* Bind this socket to a particular device like "eth0",
+ 			 * as specified in an ifreq structure.  If the device 
+ 			 * is "", socket is NOT bound to a device. */
+ 			if (!valbool) {
+ 				sk->bound_device = NULL;
+ 			} else {
+ 				err=verify_area(VERIFY_READ,optval,sizeof(req));
+ 				if(err)
+ 					return err;
+ 				memcpy_fromfs(&req,optval,sizeof(req));
+
+				/* Remove any cached route for this socket. */
+				if (sk->ip_route_cache) {
+					ip_rt_put(sk->ip_route_cache);
+					sk->ip_route_cache=NULL;
+				}
+
+ 				if (*(req.ifr_name) == '\0') {
+ 					sk->bound_device = NULL;
+ 				} else {
+ 					sk->bound_device = dev_get(req.ifr_name);
+ 					if (sk->bound_device == NULL)
+ 						return -EINVAL;
+ 				}
+ 			}
+  			return 0;
+#endif
+
 		default:
 		  	return(-ENOPROTOOPT);
   	}
@@ -314,6 +346,28 @@ int sock_getsockopt(struct sock *sk, int level, int optname,
 		case SO_BSDCOMPAT:
 			val = sk->bsdism;
 			break;
+
+#ifdef CONFIG_NET
+                case SO_BINDTODEVICE:
+		{
+			struct ifreq req;
+
+                        /* Return the bound device (if any) */
+                        err=verify_area(VERIFY_WRITE,optval,sizeof(req));
+                        if(err)
+                                return err;
+
+                        memset((char *) &req, 0, sizeof(req));
+
+                        if (sk->bound_device) {
+                            strncpy(req.ifr_name, sk->bound_device->name, sizeof(req.ifr_name));
+                            (*(struct sockaddr_in *) &req.ifr_addr).sin_family = sk->bound_device->family;
+                            (*(struct sockaddr_in *) &req.ifr_addr).sin_addr.s_addr = sk->bound_device->pa_addr;
+                        }
+                        memcpy_tofs(optval, &req, sizeof(req));
+                        return 0;
+		}
+#endif
 
 		default:
 			return(-ENOPROTOOPT);
@@ -462,9 +516,9 @@ struct sk_buff *sock_alloc_send_skb(struct sock *sk, unsigned long size, unsigne
 			return NULL;
 		}
 		
-		
+
 		mem=sk->wmem_alloc;
-		
+
 		if(!fallback)
 			skb = sock_wmalloc(sk, size, 0, sk->allocation);
 		else

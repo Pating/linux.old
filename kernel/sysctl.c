@@ -139,7 +139,7 @@ static ctl_table kern_table[] = {
 #ifdef CONFIG_ROOT_NFS
 	{KERN_NFSRNAME, "nfs-root-name", nfs_root_name, NFS_ROOT_NAME_LEN,
 	 0644, NULL, &proc_dostring, &sysctl_string },
-	{KERN_NFSRNAME, "nfs-root-addrs", nfs_root_addrs, NFS_ROOT_ADDRS_LEN,
+	{KERN_NFSRADDRS, "nfs-root-addrs", nfs_root_addrs, NFS_ROOT_ADDRS_LEN,
 	 0644, NULL, &proc_dostring, &sysctl_string },
 #endif
 #ifdef CONFIG_BINFMT_JAVA
@@ -201,7 +201,7 @@ int do_sysctl (int *name, int nlen,
 	do {
 		context = 0;
 		error = parse_table(name, nlen, oldval, oldlenp, 
-				    newval, newlen, root_table, &context);
+				    newval, newlen, tmp->ctl_table, &context);
 		if (context)
 			kfree(context);
 		if (error != -ENOTDIR)

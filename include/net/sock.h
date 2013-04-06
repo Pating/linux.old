@@ -23,6 +23,7 @@
  *	Pauline Middelink	:	identd support
  *		Alan Cox	:	Eliminate low level recv/recvfrom
  *		David S. Miller	:	New socket lookup architecture for ISS.
+ *              Elliot Poger    :       New field for SO_BINDTODEVICE option.
  *
  *		This program is free software; you can redistribute it and/or
  *		modify it under the terms of the GNU General Public License
@@ -109,7 +110,11 @@ struct ipx_opt
  * know the connection this socket belongs to. 
  */
 	struct ncp_server       *ncp_server;
-	
+/* 
+ * To handle special ncp connection-handling sockets for mars_nwe,
+ * the connection number must be stored in the socket.
+ */
+	unsigned short		ipx_ncp_conn;
 };
 #endif
 
@@ -192,6 +197,7 @@ struct sock
 				broadcast,
 				nonagle,
 				bsdism;
+	struct device           * bound_device;
 	unsigned long	        lingertime;
 	int			proc;
 

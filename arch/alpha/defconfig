@@ -169,6 +169,7 @@ CONFIG_DE4X5=y
 # ISDN subsystem
 #
 # CONFIG_ISDN is not set
+CONFIG_HISAX_EURO=y
 
 #
 # CD-ROM drivers (not for SCSI or IDE/ATAPI drives)
@@ -179,7 +180,6 @@ CONFIG_DE4X5=y
 # Filesystems
 #
 # CONFIG_QUOTA is not set
-# CONFIG_LOCK_MANDATORY is not set
 # CONFIG_MINIX_FS is not set
 # CONFIG_EXT_FS is not set
 CONFIG_EXT2_FS=y
@@ -196,6 +196,7 @@ CONFIG_ISO9660_FS=y
 # CONFIG_HPFS_FS is not set
 # CONFIG_SYSV_FS is not set
 # CONFIG_UFS_FS is not set
+# CONFIG_AUTOFS_FS is not set
 
 #
 # Character devices

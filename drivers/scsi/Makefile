@@ -19,6 +19,7 @@ MOD_LIST_NAME := SCSI_MODULES
 SCSI_SRCS = $(wildcard $(L_OBJS:%.o=%.c))
 
 AHA152X	= -DDEBUG_AHA152X -DAUTOCONF
+GDTH = #-DDEBUG_GDTH=2 -D__SERIAL__ -D__COM2__ -DGDTH_STATISTICS
 
 .SUFFIXES:
 .SUFFIXES: .c .o .h .a
@@ -177,6 +178,14 @@ else
   endif
 endif
 
+ifeq ($(CONFIG_SCSI_DC390T),y)
+L_OBJS += tmscsim.o
+else
+  ifeq ($(CONFIG_SCSI_DC390T),m)
+  M_OBJS += tmscsim.o
+  endif
+endif
+
 ifeq ($(CONFIG_SCSI_AM53C974),y)
 L_OBJS += AM53C974.o
 else
@@ -225,6 +234,14 @@ else
   endif
 endif
 
+ifeq ($(CONFIG_SCSI_GDTH),y)
+L_OBJS += gdth.o
+else
+  ifeq ($(CONFIG_SCSI_GDTH),m)
+  M_OBJS += gdth.o
+  endif
+endif
+
 ifeq ($(CONFIG_SCSI_DEBUG),y)
 L_OBJS += scsi_debug.o
 else
@@ -251,10 +268,8 @@ endif
 
 ifeq ($(CONFIG_SCSI_GENERIC_NCR5380),y)
 L_OBJS += g_NCR5380.o
-EXTRA_CFLAGS = -DGENERIC_NCR5380_OVERRIDE="{{(NCR5380_map_type)0x350,5,0, BOARD_NCR53C400}};"
 else
   ifeq ($(CONFIG_SCSI_GENERIC_NCR5380),m)
-  EXTRA_CFLAGS = -DGENERIC_NCR5380_OVERRIDE="{{(NCR5380_map_type)0x350,5,0, BOARD_NCR53C400}};"
   M_OBJS += g_NCR5380.o
   endif
 endif
@@ -348,6 +363,11 @@ else
   endif
 endif
 
+
+ifeq ($(CONFIG_BLK_DEV_IDESCSI),y)
+L_OBJS += ide-scsi.o
+endif
+
 include $(TOPDIR)/Rules.make
 
 BusLogic.o: BusLogic.c FlashPoint.c
@@ -359,19 +379,17 @@ BusLogic.o: BusLogic.c FlashPoint.c
 aha152x.o: aha152x.c
 	$(CC) $(CFLAGS) $(AHA152X) -c aha152x.c 
 
-aic7xxx_asm:	aic7xxx_asm.c
-	$(HOSTCC) -o $@ aic7xxx_asm.c
+gdth.o: gdth.c gdth.h gdth_proc.c gdth_proc.h
+	$(CC) $(CFLAGS) $(GDTH) -c gdth.c 
 
-aic7xxx.c: aic7xxx_seq.h
-aic7xxx_seq.h:	aic7xxx_asm aic7xxx.seq
-	./aic7xxx_asm -o $@ aic7xxx.seq
+aic7xxx.o: aic7xxx.c aic7xxx_seq.h aic7xxx_reg.h
+	$(CC) $(CFLAGS) -c -o $@ aic7xxx.c
 
 seagate.o: seagate.c
 	$(CC) $(CFLAGS) -DARBITRATE -DSLOW_HANDSHAKE -DFAST32 -c seagate.c 
 
-# For debugging, use the -g flag
-53c7,8xx.o : 53c7,8xx.c
-	$(CC) $(CFLAGS) -g -c 53c7,8xx.c
+tmscsim.o : tmscsim.c
+	$(CC) $(CFLAGS) -c tmscsim.c
 
 53c8xx_d.h 53c8xx_u.h : 53c7,8xx.scr script_asm.pl
 	ln -sf 53c7,8xx.scr fake.c
@@ -380,8 +398,8 @@ seagate.o: seagate.c
 	mv scriptu.h 53c8xx_u.h
 	rm fake.c
 
-ncr53c8xx.o : ncr53c8xx.c
-	$(CC) $(CFLAGS) -c ncr53c8xx.c
+g_NCR5380.o: g_NCR5380.c
+	$(CC) $(CFLAGS) -DGENERIC_NCR5380_OVERRIDE="{{(NCR5380_map_type)0x350,5,0, BOARD_NCR53C400}};" -c g_NCR5380.c
 
 scsi_mod.o: $(MX_OBJS) hosts.o scsi.o scsi_ioctl.o constants.o \
 		scsicam.o scsi_proc.o
