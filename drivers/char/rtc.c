@@ -152,7 +152,7 @@ static long rtc_read(struct inode *inode, struct file *file, char *buf,
 		     unsigned long count)
 {
 	struct wait_queue wait = { current, NULL };
-	int retval;
+	int retval = 0;
 	
 	if (count < sizeof(unsigned long))
 		return -EINVAL;
@@ -180,7 +180,7 @@ static long rtc_read(struct inode *inode, struct file *file, char *buf,
 		data = rtc_irq_data;
 		rtc_irq_data = 0;
 		restore_flags(flags);
-		retval = put_user(data, (unsigned long *)buf)) ?: sizeof(unsigned long);
+		retval = put_user(data, (unsigned long *)buf) ?: sizeof(unsigned long);
 	}
 
 	current->state = TASK_RUNNING;

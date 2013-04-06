@@ -495,17 +495,18 @@ static inline void insert_into_queues(struct buffer_head * bh)
 
 static inline struct buffer_head * find_buffer(kdev_t dev, int block, int size)
 {		
-	struct buffer_head * tmp;
+	struct buffer_head * next;
 
-	for (tmp = hash(dev,block) ; tmp != NULL ; tmp = tmp->b_next)
-		if (tmp->b_blocknr == block && tmp->b_dev == dev) {
-			if (tmp->b_size == size)
-				return tmp;
-
-			printk("VFS: Wrong blocksize on device %s\n",
-			       kdevname(dev));
-			return NULL;
-		}
+	next = hash(dev,block);
+	for (;;) {
+		struct buffer_head *tmp = next;
+		if (!next)
+			break;
+		next = tmp->b_next;
+		if (tmp->b_blocknr != block || tmp->b_size != size || tmp->b_dev != dev)
+			continue;
+		return tmp;
+	}
 	return NULL;
 }
 
@@ -518,10 +519,11 @@ static inline struct buffer_head * find_buffer(kdev_t dev, int block, int size)
  */
 struct buffer_head * get_hash_table(kdev_t dev, int block, int size)
 {
-	struct buffer_head * bh;
-
 	for (;;) {
-		if (!(bh=find_buffer(dev,block,size)))
+		struct buffer_head * bh;
+
+		bh=find_buffer(dev,block,size);
+		if (!bh)
 			return NULL;
 		bh->b_count++;
 		wait_on_buffer(bh);
@@ -1610,6 +1612,7 @@ asmlinkage int sync_old_buffers(void)
 				 next->b_count--;
 			 }
 	}
+	run_task_queue(&tq_disk);
 #ifdef DEBUG
 	if (ncount) printk("sync_old_buffers: %d dirty buffers not on dirty list\n", ncount);
 	printk("Wrote %d/%d buffers\n", nwritten, ndirty);
