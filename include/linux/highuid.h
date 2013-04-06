@@ -1,24 +1,26 @@
 #ifndef _LINUX_HIGHUID_H
 #define _LINUX_HIGHUID_H
 
+#include <linux/config.h>
 #include <linux/types.h>
 
 /*
  * general notes:
  *
- * UID16_COMPAT_NEEDED is defined in include/asm-{arch}/posix_types.h
- * if the given architecture needs to support backwards compatibility
- * for old system calls.
+ * CONFIG_UID16 is defined if the given architecture needs to
+ * support backwards compatibility for old system calls.
  *
- * old_uid_t and old_gid_t are only used if UID16_COMPAT_NEEDED
- * is defined.
+ * kernel code should use uid_t and gid_t at all times when dealing with
+ * kernel-private data.
+ *
+ * old_uid_t and old_gid_t should only be different if CONFIG_UID16 is
+ * defined, else the platform should provide dummy typedefs for them
+ * such that they are equivalent to __kernel_{u,g}id_t.
  *
  * uid16_t and gid16_t are used on all architectures. (when dealing
  * with structures hard coded to 16 bits, such as in filesystems)
  */
 
-
-#ifdef UID16_COMPAT_NEEDED
 
 /*
  * This is the "overflow" UID and GID. They are used to signify uid/gid
@@ -36,6 +38,7 @@ extern int overflowgid;
 #define DEFAULT_OVERFLOWUID	65534
 #define DEFAULT_OVERFLOWGID	65534
 
+#ifdef CONFIG_UID16
 
 /* prevent uid mod 65536 effect by returning a default value for high UIDs */
 #define high2lowuid(uid) ((uid) > 65535) ? (old_uid_t)overflowuid : (old_uid_t)(uid)
@@ -54,10 +57,18 @@ extern int overflowgid;
 #define NEW_TO_OLD_UID(uid)	high2lowuid(uid)
 #define NEW_TO_OLD_GID(gid)	high2lowgid(gid)
 
+/* specific to fs/stat.c */
 #define SET_OLDSTAT_UID(stat, uid)	(stat).st_uid = high2lowuid(uid)
 #define SET_OLDSTAT_GID(stat, gid)	(stat).st_gid = high2lowgid(gid)
 #define SET_STAT_UID(stat, uid)		(stat).st_uid = high2lowuid(uid)
 #define SET_STAT_GID(stat, gid)		(stat).st_gid = high2lowgid(gid)
+
+/* specific to kernel/signal.c */
+#ifdef UID16_SIGINFO_COMPAT_NEEDED
+#define SET_SIGINFO_UID16(var, uid)	var = high2lowuid(uid)
+#else
+#define SET_SIGINFO_UID16(var, uid)	do { ; } while (0)
+#endif
 
 #else
 
@@ -71,9 +82,9 @@ extern int overflowgid;
 #define SET_STAT_UID(stat, uid)		(stat).st_uid = uid
 #define SET_STAT_GID(stat, gid)		(stat).st_gid = gid
 
-#define high2lowuid(x)		(x)
+#define SET_SIGINFO_UID16(var, uid)	do { ; } while (0)
 
-#endif /* UID16_COMPAT_NEEDED */
+#endif /* CONFIG_UID16 */
 
 
 /*

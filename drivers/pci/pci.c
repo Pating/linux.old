@@ -202,16 +202,51 @@ pci_enable_device(struct pci_dev *dev)
 
 static LIST_HEAD(pci_drivers);
 
-void
+const struct pci_device_id *
+pci_match_device(const struct pci_device_id *ids, struct pci_dev *dev)
+{
+	while (ids->vendor || ids->subvendor || ids->class_mask) {
+		if ((ids->vendor == PCI_ANY_ID || ids->vendor == dev->vendor) &&
+		    (ids->device == PCI_ANY_ID || ids->device == dev->device) &&
+		    (ids->subvendor == PCI_ANY_ID || ids->subvendor == dev->subsystem_vendor) &&
+		    (ids->subdevice == PCI_ANY_ID || ids->subdevice == dev->subsystem_device) &&
+		    !((ids->class ^ dev->class) & ids->class_mask))
+			return ids;
+		ids++;
+	}
+	return NULL;
+}
+
+static int
+pci_announce_device(struct pci_driver *drv, struct pci_dev *dev)
+{
+	const struct pci_device_id *id;
+
+	if (drv->id_table) {
+		id = pci_match_device(drv->id_table, dev);
+		if (!id)
+			return 0;
+	} else
+		id = NULL;
+	if (drv->probe(dev, id) >= 0) {
+		dev->driver = drv;
+		return 1;
+	}
+	return 0;
+}
+
+int
 pci_register_driver(struct pci_driver *drv)
 {
 	struct pci_dev *dev;
+	int count = 0;
 
 	list_add_tail(&drv->node, &pci_drivers);
 	pci_for_each_dev(dev) {
-		if (!pci_dev_driver(dev) && drv->probe(dev))
-			dev->driver = drv;
+		if (!pci_dev_driver(dev))
+			count += pci_announce_device(drv, dev);
 	}
+	return count;
 }
 
 void
@@ -229,6 +264,8 @@ pci_unregister_driver(struct pci_driver *drv)
 	}
 }
 
+#ifdef CONFIG_HOTPLUG
+
 void
 pci_insert_device(struct pci_dev *dev, struct pci_bus *bus)
 {
@@ -241,10 +278,8 @@ pci_insert_device(struct pci_dev *dev, struct pci_bus *bus)
 #endif
 	for(ln=pci_drivers.next; ln != &pci_drivers; ln=ln->next) {
 		struct pci_driver *drv = list_entry(ln, struct pci_driver, node);
-		if (drv->probe(dev)) {
-			dev->driver = drv;
+		if (drv->remove && pci_announce_device(drv, dev))
 			break;
-		}
 	}
 }
 
@@ -272,6 +307,8 @@ pci_remove_device(struct pci_dev *dev)
 	pci_proc_detach_device(dev);
 #endif
 }
+
+#endif
 
 static struct pci_driver pci_compat_driver = {
 	name: "compat"

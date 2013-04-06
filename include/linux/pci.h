@@ -492,53 +492,42 @@ int pci_assign_resource(struct pci_dev *dev, int i);
 #define pci_for_each_dev(dev) \
 	for(dev = pci_dev_g(pci_devices.next); dev != pci_dev_g(&pci_devices); dev = pci_dev_g(dev->global_list.next))
 
+#define pci_for_each_dev_reverse(dev) \
+	for(dev = pci_dev_g(pci_devices.prev); dev != pci_dev_g(&pci_devices); dev = pci_dev_g(dev->global_list.prev))
+
 /* Helper functions for low-level code (drivers/pci/setup.c) */
 
 int pci_claim_resource(struct pci_dev *, int);
-void pci_assign_unassigned_resources(u32 min_io, u32 min_mem);
+void pci_assign_unassigned_resources(void);
 void pci_set_bus_ranges(void);
 void pci_fixup_irqs(u8 (*)(struct pci_dev *, u8 *),
 		    int (*)(struct pci_dev *, u8, u8));
 
 /* New-style probing supporting hot-pluggable devices */
 
+struct pci_device_id {
+	unsigned int vendor, device;		/* Vendor and device ID or PCI_ANY_ID */
+	unsigned int subvendor, subdevice;	/* Subsystem ID's or PCI_ANY_ID */
+	unsigned int class, class_mask;		/* (class,subclass,prog-if) triplet */
+	unsigned long driver_data;		/* Data private to the driver */
+};
+
 struct pci_driver {
 	struct list_head node;
 	char *name;
-	int (*probe)(struct pci_dev *dev);	/* New device inserted, check if known */
-	void (*remove)(struct pci_dev *dev);	/* Device removed */
+	const struct pci_device_id *id_table;	/* NULL if wants all devices */
+	int (*probe)(struct pci_dev *dev, const struct pci_device_id *id);	/* New device inserted */
+	void (*remove)(struct pci_dev *dev);	/* Device removed (NULL if not a hot-plug capable driver) */
 	void (*suspend)(struct pci_dev *dev);	/* Device suspended */
 	void (*resume)(struct pci_dev *dev);	/* Device woken up */
 };
 
-void pci_register_driver(struct pci_driver *);
+int pci_register_driver(struct pci_driver *);
 void pci_unregister_driver(struct pci_driver *);
 void pci_insert_device(struct pci_dev *, struct pci_bus *);
 void pci_remove_device(struct pci_dev *);
 struct pci_driver *pci_dev_driver(struct pci_dev *);
-
-/*
- * simple PCI probing for drivers (drivers/pci/helper.c)
- */
- 
-struct pci_simple_probe_entry;
-typedef int (*pci_simple_probe_callback) (struct pci_dev *dev, int match_num,
-				   	  const struct pci_simple_probe_entry *ent,
-					  void *drvr_data);
-
-struct pci_simple_probe_entry {
-	unsigned short vendor;	/* vendor id, PCI_ANY_ID, or 0 for last entry */
-	unsigned short device;	/* device id, PCI_ANY_ID, or 0 for last entry */
-	unsigned short subsys_vendor; /* subsystem vendor id, 0 for don't care */
-	unsigned short subsys_device; /* subsystem device id, 0 for don't care */
-	void *dev_data;		/* driver-private, entry-specific data */
-};
-
-int pci_simple_probe (const struct pci_simple_probe_entry *list,
-		      size_t match_limit, pci_simple_probe_callback cb,
-		      void *drvr_data);
-
-
+const struct pci_device_id *pci_match_device(const struct pci_device_id *ids, struct pci_dev *dev);
 
 /*
  *  If the system does not have PCI, clearly these return errors.  Define
@@ -574,10 +563,6 @@ unsigned int ss_vendor, unsigned int ss_device, struct pci_dev *from)
 
 extern inline void pci_set_master(struct pci_dev *dev) { }
 extern inline int pci_enable_device(struct pci_dev *dev) { return 0; }
-
-extern inline int pci_simple_probe (const struct pci_simple_probe_entry *list,
-	size_t match_limit, pci_simple_probe_callback cb, void *drvr_data)
-{ return 0; }
 
 #endif /* !CONFIG_PCI */
 
