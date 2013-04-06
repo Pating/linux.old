@@ -1,6 +1,6 @@
 VERSION = 2
 PATCHLEVEL = 1
-SUBLEVEL = 80
+SUBLEVEL = 81
 
 ARCH := $(shell uname -m | sed -e s/i.86/i386/ -e s/sun4u/sparc64/)
 
@@ -343,14 +343,16 @@ endif
 
 clean:	archclean
 	rm -f kernel/ksyms.lst include/linux/compile.h
-	rm -f `find . -name '*.[oas]' ! -regex '.*lxdialog/.*' -print`
-	rm -f `find . -type f -name 'core' -print`
-	rm -f `find . -name '.*.flags' -print`
+	rm -f core `find . -name '*.[oas]' ! -regex '.*lxdialog/.*' -print`
+	rm -f core `find . -type f -name 'core' -print`
+	rm -f core `find . -name '.*.flags' -print`
 	rm -f vmlinux System.map
 	rm -f .tmp*
 	rm -f drivers/char/consolemap_deftbl.c drivers/char/conmakehash
 	rm -f drivers/sound/bin2hex drivers/sound/hex2hex
-	rm -f `find modules/ -type f -print`
+	if [ -d modules ]; then \
+		rm -f core `find modules/ -type f -print`; \
+	fi
 	rm -f submenu*
 
 mrproper: clean
@@ -368,6 +370,7 @@ mrproper: clean
 	rm -f include/asm
 	rm -rf include/config
 	rm -f .depend `find . -name .depend -print`
+	rm -f core `find . -size 0 -print`
 	rm -f .hdepend scripts/mkdep scripts/split-include
 	rm -f $(TOPDIR)/include/linux/modversions.h
 	rm -rf $(TOPDIR)/include/linux/modules
