@@ -75,6 +75,7 @@ extern long sbus_init(long, long);
 extern long powermac_init(unsigned long, unsigned long);
 extern void sysctl_init(void);
 extern void filescache_init(void);
+extern void signals_init(void);
 
 extern void smp_setup(char *str, int *ints);
 extern void no_scroll(char *str, int *ints);
@@ -220,8 +221,14 @@ extern void pcxx_setup(char *str, int *ints);
 #ifdef CONFIG_RISCOM8
 extern void riscom8_setup(char *str, int *ints);
 #endif
-#ifdef CONFIG_BAYCOM
-extern void baycom_setup(char *str, int *ints);
+#ifdef CONFIG_BAYCOM_PAR
+extern void baycom_par_setup(char *str, int *ints);
+#endif
+#ifdef CONFIG_BAYCOM_SER_FDX
+extern void baycom_ser_fdx_setup(char *str, int *ints);
+#endif
+#ifdef CONFIG_BAYCOM_SER_HDX
+extern void baycom_ser_hdx_setup(char *str, int *ints);
 #endif
 #ifdef CONFIG_SOUNDMODEM
 extern void sm_setup(char *str, int *ints);
@@ -541,8 +548,14 @@ struct {
 #ifdef CONFIG_RISCOM8
 	{ "riscom8=", riscom8_setup },
 #endif
-#ifdef CONFIG_BAYCOM
-	{ "baycom=", baycom_setup },
+#ifdef CONFIG_BAYCOM_PAR
+	{ "baycom_par=", baycom_par_setup },
+#endif
+#ifdef CONFIG_BAYCOM_SER_FDX
+	{ "baycom_ser_fdx=", baycom_ser_fdx_setup },
+#endif
+#ifdef CONFIG_BAYCOM_SER_HDX
+	{ "baycom_ser_hdx=", baycom_ser_hdx_setup },
 #endif
 #ifdef CONFIG_SOUNDMODEM
 	{ "soundmodem=", sm_setup },
@@ -683,6 +696,10 @@ __initfunc(static void parse_root_dev(char * line))
 		{ "hdb",     0x0340 },
 		{ "hdc",     0x1600 },
 		{ "hdd",     0x1640 },
+		{ "hde",     0x2100 },
+		{ "hdf",     0x2140 },
+		{ "hdg",     0x2200 },
+		{ "hdh",     0x2240 },
 		{ "sda",     0x0800 },
 		{ "sdb",     0x0810 },
 		{ "sdc",     0x0820 },
@@ -955,6 +972,7 @@ __initfunc(asmlinkage void start_kernel(void))
 	dcache_init();
 	vma_init();
 	buffer_init();
+	signals_init();
 	inode_init();
 	file_table_init();
 	sock_init();

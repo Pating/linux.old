@@ -140,9 +140,9 @@ if [ "$CONFIG_EXPERIMENTAL" = "y" ]; then
   fi
 fi
 
-#if [ ! "$CONFIG_PARPORT" = "n" ]; then
-#  dep_tristate 'PLIP (parallel port) support' CONFIG_PLIP $CONFIG_PARPORT
-#fi
+if [ ! "$CONFIG_PARPORT" = "n" ]; then
+  dep_tristate 'PLIP (parallel port) support' CONFIG_PLIP $CONFIG_PARPORT
+fi
 
 tristate 'PPP (point-to-point) support' CONFIG_PPP
 if [ ! "$CONFIG_PPP" = "n" ]; then
@@ -157,9 +157,15 @@ if [ "$CONFIG_NET_RADIO" != "n" ]; then
     tristate 'Gracilis PackeTwin driver for AX.25' CONFIG_PT
     tristate 'Ottawa PI and PI2 driver for AX.25' CONFIG_PI
     tristate 'Z8530 SCC driver for AX.25' CONFIG_SCC
+    if [ "$CONFIG_SCC" != "n" ]; then
+      bool '  additional delay for PA0HZP OptoSCC compatible boards' CONFIG_SCC_DELAY
+      bool '  support for TRX that feedback the tx signal to rx' CONFIG_SCC_TRXECHO
+    fi
   fi
   if [ "$CONFIG_EXPERIMENTAL" = "y" ]; then
-    tristate 'BAYCOM ser12 and par96 driver for AX.25' CONFIG_BAYCOM
+    tristate 'BAYCOM ser12 fullduplex driver for AX.25' CONFIG_BAYCOM_SER_FDX
+    tristate 'BAYCOM ser12 halfduplex driver for AX.25' CONFIG_BAYCOM_SER_HDX
+    tristate 'BAYCOM picpar and par96 driver for AX.25' CONFIG_BAYCOM_PAR
     tristate 'Soundcard modem driver for AX.25' CONFIG_SOUNDMODEM
     if [ "$CONFIG_SOUNDMODEM" != "n" ]; then
       bool 'Soundmodem support for Soundblaster and compatible cards' CONFIG_SOUNDMODEM_SBC
@@ -175,13 +181,8 @@ if [ "$CONFIG_NET_RADIO" != "n" ]; then
       bool 'HFmodem support for Soundblaster and compatible cards' CONFIG_HFMODEM_SBC
       bool 'HFmodem support for WSS and Crystal cards' CONFIG_HFMODEM_WSS
     fi
-    tristate 'Shortwave radio modem driver' CONFIG_HFMODEM
-    if [ "$CONFIG_HFMODEM" != "n" ]; then
-      bool 'HFmodem support for Soundblaster and compatible cards' CONFIG_HFMODEM_SBC
-      bool 'HFmodem support for WSS and Crystal cards' CONFIG_HFMODEM_WSS
-    fi
   fi
-#  tristate 'STRIP (Metricom starmode radio IP)' CONFIG_STRIP
+  tristate 'STRIP (Metricom starmode radio IP)' CONFIG_STRIP
   tristate 'AT&T WaveLAN & DEC RoamAbout DS support' CONFIG_WAVELAN
 fi
 
