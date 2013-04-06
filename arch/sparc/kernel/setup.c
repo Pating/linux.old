@@ -1,4 +1,4 @@
-/*  $Id: setup.c,v 1.108 1999/07/30 09:35:03 davem Exp $
+/*  $Id: setup.c,v 1.110 1999/08/31 06:54:23 davem Exp $
  *  linux/arch/sparc/kernel/setup.c
  *
  *  Copyright (C) 1995  David S. Miller (davem@caip.rutgers.edu)
@@ -153,7 +153,7 @@ int obp_system_intr(void)
  * Process kernel command line switches that are specific to the
  * SPARC or that require special low-level processing.
  */
-__initfunc(static void process_switch(char c))
+static void __init process_switch(char c)
 {
 	switch (c) {
 	case 'd':
@@ -172,7 +172,7 @@ __initfunc(static void process_switch(char c))
 	}
 }
 
-__initfunc(static void boot_flags_init(char *commands))
+static void __init boot_flags_init(char *commands)
 {
 	while (*commands) {
 		/* Move to the start of the next "argument". */
@@ -297,8 +297,8 @@ static struct console prom_console = {
 	"PROM", prom_cons_write, 0, 0, 0, 0, 0, CON_PRINTBUFFER, 0, 0, 0
 };
 
-__initfunc(void setup_arch(char **cmdline_p,
-	unsigned long * memory_start_p, unsigned long * memory_end_p))
+void __init setup_arch(char **cmdline_p,
+	unsigned long * memory_start_p, unsigned long * memory_end_p)
 {
 	int total, i, packed;
 
@@ -425,6 +425,8 @@ __initfunc(void setup_arch(char **cmdline_p,
 				initrd_start -= KERNBASE;
 				initrd_end -= KERNBASE;
 				break;
+			default:
+				break;
 			}
 		}
 	}
@@ -493,7 +495,7 @@ __initfunc(void setup_arch(char **cmdline_p,
 	init_mm.mmap->vm_start = KERNBASE;
 	init_mm.mmap->vm_end = *memory_end_p;
 	init_mm.context = (unsigned long) NO_CONTEXT;
-	init_task.tss.kregs = &fake_swapper_regs;
+	init_task.thread.kregs = &fake_swapper_regs;
 
 	if (serial_console)
 		conswitchp = NULL;

@@ -6,7 +6,7 @@
  *	Pedro Roque		<roque@di.fc.ul.pt>	
  *	Alexey Kuznetsov	<kuznet@ms2.inr.ac.ru>
  *
- *	$Id: sit.c,v 1.33 1999/08/20 11:06:29 davem Exp $
+ *	$Id: sit.c,v 1.34 1999/08/31 07:04:16 davem Exp $
  *
  *	This program is free software; you can redistribute it and/or
  *      modify it under the terms of the GNU General Public License
@@ -756,7 +756,7 @@ static int ipip6_fb_tunnel_close(struct net_device *dev)
 }
 #endif
 
-__initfunc(int ipip6_fb_tunnel_init(struct net_device *dev))
+int __init ipip6_fb_tunnel_init(struct net_device *dev)
 {
 	struct iphdr *iph;
 
@@ -795,7 +795,7 @@ void sit_cleanup(void)
 }
 #endif
 
-__initfunc(int sit_init(void))
+int __init sit_init(void)
 {
 	printk(KERN_INFO "IPv6 over IPv4 tunneling driver\n");
 

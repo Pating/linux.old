@@ -1367,7 +1367,7 @@ static int block_til_ready(struct tty_struct *tty,
 	while(1) 
 	{ /* Begin forever while  */
 
-		current->state = TASK_INTERRUPTIBLE;
+		set_current_state(TASK_INTERRUPTIBLE);
 
 		if (tty_hung_up_p(filp) ||
 		    !(ch->asyncflags & ASYNC_INITIALIZED)) 
@@ -3233,7 +3233,7 @@ static int pc_ioctl(struct tty_struct *tty, struct file * file,
 			if (error)
 				return error;
 
-			putUser(mflag, (unsigned long *) arg);
+			putUser(mflag, (unsigned int *) arg);
 
 			break;
 

@@ -1,7 +1,7 @@
 /*
  *	Linux NET3:	IP/IP protocol decoder. 
  *
- *	Version: $Id: ipip.c,v 1.28 1999/08/20 11:05:51 davem Exp $
+ *	Version: $Id: ipip.c,v 1.29 1999/08/31 07:03:42 davem Exp $
  *
  *	Authors:
  *		Sam Lantinga (slouken@cs.ucdavis.edu)  02/01/95
@@ -826,7 +826,7 @@ static int ipip_fb_tunnel_close(struct net_device *dev)
 }
 #endif
 
-__initfunc(int ipip_fb_tunnel_init(struct net_device *dev))
+int __init ipip_fb_tunnel_init(struct net_device *dev)
 {
 	struct iphdr *iph;
 
@@ -859,7 +859,7 @@ static struct inet_protocol ipip_protocol = {
 #ifdef MODULE
 int init_module(void) 
 #else
-__initfunc(int ipip_init(void))
+int __init ipip_init(void)
 #endif
 {
 	printk(KERN_INFO "IPv4 over IPv4 tunneling driver\n");

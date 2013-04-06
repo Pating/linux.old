@@ -5,7 +5,7 @@
  *
  *		The Internet Protocol (IP) output module.
  *
- * Version:	$Id: ip_output.c,v 1.69 1999/08/20 11:05:48 davem Exp $
+ * Version:	$Id: ip_output.c,v 1.70 1999/08/31 07:03:39 davem Exp $
  *
  * Authors:	Ross Biro, <bir7@leland.Stanford.Edu>
  *		Fred N. van Kempen, <waltje@uWalt.NL.Mugnet.ORG>
@@ -1023,7 +1023,7 @@ static struct proc_dir_entry proc_net_igmp = {
  *	IP registers the packet type and then calls the subprotocol initialisers
  */
 
-__initfunc(void ip_init(void))
+void __init ip_init(void)
 {
 	dev_add_pack(&ip_packet_type);
 

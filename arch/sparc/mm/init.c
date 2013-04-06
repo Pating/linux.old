@@ -1,4 +1,4 @@
-/*  $Id: init.c,v 1.67 1999/06/29 12:33:59 davem Exp $
+/*  $Id: init.c,v 1.68 1999/08/31 06:54:32 davem Exp $
  *  linux/arch/sparc/mm/init.c
  *
  *  Copyright (C) 1995 David S. Miller (davem@caip.rutgers.edu)
@@ -113,7 +113,7 @@ void show_mem(void)
 
 extern pgprot_t protection_map[16];
 
-__initfunc(unsigned long sparc_context_init(unsigned long start_mem, int numctx))
+unsigned long __init sparc_context_init(unsigned long start_mem, int numctx)
 {
 	int ctx;
 
@@ -142,8 +142,8 @@ extern unsigned long sun4c_paging_init(unsigned long, unsigned long);
 extern unsigned long srmmu_paging_init(unsigned long, unsigned long);
 extern unsigned long device_scan(unsigned long);
 
-__initfunc(unsigned long 
-paging_init(unsigned long start_mem, unsigned long end_mem))
+unsigned long __init
+paging_init(unsigned long start_mem, unsigned long end_mem)
 {
 	switch(sparc_cpu_model) {
 	case sun4c:
@@ -202,7 +202,7 @@ extern void srmmu_frob_mem_map(unsigned long);
 
 int physmem_mapped_contig __initdata = 1;
 
-__initfunc(static void taint_real_pages(unsigned long start_mem, unsigned long end_mem))
+static void __init taint_real_pages(unsigned long start_mem, unsigned long end_mem)
 {
 	unsigned long addr, tmp2 = 0;
 
@@ -234,7 +234,7 @@ __initfunc(static void taint_real_pages(unsigned long start_mem, unsigned long e
 	}
 }
 
-__initfunc(void mem_init(unsigned long start_mem, unsigned long end_mem))
+void __init mem_init(unsigned long start_mem, unsigned long end_mem)
 {
 	int codepages = 0;
 	int datapages = 0;

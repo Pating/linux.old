@@ -1,4 +1,4 @@
-/* $Id: io-unit.c,v 1.13 1998/11/08 11:13:57 davem Exp $
+/* $Id: io-unit.c,v 1.14 1999/08/31 06:54:33 davem Exp $
  * io-unit.c:  IO-UNIT specific routines for memory management.
  *
  * Copyright (C) 1997,1998 Jakub Jelinek    (jj@sunsite.mff.cuni.cz)
@@ -26,8 +26,8 @@
 #define IOPERM        (IOUPTE_CACHE | IOUPTE_WRITE | IOUPTE_VALID)
 #define MKIOPTE(phys) __iopte((((phys)>>4) & IOUPTE_PAGE) | IOPERM)
 
-__initfunc(void
-iounit_init(int sbi_node, int io_node, struct linux_sbus *sbus))
+void __init
+iounit_init(int sbi_node, int io_node, struct linux_sbus *sbus)
 {
 	iopte_t *xpt, *xptend;
 	struct iounit_struct *iounit;
@@ -217,7 +217,7 @@ static void iounit_unlockarea(char *vaddr, unsigned long len)
 /* FIXME: Write this */
 }
 
-__initfunc(void ld_mmu_iounit(void))
+void __init ld_mmu_iounit(void)
 {
 	BTFIXUPSET_CALL(mmu_lockarea, iounit_lockarea, BTFIXUPCALL_RETO0);
 	BTFIXUPSET_CALL(mmu_unlockarea, iounit_unlockarea, BTFIXUPCALL_NOP);

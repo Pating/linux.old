@@ -5,7 +5,7 @@
  *	Authors:
  *	Pedro Roque		<roque@di.fc.ul.pt>	
  *
- *	$Id: mcast.c,v 1.25 1999/08/20 11:06:24 davem Exp $
+ *	$Id: mcast.c,v 1.26 1999/08/31 07:04:08 davem Exp $
  *
  *	Based on linux/ipv4/igmp.c and linux/ipv4/ip_sockglue.c 
  *
@@ -705,7 +705,7 @@ done:
 }
 #endif
 
-__initfunc(int igmp6_init(struct net_proto_family *ops))
+int __init igmp6_init(struct net_proto_family *ops)
 {
 #ifdef CONFIG_PROC_FS
 	struct proc_dir_entry *ent;

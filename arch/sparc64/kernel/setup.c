@@ -1,4 +1,4 @@
-/*  $Id: setup.c,v 1.46 1999/08/02 08:39:36 davem Exp $
+/*  $Id: setup.c,v 1.47 1999/08/31 06:54:55 davem Exp $
  *  linux/arch/sparc64/kernel/setup.c
  *
  *  Copyright (C) 1995,1996  David S. Miller (davem@caip.rutgers.edu)
@@ -316,7 +316,7 @@ int obp_system_intr(void)
  * Process kernel command line switches that are specific to the
  * SPARC or that require special low-level processing.
  */
-__initfunc(static void process_switch(char c))
+static void __init process_switch(char c)
 {
 	switch (c) {
 	case 'd':
@@ -335,7 +335,7 @@ __initfunc(static void process_switch(char c))
 	}
 }
 
-__initfunc(static void boot_flags_init(char *commands))
+static void __init boot_flags_init(char *commands)
 {
 	while (*commands) {
 		/* Move to the start of the next "argument". */
@@ -438,8 +438,8 @@ static struct pt_regs fake_swapper_regs = { { 0, }, 0, 0, 0, 0 };
 
 extern struct consw sun_serial_con;
 
-__initfunc(void setup_arch(char **cmdline_p,
-	unsigned long * memory_start_p, unsigned long * memory_end_p))
+void __init setup_arch(char **cmdline_p,
+	unsigned long * memory_start_p, unsigned long * memory_end_p)
 {
 	extern int serial_console;  /* in console.c, of course */
 	unsigned long lowest_paddr, end_of_phys_memory = 0;

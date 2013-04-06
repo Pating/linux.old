@@ -1,7 +1,7 @@
 /*
  *	NET3	IP device support routines.
  *
- *	Version: $Id: devinet.c,v 1.34 1999/08/20 11:04:57 davem Exp $
+ *	Version: $Id: devinet.c,v 1.35 1999/08/31 07:03:20 davem Exp $
  *
  *		This program is free software; you can redistribute it and/or
  *		modify it under the terms of the GNU General Public License
@@ -1127,7 +1127,7 @@ static void devinet_sysctl_unregister(struct ipv4_devconf *p)
 }
 #endif
 
-__initfunc(void devinet_init(void))
+void __init devinet_init(void)
 {
 	register_gifconf(PF_INET, inet_gifconf);
 	register_netdevice_notifier(&ip_netdev_notifier);

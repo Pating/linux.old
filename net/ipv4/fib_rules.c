@@ -5,7 +5,7 @@
  *
  *		IPv4 Forwarding Information Base: policy rules.
  *
- * Version:	$Id: fib_rules.c,v 1.13 1999/08/20 11:05:05 davem Exp $
+ * Version:	$Id: fib_rules.c,v 1.14 1999/08/31 07:03:29 davem Exp $
  *
  * Authors:	Alexey Kuznetsov, <kuznet@ms2.inr.ac.ru>
  *
@@ -448,7 +448,7 @@ int inet_dump_rules(struct sk_buff *skb, struct netlink_callback *cb)
 
 #endif /* CONFIG_RTNETLINK */
 
-__initfunc(void fib_rules_init(void))
+void __init fib_rules_init(void)
 {
 	register_netdevice_notifier(&fib_rules_notifier);
 }

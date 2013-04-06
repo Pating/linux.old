@@ -1778,7 +1778,6 @@ static void rs_wait_until_sent(struct tty_struct *tty, int timeout)
 		baget_printk("lsr = %d (jiff=%lu)...", lsr, jiffies);
 #endif
 		current->state = TASK_INTERRUPTIBLE;
-		current->counter = 0;	/* make us low-priority */
 		schedule_timeout(char_time);
 		if (signal_pending(current))
 			break;
@@ -1903,7 +1902,7 @@ static int block_til_ready(struct tty_struct *tty, struct file * filp,
 	restore_flags(flags); 
 	info->blocked_open++;
 	while (1) {
-		current->state = TASK_INTERRUPTIBLE;
+		set_current_state(TASK_INTERRUPTIBLE);
 		if (tty_hung_up_p(filp) ||
 		    !(info->flags & ASYNC_INITIALIZED)) {
 #ifdef SERIAL_DO_RESTART
@@ -2302,7 +2301,7 @@ static void rs_timer(void)
 /*
  * The serial driver boot-time initialization code!
  */
-__initfunc(int rs_init(void))
+int __init rs_init(void)
 {
 	int i;
 	struct serial_state * state;
@@ -2666,7 +2665,7 @@ static kdev_t serial_console_device(struct console *c)
  *	- initialize the serial port
  *	Return non-zero if we didn't find a serial port.
  */
-__initfunc(static int serial_console_setup(struct console *co, char *options))
+static int __init serial_console_setup(struct console *co, char *options)
 {
 	struct serial_state *ser;
 	unsigned cval;
@@ -2821,7 +2820,7 @@ static struct console sercons = {
 /*
  *	Register console.
  */
-__initfunc (long serial_console_init(long kmem_start, long kmem_end))
+long __init serial_console_init(long kmem_start, long kmem_end)
 {
 	register_console(&sercons);
 	return kmem_start;

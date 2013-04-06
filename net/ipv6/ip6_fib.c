@@ -5,7 +5,7 @@
  *	Authors:
  *	Pedro Roque		<roque@di.fc.ul.pt>	
  *
- *	$Id: ip6_fib.c,v 1.18 1999/08/20 11:06:19 davem Exp $
+ *	$Id: ip6_fib.c,v 1.19 1999/08/31 07:04:00 davem Exp $
  *
  *	This program is free software; you can redistribute it and/or
  *      modify it under the terms of the GNU General Public License
@@ -1204,7 +1204,7 @@ void fib6_run_gc(unsigned long dummy)
 	spin_unlock_bh(&fib6_gc_lock);
 }
 
-__initfunc(void fib6_init(void))
+void __init fib6_init(void)
 {
 	if (!fib6_node_kmem)
 		fib6_node_kmem = kmem_cache_create("fib6_nodes",

@@ -1,4 +1,4 @@
-/*  $Id: init.c,v 1.131 1999/07/30 09:35:45 davem Exp $
+/*  $Id: init.c,v 1.134 1999/08/31 06:54:58 davem Exp $
  *  arch/sparc64/mm/init.c
  *
  *  Copyright (C) 1996-1999 David S. Miller (davem@caip.rutgers.edu)
@@ -166,7 +166,7 @@ static int dvma_pages_current_index;
 static unsigned long dvmaiobase = 0;
 static unsigned long dvmaiosz __initdata = 0;
 
-__initfunc(void dvmaio_init(void))
+void __init dvmaio_init(void)
 {
 	long i;
 	
@@ -187,7 +187,7 @@ __initfunc(void dvmaio_init(void))
 	}
 }
 
-__initfunc(void iommu_init(int iommu_node, struct linux_sbus *sbus))
+void __init iommu_init(int iommu_node, struct linux_sbus *sbus)
 {
 	extern int this_is_starfire;
 	extern void *starfire_hookup(int);
@@ -586,7 +586,8 @@ void mmu_set_sbus64(struct linux_sbus_device *sdev, int bursts)
 	struct linux_sbus *sbus = sdev->my_bus;
 	struct sysio_regs *sregs = sbus->iommu->sysio_regs;
 	int slot = sdev->slot;
-	u64 *cfg, tmp;
+	volatile u64 *cfg;
+	u64 tmp;
 
 	switch(slot) {
 	case 0:
@@ -1044,8 +1045,8 @@ pte_t *get_pte_slow(pmd_t *pmd, unsigned long offset)
 	return NULL;
 }
 
-__initfunc(static void
-allocate_ptable_skeleton(unsigned long start, unsigned long end))
+static void __init
+allocate_ptable_skeleton(unsigned long start, unsigned long end)
 {
 	pgd_t *pgdp;
 	pmd_t *pmdp;
@@ -1142,8 +1143,8 @@ void sparc_ultra_dump_dtlb(void)
 extern unsigned long free_area_init(unsigned long, unsigned long);
 extern unsigned long sun_serial_setup(unsigned long);
 
-__initfunc(unsigned long 
-paging_init(unsigned long start_mem, unsigned long end_mem))
+unsigned long __init
+paging_init(unsigned long start_mem, unsigned long end_mem)
 {
 	extern pmd_t swapper_pmd_dir[1024];
 	extern unsigned int sparc64_vpte_patchme1[1];
@@ -1262,7 +1263,7 @@ paging_init(unsigned long start_mem, unsigned long end_mem))
 	return device_scan (PAGE_ALIGN (start_mem));
 }
 
-__initfunc(static void taint_real_pages(unsigned long start_mem, unsigned long end_mem))
+static void __init taint_real_pages(unsigned long start_mem, unsigned long end_mem)
 {
 	unsigned long tmp = 0, paddr, endaddr;
 	unsigned long end = __pa(end_mem);
@@ -1308,7 +1309,7 @@ __initfunc(static void taint_real_pages(unsigned long start_mem, unsigned long e
 	}
 }
 
-__initfunc(void mem_init(unsigned long start_mem, unsigned long end_mem))
+void __init mem_init(unsigned long start_mem, unsigned long end_mem)
 {
 	int codepages = 0;
 	int datapages = 0;
@@ -1322,6 +1323,7 @@ __initfunc(void mem_init(unsigned long start_mem, unsigned long end_mem))
 	max_mapnr = MAP_NR(end_mem);
 	high_memory = (void *) end_mem;
 	
+	start_mem = ((start_mem + 7UL) & ~7UL);
 	sparc64_valid_addr_bitmap = (unsigned long *)start_mem;
 	i = max_mapnr >> ((22 - PAGE_SHIFT) + 6);
 	i += 1;

@@ -27,6 +27,7 @@
 
  /*
   *  Bit simplified and optimized by Jan Hubicka
+  *  Support of BIGMEM added by Gerhard Wichert, Siemens AG, July 1999.
   */
 
 #ifdef SLOW_IO_BY_JUMPING
@@ -98,6 +99,7 @@ __OUTS(l)
 
 #ifdef __KERNEL__
 
+#include <linux/config.h>
 #include <linux/vmalloc.h>
 #include <asm/page.h>
 
@@ -109,12 +111,20 @@ __OUTS(l)
  */
 extern inline unsigned long virt_to_phys(volatile void * address)
 {
+#ifdef CONFIG_BIGMEM
+	return __pa(address);
+#else
 	return __io_phys(address);
+#endif
 }
 
 extern inline void * phys_to_virt(unsigned long address)
 {
+#ifdef CONFIG_BIGMEM
+	return __va(address);
+#else
 	return __io_virt(address);
+#endif
 }
 
 extern void * __ioremap(unsigned long offset, unsigned long size, unsigned long flags);

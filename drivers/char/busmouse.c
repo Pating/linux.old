@@ -49,7 +49,7 @@
 /*#define BROKEN_MOUSE*/
 
 extern int adb_mouse_init(void);
-extern int bus_mouse_init(void);
+extern int logi_busmouse_init(void);
 extern int ms_bus_mouse_init(void);
 extern int atixl_busmouse_init(void);
 extern int amiga_mouse_init(void);
@@ -273,7 +273,7 @@ busmouse_read(struct file *file, char *buffer, size_t count, loff_t *ppos)
 
 		add_wait_queue(&mse->wait, &wait);
 repeat:
-		current->state = TASK_INTERRUPTIBLE;
+		set_current_state(TASK_INTERRUPTIBLE);
 		if (!mse->ready && !signal_pending(current)) {
 			spin_unlock_irqrestore(&mse->lock, flags);
 			schedule();
@@ -432,11 +432,11 @@ unregister_busmouse(int mousedev)
 	return 0;
 }
 
-__initfunc(int
-bus_mouse_init(void))
+int __init
+bus_mouse_init(void)
 {
-#ifdef CONFIG_BUSMOUSE
-	bus_mouse_init();
+#ifdef CONFIG_LOGIBUSMOUSE
+	logi_busmouse_init();
 #endif
 #ifdef CONFIG_MS_BUSMOUSE
 	ms_bus_mouse_init();

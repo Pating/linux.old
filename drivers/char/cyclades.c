@@ -179,7 +179,7 @@ static char rcsid[] =
  * Change queue_task_irq_off to queue_task_irq.
  * The inline function queue_task_irq_off (tqueue.h)
  * was removed from latest releases of 2.1.x kernel.
- * Use of macro __initfunc to mark the initialization
+ * Use of macro __init to mark the initialization
  * routines, so memory can be reused.
  * Also incorporate implementation of critical region
  * in function cleanup_module() created by anonymous
@@ -2554,7 +2554,7 @@ block_til_ready(struct tty_struct *tty, struct file * filp,
 		}
 	    CY_UNLOCK(info, flags);
 
-	    current->state = TASK_INTERRUPTIBLE;
+	    set_current_state(TASK_INTERRUPTIBLE);
 	    if (tty_hung_up_p(filp)
 	    || !(info->flags & ASYNC_INITIALIZED) ){
 		return ((info->flags & ASYNC_HUP_NOTIFY) ? 
@@ -2615,7 +2615,7 @@ block_til_ready(struct tty_struct *tty, struct file * filp,
 		    printk("cyc:block_til_ready raising Z DTR\n");
 #endif
 
-	    current->state = TASK_INTERRUPTIBLE;
+	    set_current_state(TASK_INTERRUPTIBLE);
 	    if (tty_hung_up_p(filp)
 	    || !(info->flags & ASYNC_INITIALIZED) ){
 		return ((info->flags & ASYNC_HUP_NOTIFY) ?
@@ -2851,7 +2851,6 @@ static void cy_wait_until_sent(struct tty_struct *tty, int timeout)
 	    printk("Not clean (jiff=%lu)...", jiffies);
 #endif
 	    current->state = TASK_INTERRUPTIBLE;
-	    current->counter = 0;	/* make us low-priority */
 	    schedule_timeout(char_time);
 	    if (signal_pending(current))
 		break;
@@ -2864,7 +2863,6 @@ static void cy_wait_until_sent(struct tty_struct *tty, int timeout)
     }
     /* Run one more char cycle */
     current->state = TASK_INTERRUPTIBLE;
-    current->counter = 0;	/* make us low-priority */
     schedule_timeout(char_time * 5);
     current->state = TASK_RUNNING;
 #ifdef CY_DEBUG_WAIT_UNTIL_SENT
@@ -3752,7 +3750,7 @@ get_modem_info(struct cyclades_port * info, unsigned int *value)
 	}
 
     }
-    return cy_put_user(result,(unsigned long *) value);
+    return cy_put_user(result,(unsigned int *) value);
 } /* get_modem_info */
 
 
@@ -4627,8 +4625,8 @@ cy_hangup(struct tty_struct *tty)
 
 /* initialize chips on Cyclom-Y card -- return number of valid
    chips (which is number of ports/4) */
-__initfunc(static unsigned short
-cyy_init_card(volatile ucchar *true_base_addr,int index))
+static unsigned short __init
+cyy_init_card(volatile ucchar *true_base_addr,int index)
 {
   unsigned int chip_number;
   volatile ucchar* base_addr;
@@ -4713,8 +4711,8 @@ cyy_init_card(volatile ucchar *true_base_addr,int index))
  * sets global variables and return the number of ISA boards found.
  * ---------------------------------------------------------------------
  */
-__initfunc(static int
-cy_detect_isa(void))
+static int __init
+cy_detect_isa(void)
 {
   unsigned short	cy_isa_irq,nboard;
   volatile ucchar	*cy_isa_address;
@@ -4841,8 +4839,8 @@ static void plx_init(uclong addr, uclong initctl)
  * sets global variables and return the number of PCI boards found.
  * ---------------------------------------------------------------------
  */
-__initfunc(static int
-cy_detect_pci(void))
+static int __init
+cy_detect_pci(void)
 {
 #ifdef CONFIG_PCI
 
@@ -5357,8 +5355,8 @@ done:
     extra ports are ignored.
  */
 
-__initfunc(int
-cy_init(void))
+int __init
+cy_init(void)
 {
   struct cyclades_port  *info;
   struct cyclades_card *cinfo;

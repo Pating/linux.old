@@ -810,7 +810,7 @@ E: ajh@primag.co.uk
 D: Selection mechanism
 
 N: Andre Hedrick
-E: hedrick@astro.dyer.vanderbilt.edu
+E: andre@suse.com
 D: Random SMP kernel hacker...
 D: Uniform Multi-Platform E-IDE driver
 D: Aladdin 1533/1543(C) chipset
@@ -1030,6 +1030,16 @@ D: PIIX chipset IDE
 S: ul. Matemblewska 1B/10
 S: 80-283 Gdansk
 S: Poland
+
+N: Dave Jones
+E: dave@powertweak.com
+W: http://linux.powertweak.com
+D: Centaur/IDT Winchip/Winchip 2 tweaks
+D: Misc clean ups and other random hacking.
+S: 40, Heol Edward Lewis,
+S: Gelligaer, Hengoed,
+S: Mid Glamorgan, CF82 8EJ,
+S: Wales, United Kingdom
 
 N: Bernhard Kaindl
 E: bkaindl@netway.at
@@ -2362,6 +2372,7 @@ N: Leonard N. Zubkoff
 E: lnz@dandelion.com
 W: http://www.dandelion.com/Linux/
 D: BusLogic SCSI driver
+D: Mylex DAC960 PCI RAID driver
 D: Miscellaneous kernel fixes
 S: 3078 Sulphur Spring Court
 S: San Jose, California 95148

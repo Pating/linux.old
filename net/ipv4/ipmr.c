@@ -9,7 +9,7 @@
  *	as published by the Free Software Foundation; either version
  *	2 of the License, or (at your option) any later version.
  *
- *	Version: $Id: ipmr.c,v 1.45 1999/08/20 11:05:53 davem Exp $
+ *	Version: $Id: ipmr.c,v 1.46 1999/08/31 07:03:44 davem Exp $
  *
  *	Fixes:
  *	Michael Chastain	:	Incorrect size of copying.
@@ -1735,7 +1735,7 @@ struct inet_protocol pim_protocol =
  *	Setup for IP multicast routing
  */
  
-__initfunc(void ip_mr_init(void))
+void __init ip_mr_init(void)
 {
 	printk(KERN_INFO "Linux IP multicast router 0.06 plus PIM-SM\n");
 	mrt_cachep = kmem_cache_create("ip_mrt_cache",

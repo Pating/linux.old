@@ -71,11 +71,11 @@ atomic_t nmi_counter;
  * system. We never hold this lock when we call the actual
  * IRQ handler.
  */
-spinlock_t irq_controller_lock ={0};
+spinlock_t irq_controller_lock = SPIN_LOCK_UNLOCKED;
 /*
  * Controller mappings for all interrupt sources:
  */
-irq_desc_t irq_desc[NR_IRQS] = { [0 ... NR_IRQS-1] = { 0, &no_irq_type, }};
+irq_desc_t irq_desc[NR_IRQS] __cacheline_aligned = { [0 ... NR_IRQS-1] = { 0, &no_irq_type, }};
 
 /*
  * Special irq handlers.
@@ -125,10 +125,13 @@ int get_irq_list(char *buf)
 	return p - buf;
 }
 
+
 /*
  * Global interrupt locks for SMP. Allow interrupts to come in on any
  * CPU, yet make cli/sti act globally to protect critical regions..
  */
+spinlock_t i386_bh_lock = SPIN_LOCK_UNLOCKED;
+
 #ifdef __SMP__
 unsigned char global_irq_holder = NO_PROC_ID;
 unsigned volatile int global_irq_lock;
@@ -637,16 +640,22 @@ void free_irq(unsigned int irq, void *dev_id)
 
 			/* Found it - now remove it from the list of entries */
 			*pp = action->next;
-			if (irq_desc[irq].action)
-				break;
-			irq_desc[irq].status |= IRQ_DISABLED;
-			irq_desc[irq].handler->shutdown(irq);
-			break;
+			if (!irq_desc[irq].action) {
+				irq_desc[irq].status |= IRQ_DISABLED;
+				irq_desc[irq].handler->shutdown(irq);
+			}
+			spin_unlock_irqrestore(&irq_controller_lock,flags);
+
+			/* Wait to make sure it's not being used on another CPU */
+			while (irq_desc[irq].status & IRQ_INPROGRESS)
+				barrier();
+			kfree(action);
+			return;
 		}
 		printk("Trying to free free IRQ%d\n",irq);
-		break;
+		spin_unlock_irqrestore(&irq_controller_lock,flags);
+		return;
 	}
-	spin_unlock_irqrestore(&irq_controller_lock,flags);
 }
 
 /*

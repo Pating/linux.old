@@ -6,7 +6,7 @@
  *	Pedro Roque		<roque@di.fc.ul.pt>	
  *	Alexey Kuznetsov	<kuznet@ms2.inr.ac.ru>
  *
- *	$Id: addrconf.c,v 1.52 1999/08/20 11:06:14 davem Exp $
+ *	$Id: addrconf.c,v 1.53 1999/08/31 07:03:54 davem Exp $
  *
  *	This program is free software; you can redistribute it and/or
  *      modify it under the terms of the GNU General Public License
@@ -1982,7 +1982,7 @@ static void addrconf_sysctl_unregister(struct ipv6_devconf *p)
  *	Init / cleanup code
  */
 
-__initfunc(void addrconf_init(void))
+void __init addrconf_init(void)
 {
 #ifdef MODULE
 	struct net_device *dev;
