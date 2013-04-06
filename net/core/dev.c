@@ -81,7 +81,6 @@
 #include <linux/skbuff.h>
 #include <net/sock.h>
 #include <linux/rtnetlink.h>
-#include <net/slhc.h>
 #include <linux/proc_fs.h>
 #include <linux/stat.h>
 #include <net/br.h>
@@ -96,6 +95,10 @@
 #ifdef CONFIG_PLIP
 extern int plip_init(void);
 #endif
+extern void n2_init(void);
+extern void c101_init(void);
+extern int wanxl_init(void);
+extern void sync_ppp_init(void);
 
 NET_PROFILE_DEFINE(dev_queue_xmit)
 NET_PROFILE_DEFINE(net_bh)
@@ -1963,18 +1966,6 @@ __initfunc(int net_dev_init(void))
 #if defined(CONFIG_COMX)
 	comx_init();
 #endif
-	/*
-	 *	SLHC if present needs attaching so other people see it
-	 *	even if not opened.
-	 */
-	 
-#ifdef CONFIG_INET	 
-#if (defined(CONFIG_SLIP) && defined(CONFIG_SLIP_COMPRESSED)) \
-	 || defined(CONFIG_PPP) \
-    || (defined(CONFIG_ISDN) && defined(CONFIG_ISDN_PPP))
-	slhc_install();
-#endif	
-#endif
 
 #ifdef CONFIG_NET_PROFILE
 	net_profile_init();
@@ -2038,6 +2029,19 @@ __initfunc(int net_dev_init(void))
 	 * Register any statically linked ethernet devices with the bridge
 	 */
 	br_spacedevice_register();
+#endif
+
+#ifdef CONFIG_N2
+	n2_init();
+#endif
+#ifdef CONFIG_C101
+	c101_init();
+#endif
+#ifdef CONFIG_WANXL
+	wanxl_init();
+#endif
+#ifdef CONFIG_HDLC
+	sync_ppp_init();
 #endif
 
 #ifdef CONFIG_IP_PNP

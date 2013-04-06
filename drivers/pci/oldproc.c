@@ -412,8 +412,11 @@ struct pci_dev_info dev_info[] = {
 	DEVICE( MUTECH,		MUTECH_MV1000,	"MV-1000"),
 	DEVICE( RENDITION,	RENDITION_VERITE,"Verite 1000"),
 	DEVICE( RENDITION,	RENDITION_VERITE2100,"Verite 2100"),
-	DEVICE(	RCC,		RCC_HE,		"CNB20HE PCI Bridge"),
-	DEVICE(	RCC,		RCC_LE,		"CNB30LE PCI Bridge"),
+	DEVICE(	SERVERWORKS,	SERVERWORKS_HE,	"CNB20HE PCI Bridge"),
+	DEVICE(	SERVERWORKS,	SERVERWORKS_LE,	"CNB30LE PCI Bridge"),
+	DEVICE(	SERVERWORKS,	SERVERWORKS_CMIC_HE,	"CMIC-HE PCI Bridge"),
+	DEVICE(	SERVERWORKS,	SERVERWORKS_CIOB30,	"CIOB30 I/O Bridge"),
+	DEVICE(	SERVERWORKS,	SERVERWORKS_CSB5,	"CSB5 PCI Bridge"),
 	DEVICE( TOSHIBA,	TOSHIBA_601,	"Laptop"),
 	DEVICE( TOSHIBA,	TOSHIBA_TOPIC95,"ToPIC95"),
 	DEVICE( TOSHIBA,	TOSHIBA_TOPIC97,"ToPIC97"),
@@ -480,6 +483,7 @@ struct pci_dev_info dev_info[] = {
 	DEVICE( NVIDIA_SGS,	NVIDIA_SGS_RIVA128,	"Riva 128"),
 	DEVICE( CBOARDS,	CBOARDS_DAS1602_16,"DAS1602/16"),
 	DEVICE( MOTOROLA_OOPS,	MOTOROLA_FALCON,"Falcon"),
+	DEVICE( TIMEDIA,	TIMEDIA_4008A, "Noname 4008A"),
 	DEVICE( SYMPHONY,	SYMPHONY_101,	"82C101"),
 	DEVICE( TEKRAM,		TEKRAM_DC290,	"DC-290"),
 	DEVICE( 3DLABS,		3DLABS_300SX,	"GLINT 300SX"),
@@ -712,6 +716,7 @@ static const char *pci_strclass (unsigned int class)
 	      case PCI_CLASS_SERIAL_SSA:		return "SSA";
 	      case PCI_CLASS_SERIAL_USB:		return "USB Controller";
 	      case PCI_CLASS_SERIAL_FIBER:		return "Fiber Channel";
+	      case PCI_CLASS_SERIAL_SMBUS:		return "SM Bus";
 
 	      case PCI_CLASS_HOT_SWAP_CONTROLLER:	return "Hot Swap Controller";
 
@@ -843,6 +848,7 @@ static const char *pci_strvendor(unsigned int vendor)
 	      case PCI_VENDOR_ID_PICTUREL:	return "Picture Elements";
 	      case PCI_VENDOR_ID_NVIDIA_SGS:	return "NVidia/SGS Thomson";
 	      case PCI_VENDOR_ID_CBOARDS:	return "ComputerBoards";
+	      case PCI_VENDOR_ID_TIMEDIA:	return "Timedia Technology";
 	      case PCI_VENDOR_ID_SYMPHONY:	return "Symphony";
 	      case PCI_VENDOR_ID_COMPUTONE:	return "Computone Corporation";
 	      case PCI_VENDOR_ID_TEKRAM:	return "Tekram";

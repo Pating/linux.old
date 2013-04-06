@@ -50,6 +50,7 @@
 #include <linux/random.h>
 #include <linux/pkt_sched.h>
 #include <asm/byteorder.h>
+#include <asm/uaccess.h>
 #include "syncppp.h"
 
 #define MAXALIVECNT     6               /* max. alive packets */
@@ -153,9 +154,9 @@ MODULE_PARM(debug,"1i");
 
 static void if_down(struct device *dev)
 {
-	struct sppp *sp = &((struct ppp_device *)dev)->sppp;
+	struct sppp *sp = (struct sppp *)sppp_of(dev);
 
-	sp->pp_link_state=SPPP_LINK_DOWN;
+	sp->pp_link_state = SPPP_LINK_DOWN;
 }
 
 /*
@@ -191,7 +192,7 @@ static void sppp_clear_timeout(struct sppp *p)
 void sppp_input (struct device *dev, struct sk_buff *skb)
 {
 	struct ppp_header *h;
-	struct sppp *sp = &((struct ppp_device *)dev)->sppp;
+	struct sppp *sp = (struct sppp *)sppp_of(dev);
 	
 	skb->dev=dev;
 	skb->mac.raw=skb->data;
@@ -320,7 +321,7 @@ EXPORT_SYMBOL(sppp_input);
 static int sppp_hard_header(struct sk_buff *skb, struct device *dev, __u16 type,
 		void *daddr, void *saddr, unsigned int len)
 {
-	struct sppp *sp = &((struct ppp_device *)dev)->sppp;
+	struct sppp *sp = (struct sppp *)sppp_of(dev);
 	struct ppp_header *h;
 	skb_push(skb,sizeof(struct ppp_header));
 	h=(struct ppp_header *)skb->data;
@@ -826,7 +827,7 @@ static void sppp_cisco_send (struct sppp *sp, int type, long par1, long par2)
 
 int sppp_close (struct device *dev)
 {
-	struct sppp *sp = &((struct ppp_device *)dev)->sppp;
+	struct sppp *sp = (struct sppp *)sppp_of(dev);
 	sp->pp_link_state = SPPP_LINK_DOWN;
 	sp->lcp.state = LCP_STATE_CLOSED;
 	sp->ipcp.state = IPCP_STATE_CLOSED;
@@ -839,7 +840,7 @@ EXPORT_SYMBOL(sppp_close);
 
 int sppp_open (struct device *dev)
 {
-	struct sppp *sp = &((struct ppp_device *)dev)->sppp;
+	struct sppp *sp = (struct sppp *)sppp_of(dev);
 	sppp_close(dev);
 	if (!(sp->pp_flags & PP_CISCO)) {
 		sppp_lcp_open (sp);
@@ -852,7 +853,7 @@ EXPORT_SYMBOL(sppp_open);
 
 int sppp_reopen (struct device *dev)
 {
-	struct sppp *sp = &((struct ppp_device *)dev)->sppp;
+	struct sppp *sp = (struct sppp *)sppp_of(dev);
 	sppp_close(dev);
 	if (!(sp->pp_flags & PP_CISCO))
 	{
@@ -881,7 +882,7 @@ EXPORT_SYMBOL(sppp_change_mtu);
 
 int sppp_do_ioctl(struct device *dev, struct ifreq *ifr, int cmd)
 {
-	struct sppp *sp = &((struct ppp_device *)dev)->sppp;
+	struct sppp *sp = (struct sppp *)sppp_of(dev);
 
 	if(dev->flags&IFF_UP)
 		return -EBUSY;
@@ -904,6 +905,14 @@ int sppp_do_ioctl(struct device *dev, struct ifreq *ifr, int cmd)
 			if(ifr->ifr_flags)
 				sp->pp_flags|=PP_DEBUG;
 			break;
+		case SPPPIOCGFLAGS:
+			if(copy_to_user(ifr->ifr_data, &sp->pp_flags, sizeof(sp->pp_flags)))
+				return -EFAULT;
+			break;
+		case SPPPIOCSFLAGS:
+			if(copy_from_user(&sp->pp_flags, ifr->ifr_data, sizeof(sp->pp_flags)))
+				return -EFAULT;
+			break;
 		default:
 			return -EINVAL;
 	}
@@ -914,7 +923,7 @@ EXPORT_SYMBOL(sppp_do_ioctl);
 
 void sppp_attach(struct ppp_device *pd)
 {
-	struct device *dev=&pd->dev;
+	struct device *dev = pd->dev;
 	struct sppp *sp = &pd->sppp;
 	
 	/* Initialize keepalive handler. */
@@ -971,8 +980,7 @@ EXPORT_SYMBOL(sppp_attach);
 
 void sppp_detach (struct device *dev)
 {
-	struct sppp **q, *p, *sp = &((struct ppp_device *)dev)->sppp;
-
+	struct sppp **q, *p, *sp = (struct sppp *)sppp_of(dev);
 
 	/* Remove the entry from the keepalive list. */
 	for (q = &spppq; (p = *q); q = &p->pp_next)
@@ -1297,6 +1305,8 @@ void sync_ppp_init(void)
 	sppp_packet_type.type=htons(ETH_P_WAN_PPP);	
 	dev_add_pack(&sppp_packet_type);
 }
+
+EXPORT_SYMBOL(sync_ppp_init);
 
 #ifdef MODULE
 

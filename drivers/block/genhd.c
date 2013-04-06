@@ -165,14 +165,6 @@ static inline int is_extended_partition(struct partition *p)
 		SYS_IND(p) == LINUX_EXTENDED_PARTITION);
 }
 
-static int sector_partition_scale(kdev_t dev)
-{
-       if (hardsect_size[MAJOR(dev)] != NULL)
-               return (hardsect_size[MAJOR(dev)][MINOR(dev)]/512);
-       else
-               return (1);
-}
-
 static unsigned int get_ptable_blocksize(kdev_t dev)
 {
 	int ret = 1024;
@@ -234,20 +226,23 @@ static unsigned int get_ptable_blocksize(kdev_t dev)
 
 #define MSDOS_LABEL_MAGIC		0xAA55
 
-static void extended_partition(struct gendisk *hd, kdev_t dev)
+static void extended_partition(struct gendisk *hd, kdev_t dev, int sector_size)
 {
 	struct buffer_head *bh;
 	struct partition *p;
 	unsigned long first_sector, first_size, this_sector, this_size;
 	int mask = (1 << hd->minor_shift) - 1;
-	int sector_size = sector_partition_scale(dev);
 	int i;
+	int loopct = 0; 	/* number of links followed
+				   without finding a data partition */
 
 	first_sector = hd->part[MINOR(dev)].start_sect;
 	first_size = hd->part[MINOR(dev)].nr_sects;
 	this_sector = first_sector;
 
 	while (1) {
+		if (++loopct > 100)
+			return;
 		if ((current_minor & mask) == 0)
 			return;
 		if (!(bh = bread(dev,0,get_ptable_blocksize(dev))))
@@ -295,6 +290,7 @@ static void extended_partition(struct gendisk *hd, kdev_t dev)
 			current_minor++;
 			if ((current_minor & mask) == 0)
 				goto done;
+			loopct = 0;
 		}
 		/*
 		 * Next, process the (first) extended partition, if present.
@@ -330,6 +326,7 @@ solaris_x86_partition(struct gendisk *hd, kdev_t dev, long offset) {
 	struct buffer_head *bh;
 	struct solaris_x86_vtoc *v;
 	struct solaris_x86_slice *s;
+	int mask = (1 << hd->minor_shift) - 1;
 	int i;
 
 	if(!(bh = bread(dev, 0, get_ptable_blocksize(dev))))
@@ -346,10 +343,14 @@ solaris_x86_partition(struct gendisk *hd, kdev_t dev, long offset) {
 		return;
 	}
 	for(i=0; i<SOLARIS_X86_NUMSLICE; i++) {
+		if ((current_minor & mask) == 0)
+			break;
+
 		s = &v->v_slice[i];
 
 		if (s->s_size == 0)
 			continue;
+
 		printk(" [s%d]", i);
 		/* solaris partitions are relative to current MS-DOS
 		 * one but add_partition starts relative to sector
@@ -486,7 +487,8 @@ static int msdos_partition(struct gendisk *hd, kdev_t dev, unsigned long first_s
 	struct partition *p;
 	unsigned char *data;
 	int mask = (1 << hd->minor_shift) - 1;
-	int sector_size = sector_partition_scale(dev);
+	int sector_size;
+        int disk_number_of_sects;
 #ifdef CONFIG_BSD_DISKLABEL
 	/* no bsd disklabel as a default */
 	kdev_t bsd_kdev = 0;
@@ -501,6 +503,15 @@ read_mbr:
 		printk(" unable to read partition table\n");
 		return -1;
 	}
+
+	/* in some cases (backwards compatibility) we'll adjust the
+         * sector_size below
+         */
+        if (hardsect_size[MAJOR(dev)] != NULL)
+               sector_size=hardsect_size[MAJOR(dev)][MINOR(dev)]/512;
+        else
+               sector_size=1;
+
 	data = bh->b_data;
 	/* In some cases we modify the geometry    */
 	/*  of the drive (below), so ensure that   */
@@ -585,6 +596,35 @@ check_table:
 	}
 #endif	/* CONFIG_BLK_DEV_IDE */
 
+	/*
+         * The Linux code now honours the rules the MO people set and
+         * is 'DOS compatible' - sizes are scaled by the media block
+	 * size not 512 bytes. The following is a backwards
+	 * compatibility check. If a 1k or greater sectorsize disk
+	 * (1024, 2048, etc) was created under a pre 2.2 kernel,
+	 * the partition table wrongly used units of 512 instead of
+         * units of sectorsize (1024, 2048, etc.) The below check attempts
+         * to detect a partition table created under the older kernel, and
+         * if so detected, it will reset the a sector scale factor to 1 (i.e.
+         * no scaling).
+	 */
+        disk_number_of_sects = NR_SECTS((&hd->part[MINOR(dev)]));
+	for (i = 0; i < 4; i++) {
+		struct partition *q = &p[i];
+		if (NR_SECTS(q)) {
+		        if (((first_sector+(START_SECT(q)+NR_SECTS(q))*sector_size) >
+                             (disk_number_of_sects+1)) &&
+		            ((first_sector+(START_SECT(q)+NR_SECTS(q)) <=
+                             disk_number_of_sects))) {
+	                        char buf[MAX_DISKNAME_LEN];
+	                        printk(" %s: RESETTINGING SECTOR SCALE from %d to 1",
+                                       disk_name(hd, MINOR(dev), buf), sector_size);
+		                sector_size=1;
+                                break;
+		        }
+		}
+	}
+
 	current_minor += 4;  /* first "extra" minor (for extended partitions) */
 	for (i=1 ; i<=4 ; minor++,i++,p++) {
 		if (!NR_SECTS(p))
@@ -601,7 +641,7 @@ check_table:
 			 */
 			hd->sizes[minor] = hd->part[minor].nr_sects 
 			  	>> (BLOCK_SIZE_BITS - 9);
-			extended_partition(hd, MKDEV(hd->major, minor));
+			extended_partition(hd, MKDEV(hd->major, minor), sector_size);
 			printk(" >");
 			/* prevent someone doing mkfs or mkswap on an
 			   extended partition, but leave room for LILO */
@@ -1335,6 +1375,114 @@ static int ultrix_partition(struct gendisk *hd, kdev_t dev, unsigned long first_
 
 #endif /* CONFIG_ULTRIX_PARTITION */
 
+#ifdef CONFIG_ARCH_S390
+#include <asm/ebcdic.h>
+#include "../s390/block/dasd_types.h"
+
+dasd_information_t **dasd_information = NULL;
+
+typedef enum {
+  ibm_partition_none = 0,
+  ibm_partition_lnx1 = 1,
+  ibm_partition_vol1 = 3,
+  ibm_partition_cms1 = 4
+} ibm_partition_t;
+
+static ibm_partition_t
+get_partition_type ( char * type )
+{
+        static char lnx[5]="LNX1";
+        static char vol[5]="VOL1";
+        static char cms[5]="CMS1";
+        if ( ! strncmp ( lnx, "LNX1",4 ) ) {
+                ASCEBC(lnx,4);
+                ASCEBC(vol,4);
+                ASCEBC(cms,4);
+        }
+        if ( ! strncmp (type,lnx,4) ||
+             ! strncmp (type,"LNX1",4) )
+                return ibm_partition_lnx1;
+        if ( ! strncmp (type,vol,4) )
+                return ibm_partition_vol1;
+        if ( ! strncmp (type,cms,4) )
+                return ibm_partition_cms1;
+        return ibm_partition_none;
+}
+
+int 
+ibm_partition (struct gendisk *hd, kdev_t dev, int first_sector)
+{
+	struct buffer_head *bh;
+	ibm_partition_t partition_type;
+	char type[5] = {0,};
+	char name[7] = {0,};
+        int di = MINOR(dev) >> hd->minor_shift;
+        if ( ! get_ptable_blocksize(dev) )
+		return 0;
+	if ( ! dasd_information )
+		return 0;
+	if ( ( bh = bread( dev, 
+			 dasd_information[di]->sizes.label_block, 
+			 dasd_information[di]->sizes.bp_sector ) ) != NULL ) {
+		strncpy ( type,bh -> b_data, 4);
+		strncpy ( name,bh -> b_data + 4, 6);
+        } else {
+		return 0;
+	}
+	if ( (*(char *)bh -> b_data) & 0x80 ) {
+		EBCASC(name,6);
+	}
+	switch ( partition_type = get_partition_type(type) ) {
+	case ibm_partition_lnx1:
+		printk ( "(LNX1)/%6s:",name);
+		add_partition( hd, MINOR(dev) + 1, 
+				  (dasd_information[di]->sizes.label_block + 1) <<
+				   dasd_information[di]->sizes.s2b_shift,
+				  (dasd_information [di]->sizes.blocks -
+				    dasd_information[di]->sizes.label_block - 1) <<
+				  dasd_information[di]->sizes.s2b_shift,0 );
+		break;
+	case ibm_partition_vol1:
+		printk ( "(VOL1)/%6s:",name);
+		break;
+	case ibm_partition_cms1:
+		printk ( "(CMS1)/%6s:",name);
+		if (* (((long *)bh->b_data) + 13) == 0) {
+			/* disk holds a CMS filesystem */
+			add_partition( hd, MINOR(dev) + 1, 
+				       (dasd_information [di]->sizes.label_block + 1) <<
+				       dasd_information [di]->sizes.s2b_shift,
+				       (dasd_information [di]->sizes.blocks -
+					dasd_information [di]->sizes.label_block) <<
+				       dasd_information [di]->sizes.s2b_shift,0 );
+			printk ("(CMS)");
+		} else {
+		  /* disk is reserved minidisk */
+                        long *label=(long*)bh->b_data;
+			int offset = label[13];
+			int size = (label[7]-1-label[13])*(label[3]>>9);
+			add_partition( hd, MINOR(dev) + 1, 
+				       offset << dasd_information [di]->sizes.s2b_shift,
+				       size<<dasd_information [di]->sizes.s2b_shift,0 );
+			printk ("(MDSK)");
+		}
+		break;
+	case ibm_partition_none:
+		printk ( "(nonl)/      :");
+		add_partition( hd, MINOR(dev) + 1, 
+				  (dasd_information [di]->sizes.label_block + 1) <<
+				  dasd_information [di]->sizes.s2b_shift,
+				  (dasd_information [di]->sizes.blocks -
+				   dasd_information [di]->sizes.label_block - 1) <<
+				  dasd_information [di]->sizes.s2b_shift,0 );
+		break;
+	}
+	printk ( "\n" );
+	bforget(bh);
+	return 1;
+}
+#endif
+
 static void check_partition(struct gendisk *hd, kdev_t dev)
 {
 	static int first_time = 1;
@@ -1386,6 +1534,10 @@ static void check_partition(struct gendisk *hd, kdev_t dev)
 #endif
 #ifdef CONFIG_ULTRIX_PARTITION
 	if(ultrix_partition(hd, dev, first_sector))
+		return;
+#endif
+#ifdef CONFIG_ARCH_S390
+	if (ibm_partition (hd, dev, first_sector))
 		return;
 #endif
 	printk(" unknown partition table\n");

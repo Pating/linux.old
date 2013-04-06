@@ -221,12 +221,12 @@ static inline void mask_and_ack_8259A(unsigned int irq)
 	if (irq & 8) {
 		inb(0xA1);	/* DUMMY */
 		outb(cached_A1,0xA1);
+		outb(0x60+(irq&7),0xA0);/* Specific EOI to slave */
 		outb(0x62,0x20);	/* Specific EOI to cascade */
-		outb(0x20,0xA0);
 	} else {
 		inb(0x21);	/* DUMMY */
 		outb(cached_21,0x21);
-		outb(0x20,0x20);
+		outb(0x60+irq,0x20);	/* Specific EOI to master */
 	}
 }
 
@@ -442,6 +442,10 @@ int get_irq_list(char *buf)
  * Global interrupt locks for SMP. Allow interrupts to come in on any
  * CPU, yet make cli/sti act globally to protect critical regions..
  */
+#if defined (__SMP__) || DEBUG_SPINLOCKS > 0
+spinlock_t i386_bh_lock = SPIN_LOCK_UNLOCKED;
+#endif
+
 #ifdef __SMP__
 unsigned char global_irq_holder = NO_PROC_ID;
 unsigned volatile int global_irq_lock;
@@ -449,7 +453,6 @@ atomic_t global_irq_count;
 
 atomic_t global_bh_count;
 atomic_t global_bh_lock;
-spinlock_t i386_bh_lock = SPIN_LOCK_UNLOCKED;
 
 /*
  * "global_cli()" is a special case, in that it can hold the
@@ -971,8 +974,24 @@ unsigned long probe_irq_on(void)
 	unsigned int i;
 	unsigned long delay;
 
+	/* 
+	 * something may have generated an irq long ago and we want to
+	 * flush such a longstanding irq before considering it as spurious. 
+	 */
+	spin_lock_irq(&irq_controller_lock);
+	for (i = NR_IRQS-1; i > 0; i--) 
+		if (!irq_desc[i].action) 
+			irq_desc[i].handler->startup(i);
+	spin_unlock_irq(&irq_controller_lock);
+
+	/* Wait for longstanding interrupts to trigger. */
+	for (delay = jiffies + HZ/50; time_after(delay, jiffies); )
+		/* about 20ms delay */ synchronize_irq();
+
 	/*
-	 * first, enable any unassigned irqs
+	 * enable any unassigned irqs
+	 * (we must startup again here because if a longstanding irq
+	 * happened in the previous stage, it may have masked itself)
 	 */
 	spin_lock_irq(&irq_controller_lock);
 	for (i = NR_IRQS-1; i > 0; i--) {

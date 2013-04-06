@@ -219,6 +219,15 @@ int do_debugger_trap(struct pt_regs *regs,int signal)
 	return(FALSE);
 }
 
+asmlinkage void default_trap_handler(struct pt_regs * regs, long error_code)
+{
+        if (check_for_fixup(regs) == 0) {
+                current->tss.error_code = error_code;
+                current->tss.trap_no = error_code;
+                force_sig(SIGSEGV, current); 
+                die("Unknown program exception",regs,error_code);
+        }
+}
 
 DO_ERROR(2, SIGILL, "privileged operation", privileged_op, current)
 DO_ERROR(3, SIGILL, "execute exception", execute_exception, current)
@@ -350,8 +359,23 @@ asmlinkage void data_exception(struct pt_regs * regs, long error_code)
 	int do_sig = 0;
 
         lock_kernel();
-        if (regs->psw.mask & 0x00010000L) {
 		location = (__u16 *)(regs->psw.addr-S390_lowcore.pgm_ilc);
+	if(MACHINE_HAS_IEEE)
+	{
+		__asm__ volatile ("stfpc %0\n\t" 
+				  : "=m" (current->tss.fp_regs.fpc));
+		
+	}
+	/* Same code should work when we implement fpu emulation */
+	/* provided we call data exception from the fpu emulator */
+	if(current->tss.fp_regs.fpc&FPC_DXC_MASK)
+	{
+		current->tss.ieee_instruction_pointer=
+			(addr_t)ADDR_BITS_REMOVE((addr_t)location);
+		force_sig(SIGFPE, current);
+	}
+        else if ((regs->psw.mask & 0x00010000L)) 
+	{
 		get_user(*((__u16 *) opcode), location);
 		switch (opcode[0]) {
 		case 0x28: /* LDR Rx,Ry   */
@@ -402,7 +426,8 @@ asmlinkage void data_exception(struct pt_regs * regs, long error_code)
 			do_sig = 1;
 			break;
                 }
-        } else
+        } 
+	else
 		do_sig = 1;
 	if (do_sig) {
                 if (check_for_fixup(regs) == 0) {

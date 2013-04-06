@@ -25,7 +25,7 @@ endif
 export-objs	:=  ad1848.o audio_syms.o midi_syms.o mpu401.o \
 		    msnd.o opl3.o sb_card.o sequencer_syms.o \
 		    sound_core.o sound_syms.o uart401.o ad1816.o \
-		    nm256_audio.o
+		    nm256_audio.o ac97_codec.o
 
 
 
@@ -53,7 +53,8 @@ obj-$(CONFIG_SOUND_CS4232)	+= cs4232.o ad1848.o
 obj-$(CONFIG_SOUND_CS4232)	+= uart401.o
 obj-$(CONFIG_SOUND_GUS)		+= gus.o ad1848.o
 obj-$(CONFIG_SOUND_MAD16)	+= mad16.o ad1848.o sb.o uart401.o
-obj-$(CONFIG_SOUND_VIA82CXXX)	+= via82cxxx.o sb.o uart401.o
+obj-$(CONFIG_SOUND_VIA82CXXX)	+= via82cxxx.o sb.o uart401.o 
+obj-$(CONFIG_SOUND_YMPCI)	+= ymf_sb.o sb.o uart401.o ac97_codec.o
 obj-$(CONFIG_SOUND_MAUI)	+= maui.o mpu401.o
 obj-$(CONFIG_SOUND_MPU401)	+= mpu401.o
 obj-$(CONFIG_SOUND_MSNDCLAS)	+= msnd.o msnd_classic.o
@@ -83,13 +84,15 @@ obj-$(CONFIG_SOUND_CMPCI)	+= cmpci.o
 obj-$(CONFIG_SOUND_ES1370)	+= es1370.o
 obj-$(CONFIG_SOUND_ES1371)	+= es1371.o
 obj-$(CONFIG_SOUND_ESSSOLO1)	+= esssolo1.o
+obj-$(CONFIG_SOUND_ICH)		+= i810_audio.o ac97_codec.o
 obj-$(CONFIG_SOUND_MAESTRO)	+= maestro.o
 obj-$(CONFIG_SOUND_SONICVIBES)	+= sonicvibes.o
+obj-$(CONFIG_SOUND_TRIDENT)     += trident.o ac97_codec.o
 
 # Declare multi-part drivers.
 
 list-multi	:= sound.o gus.o pas2.o sb.o softoss2.o vidc_mod.o \
-    soundcore.o wavefront.o nm256.o
+    soundcore.o wavefront.o nm256.o via82cxxx.o \
 
 sound-objs	:= 							\
     dev_table.o soundcard.o sound_syms.o		\
@@ -107,6 +110,7 @@ softoss2-objs	:= softoss.o softoss_rs.o
 vidc_mod-objs	:= vidc.o vidc_audio.o vidc_fill.o vidc_mixer.o vidc_synth.o
 wavefront-objs  := wavfront.o wf_midi.o yss225.o
 nm256-objs	:= nm256_audio.o ac97.o
+via82cxxx-objs := via82cxxx_audio.o ac97.o
 
 
 # Extract lists of the multi-part drivers.
@@ -194,6 +198,9 @@ wavefront.o: $(wavefront-objs)
 
 nm256.o: $(nm256-objs)
 	$(LD) -r -o $@ $(nm256-objs)
+
+via82cxxx.o: $(via82cxxx-objs)
+	$(LD) -r -o $@ $(via82cxxx-objs)
 
 # Firmware files that need translation
 #
