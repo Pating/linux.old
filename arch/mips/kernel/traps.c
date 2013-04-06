@@ -126,11 +126,6 @@ void show_trace(struct task_struct *task, unsigned long *stack)
 	printk("\n");
 }
 
-void show_trace_task(struct task_struct *tsk)
-{
-	show_trace(tsk, (long *)tsk->thread.reg29);
-}
-
 /*
  * The architecture-independent dump_stack generator
  */
@@ -977,8 +972,7 @@ void __init trap_init(void)
 		memcpy((void *)(CAC_BASE + 0x300), &except_vec_ejtag_debug, 0x80);
 
 	/*
-	 * Only some CPUs have the watch exceptions or a dedicated
-	 * interrupt vector.
+	 * Only some CPUs have the watch exceptions.
 	 */
 	if (cpu_has_watch)
 		set_except_vector(23, handle_watch);

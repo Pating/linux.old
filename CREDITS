@@ -289,6 +289,15 @@ S: Via Delle Palme, 9
 S: Terni 05100
 S: Italy
 
+N: Krzysztof Benedyczak
+E: golbi@mat.uni.torun.pl
+W: http://www.mat.uni.torun.pl/~golbi
+D: POSIX message queues fs (with M. Wronski)
+S: ul. Podmiejska 52
+S: Radunica
+S: 83-000 Pruszcz Gdanski
+S: Poland
+
 N: Randolph Bentson
 E: bentson@grieg.seaslug.org
 W: http://www.aa.net/~bentson/
@@ -1299,11 +1308,10 @@ S: USA
 
 N: Benjamin Herrenschmidt
 E: benh@kernel.crashing.org
-E: benh@mipsys.com
-D: Various parts of PPC & PowerMac
-S: 122, boulevard Baille
-S: 13005 Marseille
-S: France
+D: Various parts of PPC/PPC64 & PowerMac
+S: 312/107 Canberra Avenue
+S: Griffith, ACT 2603 
+S: Australia
 
 N: Sebastian Hetze
 E: she@lunetix.de
@@ -1935,6 +1943,12 @@ S: 8786 Niwot Road
 S: Niwot, Colorado 80503
 S: USA
 
+N: Pete Popov
+E: pete_popov@yahoo.com
+D: Linux/MIPS AMD/Alchemy Port and mips hacking and debugging
+S: San Jose, CA 95134
+S: USA
+
 N: Robert M. Love
 E: rml@tech9.net
 E: rml@ufl.edu
@@ -2258,7 +2272,7 @@ S: D-37083 Goettingen
 S: Germany
 
 N: Thomas Molina
-E: tmolina@cox.net
+E: tmolina@cablespeed.com
 D: bug fixes, documentation, minor hackery
 
 N: James Morris
@@ -3484,6 +3498,14 @@ S: c/o OSDL
 S: 12725 SW Millikan Way, Suite 400
 S: Beaverton, OR 97005
 S: USA
+
+N: Michal Wronski
+E: wrona@mat.uni.torun.pl
+W: http://www.mat.uni.torun.pl/~wrona
+D: POSIX message queues fs (with K. Benedyczak)
+S: ul. Teczowa 23/12
+S: 80-680 Gdansk-Sobieszewo
+S: Poland
 
 N: Frank Xia
 E: qx@math.columbia.edu

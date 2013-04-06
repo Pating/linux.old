@@ -49,11 +49,9 @@
 struct hiddev {
 	int exist;
 	int open;
-	int minor;
 	wait_queue_head_t wait;
 	struct hid_device *hid;
 	struct hiddev_list *list;
-	struct usb_interface intf;
 };
 
 struct hiddev_list {
@@ -234,8 +232,8 @@ static int hiddev_fasync(int fd, struct file *file, int on)
 static struct usb_class_driver hiddev_class;
 static void hiddev_cleanup(struct hiddev *hiddev)
 {
-	usb_deregister_dev(&hiddev->intf, &hiddev_class);
-	hiddev_table[hiddev->minor] = NULL;
+	hiddev_table[hiddev->hid->minor] = NULL;
+	usb_deregister_dev(hiddev->hid->intf, &hiddev_class);
 	kfree(hiddev);
 }
 
@@ -403,8 +401,8 @@ static int hiddev_ioctl(struct inode *inode, struct file *file, unsigned int cmd
 	struct hiddev_collection_info cinfo;
 	struct hiddev_report_info rinfo;
 	struct hiddev_field_info finfo;
-	struct hiddev_usage_ref_multi uref_multi;
-	struct hiddev_usage_ref *uref = &uref_multi.uref;
+	struct hiddev_usage_ref_multi *uref_multi=NULL;
+	struct hiddev_usage_ref *uref;
 	struct hiddev_devinfo dinfo;
 	struct hid_report *report;
 	struct hid_field *field;
@@ -576,26 +574,31 @@ static int hiddev_ioctl(struct inode *inode, struct file *file, unsigned int cmd
 		return 0;
 
 	case HIDIOCGUCODE:
-		if (copy_from_user(uref, (void *) arg, sizeof(*uref)))
-			return -EFAULT;
+		uref_multi = kmalloc(sizeof(struct hiddev_usage_ref_multi), GFP_KERNEL);
+		if (!uref_multi)
+			return -ENOMEM;
+		uref = &uref_multi->uref;
+		if (copy_from_user(uref, (void *) arg, sizeof(*uref))) 
+			goto fault;
 
 		rinfo.report_type = uref->report_type;
 		rinfo.report_id = uref->report_id;
 		if ((report = hiddev_lookup_report(hid, &rinfo)) == NULL)
-			return -EINVAL;
+			goto inval;
 
 		if (uref->field_index >= report->maxfield)
-			return -EINVAL;
+			goto inval;
 
 		field = report->field[uref->field_index];
 		if (uref->usage_index >= field->maxusage)
-			return -EINVAL;
+			goto inval;
 
 		uref->usage_code = field->usage[uref->usage_index].hid;
 
 		if (copy_to_user((void *) arg, uref, sizeof(*uref)))
-			return -EFAULT;
+			goto fault;
 
+		kfree(uref_multi);
 		return 0;
 
 	case HIDIOCGUSAGE:
@@ -603,42 +606,46 @@ static int hiddev_ioctl(struct inode *inode, struct file *file, unsigned int cmd
 	case HIDIOCGUSAGES:
 	case HIDIOCSUSAGES:
 	case HIDIOCGCOLLECTIONINDEX:
+		uref_multi = kmalloc(sizeof(struct hiddev_usage_ref_multi), GFP_KERNEL);
+		if (!uref_multi)
+			return -ENOMEM;
+		uref = &uref_multi->uref;
 		if (cmd == HIDIOCGUSAGES || cmd == HIDIOCSUSAGES) {
-			if (copy_from_user(&uref_multi, (void *) arg, 
+			if (copy_from_user(uref_multi, (void *) arg, 
 					   sizeof(uref_multi)))
-				return -EFAULT;
+				goto fault;
 		} else {
 			if (copy_from_user(uref, (void *) arg, sizeof(*uref)))
-				return -EFAULT;
+				goto fault;
 		}
 
 		if (cmd != HIDIOCGUSAGE && 
 		    cmd != HIDIOCGUSAGES &&
 		    uref->report_type == HID_REPORT_TYPE_INPUT)
-			return -EINVAL;
+			goto inval;
 
 		if (uref->report_id == HID_REPORT_ID_UNKNOWN) {
 			field = hiddev_lookup_usage(hid, uref);
 			if (field == NULL)
-				return -EINVAL;
+				goto inval;
 		} else {
 			rinfo.report_type = uref->report_type;
 			rinfo.report_id = uref->report_id;
 			if ((report = hiddev_lookup_report(hid, &rinfo)) == NULL)
-				return -EINVAL;
+				goto inval;
 
 			if (uref->field_index >= report->maxfield)
-				return -EINVAL;
+				goto inval;
 
 			field = report->field[uref->field_index];
 			if (uref->usage_index >= field->maxusage)
-				return -EINVAL;
+				goto inval;
 
 			if (cmd == HIDIOCGUSAGES || cmd == HIDIOCSUSAGES) {
-				if (uref_multi.num_values >= HID_MAX_USAGES || 
+				if (uref_multi->num_values >= HID_MAX_USAGES || 
 				    uref->usage_index >= field->maxusage || 
-				   (uref->usage_index + uref_multi.num_values) >= field->maxusage)
-					return -EINVAL;
+				   (uref->usage_index + uref_multi->num_values) >= field->maxusage)
+					goto inval;
 			}
 		}
 
@@ -646,31 +653,40 @@ static int hiddev_ioctl(struct inode *inode, struct file *file, unsigned int cmd
 			case HIDIOCGUSAGE:
 				uref->value = field->value[uref->usage_index];
 				if (copy_to_user((void *) arg, uref, sizeof(*uref)))
-					return -EFAULT;
-				return 0;
+					goto fault;
+				goto goodreturn;
 
 			case HIDIOCSUSAGE:
 				field->value[uref->usage_index] = uref->value;
-				return 0;
+				goto goodreturn;
 
 			case HIDIOCGCOLLECTIONINDEX:
+				kfree(uref_multi);
 				return field->usage[uref->usage_index].collection_index;
 			case HIDIOCGUSAGES:
-				for (i = 0; i < uref_multi.num_values; i++)
-					uref_multi.values[i] = 
+				for (i = 0; i < uref_multi->num_values; i++)
+					uref_multi->values[i] = 
 					    field->value[uref->usage_index + i];
-				if (copy_to_user((void *) arg, &uref_multi, 
-						 sizeof(uref_multi)))
-					return -EFAULT;
-				return 0;
+				if (copy_to_user((void *) arg, uref_multi, 
+						 sizeof(*uref_multi)))
+					goto fault;
+				goto goodreturn;
 			case HIDIOCSUSAGES:
-				for (i = 0; i < uref_multi.num_values; i++)
+				for (i = 0; i < uref_multi->num_values; i++)
 					field->value[uref->usage_index + i] = 
-				  	    uref_multi.values[i];
-				return 0;
+				  	    uref_multi->values[i];
+				goto goodreturn;
 		}
 
+goodreturn:
+		kfree(uref_multi);
 		return 0;
+fault:
+		kfree(uref_multi);
+		return -EFAULT;
+inval:		
+		kfree(uref_multi);
+		return -EINVAL;
 
 	case HIDIOCGCOLLECTIONINFO:
 		if (copy_from_user(&cinfo, (void *) arg, sizeof(cinfo)))
@@ -757,7 +773,7 @@ int hiddev_connect(struct hid_device *hid)
 		return -1;
 	memset(hiddev, 0, sizeof(struct hiddev));
 
- 	retval = usb_register_dev(&hiddev->intf, &hiddev_class);
+ 	retval = usb_register_dev(hid->intf, &hiddev_class);
 	if (retval) {
 		err("Not able to get a minor for this device.");
 		kfree(hiddev);
@@ -766,13 +782,12 @@ int hiddev_connect(struct hid_device *hid)
 
 	init_waitqueue_head(&hiddev->wait);
 
- 	hiddev->minor = hiddev->intf.minor;
- 	hiddev_table[hiddev->intf.minor - HIDDEV_MINOR_BASE] = hiddev;
+ 	hiddev_table[hid->intf->minor - HIDDEV_MINOR_BASE] = hiddev;
 
 	hiddev->hid = hid;
 	hiddev->exist = 1;
 
- 	hid->minor = hiddev->intf.minor;
+ 	hid->minor = hid->intf->minor;
 	hid->hiddev = hiddev;
 
 	return 0;

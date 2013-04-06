@@ -131,6 +131,8 @@ enum
 	KERN_PRINTK_RATELIMIT_BURST=61,	/* int: tune printk ratelimiting */
 	KERN_PTY=62,		/* dir: pty driver */
 	KERN_NGROUPS_MAX=63,	/* int: NGROUPS_MAX */
+	KERN_SPARC_SCONS_PWROFF=64, /* int: serial console power-off halt */
+	KERN_HZ_TIMER=65,	/* int: hz timer on or off */
 };
 
 
@@ -159,6 +161,8 @@ enum
 	VM_LOWER_ZONE_PROTECTION=20,/* Amount of protection of lower zones */
 	VM_MIN_FREE_KBYTES=21,	/* Minimum free kilobytes to maintain */
 	VM_MAX_MAP_COUNT=22,	/* int: Maximum number of mmaps/address-space */
+	VM_LAPTOP_MODE=23,	/* vm laptop mode */
+	VM_BLOCK_DUMP=24,	/* block dump mode */
 };
 
 
@@ -323,6 +327,14 @@ enum
 	NET_IPV4_IPFRAG_SECRET_INTERVAL=94,
 	NET_TCP_WESTWOOD=95,
 	NET_IPV4_IGMP_MAX_MSF=96,
+	NET_TCP_NO_METRICS_SAVE=97,
+	NET_TCP_VEGAS=98,
+	NET_TCP_VEGAS_ALPHA=99,
+	NET_TCP_VEGAS_BETA=100,
+	NET_TCP_VEGAS_GAMMA=101,
+ 	NET_TCP_BIC=102,
+ 	NET_TCP_BIC_FAST_CONVERGENCE=103,
+	NET_TCP_BIC_LOW_WINDOW=104,
 };
 
 enum {
@@ -599,8 +611,7 @@ enum {
 	NET_SCTP_PRESERVE_ENABLE         = 11,
 	NET_SCTP_MAX_BURST               = 12,
 	NET_SCTP_ADDIP_ENABLE		 = 13,
-	NET_SCTP_RMEM			 = 14,
-	NET_SCTP_WMEM			 = 15,
+	NET_SCTP_PRSCTP_ENABLE		 = 14,
 };
 
 /* /proc/sys/net/bridge */

@@ -301,7 +301,7 @@ xfs_read(
 	/* END copy & waste from filemap.c */
 
 	if (ioflags & IO_ISDIRECT) {
-		pb_target_t	*target =
+		xfs_buftarg_t	*target =
 			(ip->i_d.di_flags & XFS_DIFLAG_REALTIME) ?
 				mp->m_rtdev_targp : mp->m_ddev_targp;
 		if ((*offset & target->pbr_smask) ||
@@ -682,14 +682,12 @@ xfs_write(
 	io = &xip->i_iocore;
 	mp = io->io_mount;
 
-	xfs_check_frozen(mp, bdp, XFS_FREEZE_WRITE);
-
 	if (XFS_FORCED_SHUTDOWN(mp)) {
 		return -EIO;
 	}
 
 	if (ioflags & IO_ISDIRECT) {
-		pb_target_t	*target =
+		xfs_buftarg_t	*target =
 			(xip->i_d.di_flags & XFS_DIFLAG_REALTIME) ?
 				mp->m_rtdev_targp : mp->m_ddev_targp;
 

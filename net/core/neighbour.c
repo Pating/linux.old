@@ -1094,7 +1094,7 @@ void pneigh_enqueue(struct neigh_table *tbl, struct neigh_parms *p,
 		kfree_skb(skb);
 		return;
 	}
-	skb->stamp.tv_sec  = 0;
+	skb->stamp.tv_sec  = LOCALLY_ENQUEUED;
 	skb->stamp.tv_usec = now + sched_next;
 
 	spin_lock(&tbl->proxy_queue.lock);
@@ -1479,7 +1479,7 @@ static void neigh_app_notify(struct neighbour *n)
 
 #ifdef CONFIG_SYSCTL
 
-struct neigh_sysctl_table {
+static struct neigh_sysctl_table {
 	struct ctl_table_header *sysctl_header;
 	ctl_table		neigh_vars[17];
 	ctl_table		neigh_dev[2];

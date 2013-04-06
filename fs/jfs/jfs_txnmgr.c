@@ -176,7 +176,6 @@ static void dtLog(struct jfs_log * log, struct tblock * tblk, struct lrd * lrd,
 		struct tlock * tlck);
 static void mapLog(struct jfs_log * log, struct tblock * tblk, struct lrd * lrd,
 		struct tlock * tlck);
-static void txAbortCommit(struct commit * cd);
 static void txAllocPMap(struct inode *ip, struct maplock * maplock,
 		struct tblock * tblk);
 static void txForce(struct tblock * tblk);
@@ -1315,7 +1314,7 @@ int txCommit(tid_t tid,		/* transaction identifier */
 
       out:
 	if (rc != 0)
-		txAbortCommit(&cd);
+		txAbort(tid, 1);
 
       TheEnd:
 	jfs_info("txCommit: tid = %d, returning %d", tid, rc);
@@ -2647,64 +2646,6 @@ void txAbort(tid_t tid, int dirty)
 	return;
 }
 
-
-/*
- *      txAbortCommit()
- *
- * function: abort commit.
- *
- * frees tlocks of transaction; line-locks and segment locks for all
- * segments in comdata structure. frees malloc storage
- * sets state of file-system to FM_MDIRTY in super-block.
- * log age of page-frames in memory for which caller has
- * are reset to 0 (to avoid logwarap).
- */
-static void txAbortCommit(struct commit * cd)
-{
-	struct tblock *tblk;
-	tid_t tid;
-	lid_t lid, next;
-	struct metapage *mp;
-
-	jfs_warn("txAbortCommit: cd:0x%p", cd);
-
-	/*
-	 * free tlocks of the transaction
-	 */
-	tid = cd->tid;
-	tblk = tid_to_tblock(tid);
-	for (lid = tblk->next; lid; lid = next) {
-		next = lid_to_tlock(lid)->next;
-
-		mp = lid_to_tlock(lid)->mp;
-		if (mp) {
-			mp->lid = 0;
-
-			/*
-			 * reset lsn of page to avoid logwarap;
-			 */
-			if (mp->xflag & COMMIT_PAGE)
-				LogSyncRelease(mp);
-		}
-
-		/* insert tlock at head of freelist */
-		TXN_LOCK();
-		txLockFree(lid);
-		TXN_UNLOCK();
-	}
-
-	tblk->next = tblk->last = 0;
-
-	/* free the transaction block */
-	txEnd(tid);
-
-	/*
-	 * mark filesystem dirty
-	 */
-	jfs_error(cd->sb, "txAbortCommit");
-}
-
-
 /*
  *      txLazyCommit(void)
  *
@@ -2813,7 +2754,7 @@ restart:
 
 		if (current->flags & PF_FREEZE) {
 			LAZY_UNLOCK(flags);
-			refrigerator(PF_IOTHREAD);
+			refrigerator(PF_FREEZE);
 		} else {
 			DECLARE_WAITQUEUE(wq, current);
 
@@ -2977,11 +2918,12 @@ int jfs_sync(void *arg)
 					    anon_inode_list);
 			ip = &jfs_ip->vfs_inode;
 
-			/*
-			 * down_trylock returns 0 on success.  This is
-			 * inconsistent with spin_trylock.
-			 */
-			if (! down_trylock(&jfs_ip->commit_sem)) {
+			if (! igrab(ip)) {
+				/*
+				 * Inode is being freed
+				 */
+				list_del_init(&jfs_ip->anon_inode_list);
+			} else if (! down_trylock(&jfs_ip->commit_sem)) {
 				/*
 				 * inode will be removed from anonymous list
 				 * when it is committed
@@ -2991,6 +2933,8 @@ int jfs_sync(void *arg)
 				rc = txCommit(tid, 1, &ip, 0);
 				txEnd(tid);
 				up(&jfs_ip->commit_sem);
+
+				iput(ip);
 				/*
 				 * Just to be safe.  I don't know how
 				 * long we can run without blocking
@@ -3010,6 +2954,10 @@ int jfs_sync(void *arg)
 				/* Put on anon_list2 */
 				list_add(&jfs_ip->anon_inode_list,
 					 &TxAnchor.anon_list2);
+
+				TXN_UNLOCK();
+				iput(ip);
+				TXN_LOCK();
 			}
 		}
 		/* Add anon_list2 back to anon_list */
@@ -3017,7 +2965,7 @@ int jfs_sync(void *arg)
 
 		if (current->flags & PF_FREEZE) {
 			TXN_UNLOCK();
-			refrigerator(PF_IOTHREAD);
+			refrigerator(PF_FREEZE);
 		} else {
 			DECLARE_WAITQUEUE(wq, current);
 

@@ -28,6 +28,7 @@
 #include <asm/uaccess.h>
 #include <linux/security.h>
 #include <linux/seqlock.h>
+#include <linux/swap.h>
 
 #define DCACHE_PARANOIA 1
 /* #define DCACHE_DEBUG 1 */
@@ -383,7 +384,11 @@ static void prune_dcache(int count)
 		dentry = list_entry(tmp, struct dentry, d_lru);
 
  		spin_lock(&dentry->d_lock);
-		/* leave inuse dentries */
+		/*
+		 * We found an inuse dentry which was not removed from
+		 * dentry_unused because of laziness during lookup.  Do not free
+		 * it - just keep it off the dentry_unused list.
+		 */
  		if (atomic_read(&dentry->d_count)) {
  			spin_unlock(&dentry->d_lock);
 			continue;
@@ -934,8 +939,9 @@ struct dentry *d_splice_alias(struct inode *inode, struct dentry *dentry)
  * rcu_read_lock() and rcu_read_unlock() are used to disable preemption while
  * lookup is going on.
  *
- * d_lru list is not updated, which can leave non-zero d_count dentries
- * around in d_lru list.
+ * dentry_unused list is not updated even if lookup finds the required dentry
+ * in there. It is updated in places such as prune_dcache, shrink_dcache_sb and
+ * select_parent. This laziness saves lookup from dcache_lock acquisition.
  *
  * d_lookup() is protected against the concurrent renames in some unrelated
  * directory using the seqlockt_t rename_lock.
@@ -1552,14 +1558,11 @@ static void __init dcache_init(unsigned long mempages)
 	 * A constructor could be added for stable state like the lists,
 	 * but it is probably not worth it because of the cache nature
 	 * of the dcache. 
-	 * If fragmentation is too bad then the SLAB_HWCACHE_ALIGN
-	 * flag could be removed here, to hint to the allocator that
-	 * it should not try to get multiple page regions.  
 	 */
 	dentry_cache = kmem_cache_create("dentry_cache",
 					 sizeof(struct dentry),
 					 0,
-					 SLAB_HWCACHE_ALIGN|SLAB_RECLAIM_ACCOUNT,
+					 SLAB_RECLAIM_ACCOUNT,
 					 NULL, NULL);
 	if (!dentry_cache)
 		panic("Cannot create dentry cache");
@@ -1619,13 +1622,21 @@ extern void chrdev_init(void);
 
 void __init vfs_caches_init(unsigned long mempages)
 {
-	names_cachep = kmem_cache_create("names_cache", 
-			PATH_MAX, 0, 
+	unsigned long reserve;
+
+	/* Base hash sizes on available memory, with a reserve equal to
+           150% of current kernel size */
+
+	reserve = (mempages - nr_free_pages()) * 3/2;
+	mempages -= reserve;
+
+	names_cachep = kmem_cache_create("names_cache",
+			PATH_MAX, 0,
 			SLAB_HWCACHE_ALIGN, NULL, NULL);
 	if (!names_cachep)
 		panic("Cannot create names SLAB cache");
 
-	filp_cachep = kmem_cache_create("filp", 
+	filp_cachep = kmem_cache_create("filp",
 			sizeof(struct file), 0,
 			SLAB_HWCACHE_ALIGN, filp_ctor, filp_dtor);
 	if(!filp_cachep)
@@ -1633,7 +1644,7 @@ void __init vfs_caches_init(unsigned long mempages)
 
 	dcache_init(mempages);
 	inode_init(mempages);
-	files_init(mempages); 
+	files_init(mempages);
 	mnt_init(mempages);
 	bdev_cache_init();
 	chrdev_init();

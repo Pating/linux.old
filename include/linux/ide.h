@@ -20,7 +20,6 @@
 #include <linux/pci.h>
 #include <asm/byteorder.h>
 #include <asm/system.h>
-#include <asm/hdreg.h>
 #include <asm/io.h>
 #include <asm/semaphore.h>
 
@@ -216,8 +215,6 @@ typedef unsigned char	byte;	/* used everywhere */
 #define SECTOR_SIZE	512
 #define SECTOR_WORDS	(SECTOR_SIZE / 4)	/* number of 32bit words per sector */
 #define IDE_LARGE_SEEK(b1,b2,t)	(((b1) > (b2) + (t)) || ((b2) > (b1) + (t)))
-#define IDE_MIN(a,b)	((a)<(b) ? (a):(b))
-#define IDE_MAX(a,b)	((a)>(b) ? (a):(b))
 
 /*
  * Timeouts for various operations:
@@ -294,7 +291,48 @@ void ide_setup_ports(	hw_regs_t *hw,
 #endif
 			int irq);
 
+static inline void ide_std_init_ports(hw_regs_t *hw,
+				      unsigned long io_addr,
+				      unsigned long ctl_addr)
+{
+	unsigned int i;
+
+	for (i = IDE_DATA_OFFSET; i <= IDE_STATUS_OFFSET; i++)
+		hw->io_ports[i] = io_addr++;
+
+	hw->io_ports[IDE_CONTROL_OFFSET] = ctl_addr;
+}
+
 #include <asm/ide.h>
+
+/*
+ * ide_init_hwif_ports() is OBSOLETE and will be removed in 2.7 series.
+ *
+ * arm26, arm, h8300, m68k, m68knommu (broken) and i386-pc9800 (broken)
+ * still have their own versions.
+ */
+#if !defined(CONFIG_ARM) && !defined(CONFIG_H8300) && !defined(CONFIG_M68K)
+static inline void ide_init_hwif_ports(hw_regs_t *hw,
+				       unsigned long io_addr,
+				       unsigned long ctl_addr,
+				       int *irq)
+{
+	if (!ctl_addr)
+		ide_std_init_ports(hw, io_addr, io_addr + 0x206);
+	else
+		ide_std_init_ports(hw, io_addr, ctl_addr);
+
+	if (irq)
+		*irq = 0;
+
+	hw->io_ports[IDE_IRQ_OFFSET] = 0;
+
+#ifdef CONFIG_PPC32
+	if (ppc_ide_md.ide_init_hwif)
+		ppc_ide_md.ide_init_hwif(hw, io_addr, ctl_addr, irq);
+#endif
+}
+#endif /* !ARM && !H8300 && !M68K */
 
 /* Currently only m68k, apus and m8xx need it */
 #ifndef IDE_ARCH_ACK_INTR

@@ -474,13 +474,7 @@ int inet6_ioctl(struct socket *sock, unsigned int cmd, unsigned long arg)
 	switch(cmd) 
 	{
 	case SIOCGSTAMP:
-		if (!sk->sk_stamp.tv_sec)
-			return -ENOENT;
-		err = copy_to_user((void *)arg, &sk->sk_stamp,
-				   sizeof(struct timeval));
-		if (err)
-			return -EFAULT;
-		return 0;
+		return sock_get_timestamp(sk, (struct timeval *)arg);
 
 	case SIOCADDRT:
 	case SIOCDELRT:
@@ -545,7 +539,7 @@ struct proto_ops inet6_dgram_ops = {
 	.sendpage =	sock_no_sendpage,
 };
 
-struct net_proto_family inet6_family_ops = {
+static struct net_proto_family inet6_family_ops = {
 	.family = PF_INET6,
 	.create = inet6_create,
 	.owner	= THIS_MODULE,

@@ -83,7 +83,7 @@ kernel_stack_top(struct task_struct *tsk)
 unsigned long
 task_top(struct task_struct *tsk)
 {
-	return ((unsigned long)tsk) + sizeof(struct task_struct);
+	return ((unsigned long)tsk) + sizeof(struct thread_info);
 }
 
 /* check to make sure the kernel stack is healthy */
@@ -273,8 +273,8 @@ void show_regs(struct pt_regs * regs)
 	trap = TRAP(regs);
 	if (trap == 0x300 || trap == 0x600)
 		printk("DAR: %08lX, DSISR: %08lX\n", regs->dar, regs->dsisr);
-	printk("TASK = %p[%d] '%s' ",
-	       current, current->pid, current->comm);
+	printk("TASK = %p[%d] '%s' THREAD: %p",
+	       current, current->pid, current->comm, current->thread_info);
 	printk("Last syscall: %ld ", current->thread.last_syscall);
 
 #if defined(CONFIG_4xx) && defined(DCRN_PLB0_BEAR)
@@ -303,6 +303,16 @@ void show_regs(struct pt_regs * regs)
 			break;
 	}
 	printk("\n");
+#ifdef CONFIG_KALLSYMS
+	/*
+	 * Lookup NIP late so we have the best change of getting the
+	 * above info out without failing
+	 */
+	printk("NIP [%08lx] ", regs->nip);
+	print_symbol("%s\n", regs->nip);
+	printk("LR [%08lx] ", regs->link);
+	print_symbol("%s\n", regs->link);
+#endif
 	show_stack(current, (unsigned long *) regs->gpr[1]);
 }
 
@@ -661,8 +671,6 @@ void __init ll_puts(const char *s)
 /*
  * These bracket the sleeping functions..
  */
-extern void scheduling_functions_start_here(void);
-extern void scheduling_functions_end_here(void);
 #define first_sched    ((unsigned long) scheduling_functions_start_here)
 #define last_sched     ((unsigned long) scheduling_functions_end_here)
 

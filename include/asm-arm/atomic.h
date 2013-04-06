@@ -44,7 +44,7 @@ static inline void atomic_set(atomic_t *v, int i)
 	: "cc");
 }
 
-static inline void atomic_add(int i, volatile atomic_t *v)
+static inline void atomic_add(int i, atomic_t *v)
 {
 	unsigned long tmp, tmp2;
 
@@ -59,7 +59,7 @@ static inline void atomic_add(int i, volatile atomic_t *v)
 	: "cc");
 }
 
-static inline void atomic_sub(int i, volatile atomic_t *v)
+static inline void atomic_sub(int i, atomic_t *v)
 {
 	unsigned long tmp, tmp2;
 
@@ -77,7 +77,7 @@ static inline void atomic_sub(int i, volatile atomic_t *v)
 #define atomic_inc(v)	atomic_add(1, v)
 #define atomic_dec(v)	atomic_sub(1, v)
 
-static inline int atomic_dec_and_test(volatile atomic_t *v)
+static inline int atomic_dec_and_test(atomic_t *v)
 {
 	unsigned long tmp;
 	int result;
@@ -88,14 +88,14 @@ static inline int atomic_dec_and_test(volatile atomic_t *v)
 "	strex	%1, %0, [%2]\n"
 "	teq	%1, #0\n"
 "	bne	1b"
-	: "=&r" (result), "=r" (tmp)
+	: "=&r" (result), "=&r" (tmp)
 	: "r" (&v->counter)
 	: "cc");
 
 	return result == 0;
 }
 
-static inline int atomic_add_negative(int i, volatile atomic_t *v)
+static inline int atomic_add_negative(int i, atomic_t *v)
 {
 	unsigned long tmp;
 	int result;
@@ -106,7 +106,7 @@ static inline int atomic_add_negative(int i, volatile atomic_t *v)
 "	strex	%1, %0, [%2]\n"
 "	teq	%1, #0\n"
 "	bne	1b"
-	: "=&r" (result), "=r" (tmp)
+	: "=&r" (result), "=&r" (tmp)
 	: "r" (&v->counter), "Ir" (i)
 	: "cc");
 
@@ -138,7 +138,7 @@ static inline void atomic_clear_mask(unsigned long mask, unsigned long *addr)
 
 #define atomic_set(v,i)	(((v)->counter) = (i))
 
-static inline void atomic_add(int i, volatile atomic_t *v)
+static inline void atomic_add(int i, atomic_t *v)
 {
 	unsigned long flags;
 
@@ -147,7 +147,7 @@ static inline void atomic_add(int i, volatile atomic_t *v)
 	local_irq_restore(flags);
 }
 
-static inline void atomic_sub(int i, volatile atomic_t *v)
+static inline void atomic_sub(int i, atomic_t *v)
 {
 	unsigned long flags;
 
@@ -156,7 +156,7 @@ static inline void atomic_sub(int i, volatile atomic_t *v)
 	local_irq_restore(flags);
 }
 
-static inline void atomic_inc(volatile atomic_t *v)
+static inline void atomic_inc(atomic_t *v)
 {
 	unsigned long flags;
 
@@ -165,7 +165,7 @@ static inline void atomic_inc(volatile atomic_t *v)
 	local_irq_restore(flags);
 }
 
-static inline void atomic_dec(volatile atomic_t *v)
+static inline void atomic_dec(atomic_t *v)
 {
 	unsigned long flags;
 
@@ -174,7 +174,7 @@ static inline void atomic_dec(volatile atomic_t *v)
 	local_irq_restore(flags);
 }
 
-static inline int atomic_dec_and_test(volatile atomic_t *v)
+static inline int atomic_dec_and_test(atomic_t *v)
 {
 	unsigned long flags;
 	int val;
@@ -187,7 +187,7 @@ static inline int atomic_dec_and_test(volatile atomic_t *v)
 	return val == 0;
 }
 
-static inline int atomic_add_negative(int i, volatile atomic_t *v)
+static inline int atomic_add_negative(int i, atomic_t *v)
 {
 	unsigned long flags;
 	int val;

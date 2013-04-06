@@ -25,6 +25,12 @@
 		.macro	writeb, rb
 		str	\rb, [r3, #0x160]
 		.endm
+#elif defined(CONFIG_DEBUG_ICEDCC)
+		.macro	loadsp, rb
+		.endm
+		.macro writeb, rb
+		mcr	p14, 0, \rb, c0, c1, 0
+		.endm
 #elif defined(CONFIG_FOOTBRIDGE)
 		.macro	loadsp,	rb
 		mov	\rb, #0x7c000000
@@ -66,6 +72,13 @@
 		.endm
 		.macro	writeb, rb
 		str	\rb, [r3, #0x14]	@ UTDR
+		.endm
+#elif defined(CONFIG_ARCH_LH7A40X)
+		.macro	loadsp, rb
+		ldr	\rb, =0x80000700	@ UART2 UARTBASE
+		.endm
+		.macro	writeb, rb
+		strb	\rb, [r3, #0]
 		.endm
 #else
 #error no serial architecture defined

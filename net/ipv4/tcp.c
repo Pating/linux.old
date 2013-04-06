@@ -753,9 +753,6 @@ do_interrupted:
 	goto out;
 }
 
-ssize_t do_tcp_sendpages(struct sock *sk, struct page **pages, int poffset,
-			 size_t psize, int flags);
-
 static inline int can_coalesce(struct sk_buff *skb, int i, struct page *page,
 			       int off)
 {
@@ -836,7 +833,7 @@ static int tcp_error(struct sock *sk, int flags, int err)
 	return err;
 }
 
-ssize_t do_tcp_sendpages(struct sock *sk, struct page **pages, int poffset,
+static ssize_t do_tcp_sendpages(struct sock *sk, struct page **pages, int poffset,
 			 size_t psize, int flags)
 {
 	struct tcp_opt *tp = tcp_sk(sk);
@@ -2158,7 +2155,7 @@ int tcp_disconnect(struct sock *sk, int flags)
 	tp->packets_out = 0;
 	tp->snd_ssthresh = 0x7fffffff;
 	tp->snd_cwnd_cnt = 0;
-	tp->ca_state = TCP_CA_Open;
+	tcp_set_ca_state(tp, TCP_CA_Open);
 	tcp_clear_retrans(tp);
 	tcp_delack_init(tp);
 	tp->send_head = NULL;

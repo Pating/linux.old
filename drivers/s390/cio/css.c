@@ -1,7 +1,7 @@
 /*
  *  drivers/s390/cio/css.c
  *  driver for channel subsystem
- *   $Revision: 1.69 $
+ *   $Revision: 1.73 $
  *
  *    Copyright (C) 2002 IBM Deutschland Entwicklung GmbH,
  *			 IBM Corporation
@@ -124,24 +124,6 @@ css_probe_device(int irq)
 	return ret;
 }
 
-static struct subchannel *
-__get_subchannel_by_stsch(int irq)
-{
-	struct subchannel *sch;
-	int cc;
-	struct schib schib;
-
-	cc = stsch(irq, &schib);
-	if (cc || !schib.pmcw.dnv)
-		return NULL;
-	sch = (struct subchannel *)(unsigned long)schib.pmcw.intparm;
-	if (!sch)
-		return NULL;
-	if (get_device(&sch->dev))
-		return sch;
-	return NULL;
-}
-
 struct subchannel *
 get_subchannel_by_schid(int irq)
 {
@@ -151,23 +133,13 @@ get_subchannel_by_schid(int irq)
 
 	if (!get_bus(&css_bus_type))
 		return NULL;
-
-	/* Try to get subchannel from pmcw first. */ 
-	sch = __get_subchannel_by_stsch(irq);
-	if (sch)
-		goto out;
 	down_read(&css_bus_type.subsys.rwsem);
-
+	sch = NULL;
 	list_for_each(entry, &css_bus_type.devices.list) {
 		dev = get_device(container_of(entry,
 					      struct device, bus_list));
 		if (!dev)
 			continue;
-		/* Skip channel paths. */
-		if (dev->release != &css_subchannel_release) {
-			put_device(dev);
-			continue;
-		}
 		sch = to_subchannel(dev);
 		if (sch->irq == irq)
 			break;
@@ -175,7 +147,6 @@ get_subchannel_by_schid(int irq)
 		sch = NULL;
 	}
 	up_read(&css_bus_type.subsys.rwsem);
-out:
 	put_bus(&css_bus_type);
 
 	return sch;
@@ -206,10 +177,16 @@ css_evaluate_subchannel(int irq, int slow)
 
 	sch = get_subchannel_by_schid(irq);
 	disc = sch ? device_is_disconnected(sch) : 0;
-	if (disc && slow)
+	if (disc && slow) {
+		if (sch)
+			put_device(&sch->dev);
 		return 0; /* Already processed. */
-	if (!disc && !slow)
+	}
+	if (!disc && !slow) {
+		if (sch)
+			put_device(&sch->dev);
 		return -EAGAIN; /* Will be done on the slow path. */
+	}
 	event = css_get_subchannel_status(sch, irq);
 	switch (event) {
 	case CIO_GONE:

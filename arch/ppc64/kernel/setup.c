@@ -25,6 +25,8 @@
 #include <linux/version.h>
 #include <linux/tty.h>
 #include <linux/root_dev.h>
+#include <linux/notifier.h>
+#include <linux/cpu.h>
 #include <asm/io.h>
 #include <asm/prom.h>
 #include <asm/processor.h>
@@ -92,6 +94,13 @@ unsigned long SYSRQ_KEY;
 #endif /* CONFIG_MAGIC_SYSRQ */
 
 struct machdep_calls ppc_md;
+
+static int ppc64_panic_event(struct notifier_block *, unsigned long, void *);
+
+static struct notifier_block ppc64_panic_block = {
+	notifier_call: ppc64_panic_event,
+	priority: INT_MIN /* may not return; must be done last */
+};
 
 /*
  * Perhaps we can put the pmac screen_info[] here
@@ -179,29 +188,31 @@ void setup_system(unsigned long r3, unsigned long r4, unsigned long r5,
 #ifdef CONFIG_PPC_PSERIES
 	case PLATFORM_PSERIES:
 		pSeries_init_early();
-#ifdef CONFIG_BLK_DEV_INITRD
-		initrd_start = initrd_end = 0;
-#endif
 		parse_bootinfo();
 		break;
 
 	case PLATFORM_PSERIES_LPAR:
 		pSeriesLP_init_early();
-#ifdef CONFIG_BLK_DEV_INITRD
-		initrd_start = initrd_end = 0;
-#endif
 		parse_bootinfo();
 		break;
 #endif /* CONFIG_PPC_PSERIES */
 #ifdef CONFIG_PPC_PMAC
 	case PLATFORM_POWERMAC:
 		pmac_init_early();
-#ifdef CONFIG_BLK_DEV_INITRD
-		initrd_start = initrd_end = 0;
-#endif
 		parse_bootinfo();
 #endif /* CONFIG_PPC_PMAC */
 	}
+
+	/* If we were passed an initrd, set the ROOT_DEV properly if the values
+	 * look sensible. If not, clear initrd reference.
+	 */
+#ifdef CONFIG_BLK_DEV_INITRD
+	if (initrd_start >= KERNELBASE && initrd_end >= KERNELBASE &&
+	    initrd_end > initrd_start)
+		ROOT_DEV = Root_RAM0;
+	else
+		initrd_start = initrd_end = 0;
+#endif /* CONFIG_BLK_DEV_INITRD */
 
 #ifdef CONFIG_BOOTX_TEXT
 	map_boot_text();
@@ -215,6 +226,7 @@ void setup_system(unsigned long r3, unsigned long r4, unsigned long r5,
 	if (systemcfg->platform & PLATFORM_PSERIES) {
 		early_console_initialized = 1;
 		register_console(&udbg_console);
+		__irq_offset_value = NUM_ISA_INTERRUPTS;
 		finish_device_tree();
 		chrp_init(r3, r4, r5, r6, r7);
 
@@ -318,6 +330,14 @@ EXPORT_SYMBOL(machine_halt);
 unsigned long ppc_proc_freq;
 unsigned long ppc_tb_freq;
 
+static int ppc64_panic_event(struct notifier_block *this,
+                             unsigned long event, void *ptr)
+{
+	ppc_md.panic((char *)ptr);  /* May not return */
+	return NOTIFY_DONE;
+}
+
+
 #ifdef CONFIG_SMP
 DEFINE_PER_CPU(unsigned int, pvr);
 #endif
@@ -338,8 +358,13 @@ static int show_cpuinfo(struct seq_file *m, void *v)
 		return 0;
 	}
 
-	if (!cpu_online(cpu_id))
+	/* We only show online cpus: disable preempt (overzealous, I
+	 * knew) to prevent cpu going down. */
+	preempt_disable();
+	if (!cpu_online(cpu_id)) {
+		preempt_enable();
 		return 0;
+	}
 
 #ifdef CONFIG_SMP
 	pvr = per_cpu(pvr, cpu_id);
@@ -372,7 +397,8 @@ static int show_cpuinfo(struct seq_file *m, void *v)
 		   ppc_proc_freq % 1000000);
 
 	seq_printf(m, "revision\t: %hd.%hd\n\n", maj, min);
-	
+
+	preempt_enable();
 	return 0;
 }
 
@@ -401,15 +427,6 @@ struct seq_operations cpuinfo_op = {
 void parse_cmd_line(unsigned long r3, unsigned long r4, unsigned long r5,
 		  unsigned long r6, unsigned long r7)
 {
-#ifdef CONFIG_BLK_DEV_INITRD
-	if ((initrd_start == 0) && r3 && r4 && r4 != 0xdeadbeef) {
-		initrd_start = (r3 >= KERNELBASE) ? r3 : (unsigned long)__va(r3);
-		initrd_end = initrd_start + r4;
-		ROOT_DEV = Root_RAM0;
-		initrd_below_start_ok = 1;
-	}
-#endif
-
 	cmd_line[0] = 0;
 
 #ifdef CONFIG_CMDLINE
@@ -509,8 +526,6 @@ console_initcall(set_preferred_console);
 int parse_bootinfo(void)
 {
 	struct bi_record *rec;
-	extern char *sysmap;
-	extern unsigned long sysmap_size;
 
 	rec = prom.bi_recs;
 
@@ -522,18 +537,6 @@ int parse_bootinfo(void)
 		case BI_CMD_LINE:
 			strlcpy(cmd_line, (void *)rec->data, sizeof(cmd_line));
 			break;
-		case BI_SYSMAP:
-			sysmap = __va(rec->data[0]);
-			sysmap_size = rec->data[1];
-			break;
-#ifdef CONFIG_BLK_DEV_INITRD
-		case BI_INITRD:
-			initrd_start = (unsigned long)__va(rec->data[0]);
-			initrd_end = initrd_start + rec->data[1];
-			ROOT_DEV = Root_RAM0;
-			initrd_below_start_ok = 1;
-			break;
-#endif /* CONFIG_BLK_DEV_INITRD */
 		}
 	}
 
@@ -597,6 +600,9 @@ void __init setup_arch(char **cmdline_p)
 
 	/* reboot on panic */
 	panic_timeout = 180;
+
+	if (ppc_md.panic)
+		notifier_chain_register(&panic_notifier_list, &ppc64_panic_block);
 
 	init_mm.start_code = PAGE_OFFSET;
 	init_mm.end_code = (unsigned long) _etext;

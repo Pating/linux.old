@@ -44,11 +44,14 @@ head-$(CONFIG_ARCH_S390_31)	+= arch/$(ARCH)/kernel/head.o
 head-$(CONFIG_ARCH_S390X)	+= arch/$(ARCH)/kernel/head64.o
 head-y				+= arch/$(ARCH)/kernel/init_task.o
 
-core-y		+= arch/$(ARCH)/mm/ arch/$(ARCH)/kernel/ \
+core-y		+= arch/$(ARCH)/mm/ arch/$(ARCH)/kernel/ arch/$(ARCH)/crypto/ \
 		   arch/$(ARCH)/appldata/
 libs-y		+= arch/$(ARCH)/lib/
 drivers-y	+= drivers/s390/
 drivers-$(CONFIG_MATHEMU) += arch/$(ARCH)/math-emu/
+
+# must be linked after kernel
+drivers-$(CONFIG_OPROFILE)	+= arch/s390/oprofile/
 
 boot		:= arch/$(ARCH)/boot
 

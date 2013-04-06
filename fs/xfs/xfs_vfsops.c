@@ -213,9 +213,9 @@ xfs_cleanup(void)
  */
 STATIC int
 xfs_start_flags(
+	struct vfs		*vfs,
 	struct xfs_mount_args	*ap,
-	struct xfs_mount	*mp,
-	int			ronly)
+	struct xfs_mount	*mp)
 {
 	/* Values are in BBs */
 	if ((ap->flags & XFSMNT_NOALIGN) != XFSMNT_NOALIGN) {
@@ -305,7 +305,7 @@ xfs_start_flags(
 	 * no recovery flag requires a read-only mount
 	 */
 	if (ap->flags & XFSMNT_NORECOVERY) {
-		if (!ronly) {
+		if (!(vfs->vfs_flag & VFS_RDONLY)) {
 			cmn_err(CE_WARN,
 	"XFS: tried to mount a FS read-write without recovery!");
 			return XFS_ERROR(EINVAL);
@@ -327,10 +327,12 @@ xfs_start_flags(
  */
 STATIC int
 xfs_finish_flags(
+	struct vfs		*vfs,
 	struct xfs_mount_args	*ap,
-	struct xfs_mount	*mp,
-	int			ronly)
+	struct xfs_mount	*mp)
 {
+	int			ronly = (vfs->vfs_flag & VFS_RDONLY);
+
 	/* Fail a mount where the logbuf is smaller then the log stripe */
 	if (XFS_SB_VERSION_HASLOGV2(&mp->m_sb)) {
 		if ((ap->logbufsize == -1) &&
@@ -420,7 +422,6 @@ xfs_mount(
 	struct bhv_desc		*p;
 	struct xfs_mount	*mp = XFS_BHVTOM(bhvp);
 	struct block_device	*ddev, *logdev, *rtdev;
-	int			ronly = (vfsp->vfs_flag & VFS_RDONLY);
 	int			flags = 0, error;
 
 	ddev = vfsp->vfs_super->s_bdev;
@@ -472,13 +473,13 @@ xfs_mount(
 	/*
 	 * Setup flags based on mount(2) options and then the superblock
 	 */
-	error = xfs_start_flags(args, mp, ronly);
+	error = xfs_start_flags(vfsp, args, mp);
 	if (error)
 		goto error;
 	error = xfs_readsb(mp);
 	if (error)
 		goto error;
-	error = xfs_finish_flags(args, mp, ronly);
+	error = xfs_finish_flags(vfsp, args, mp);
 	if (error) {
 		xfs_freesb(mp);
 		goto error;
@@ -624,7 +625,7 @@ xfs_mntupdate(
 
 	if (*flags & MS_RDONLY) {
 		xfs_refcache_purge_mp(mp);
-		pagebuf_delwri_flush(mp->m_ddev_targp, 0, NULL);
+		xfs_flush_buftarg(mp->m_ddev_targp, 0);
 		xfs_finish_reclaim_all(mp, 0);
 
 		/* This loop must run at least twice.
@@ -636,9 +637,11 @@ xfs_mntupdate(
 		 */ 
 		do {
 			VFS_SYNC(vfsp, REMOUNT_READONLY_FLAGS, NULL, error);
-			pagebuf_delwri_flush(mp->m_ddev_targp, PBDF_WAIT,
-								&pincount);
-			if(0 == pincount) { delay(50); count++; }
+			pincount = xfs_flush_buftarg(mp->m_ddev_targp, 1);
+			if (!pincount) {
+				delay(50);
+				count++;
+			}
 		} while (count < 2);
 
 		/* Ok now write out an unmount record */
@@ -1858,6 +1861,20 @@ xfs_showargs(
 	return 0;
 }
 
+STATIC void
+xfs_freeze(
+	bhv_desc_t	*bdp)
+{
+	xfs_mount_t	*mp = XFS_BHVTOM(bdp);
+
+	while (atomic_read(&mp->m_active_trans) > 0)
+		delay(100);
+
+	/* Push the superblock and write an unmount record */
+	xfs_log_unmount_write(mp);
+	xfs_unmountfs_writesb(mp);
+}
+
 
 vfsops_t xfs_vfsops = {
 	BHV_IDENTITY_INIT(VFS_BHV_XFS,VFS_POSITION_XFS),
@@ -1874,4 +1891,5 @@ vfsops_t xfs_vfsops = {
 	.vfs_quotactl		= (vfs_quotactl_t)fs_nosys,
 	.vfs_init_vnode		= xfs_initialize_vnode,
 	.vfs_force_shutdown	= xfs_do_force_shutdown,
+	.vfs_freeze		= xfs_freeze,
 };

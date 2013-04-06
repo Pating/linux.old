@@ -868,6 +868,13 @@ static void __init quirk_intel_ide_combined(struct pci_dev *pdev)
 }
 #endif /* CONFIG_SCSI_SATA */
 
+int pciehp_msi_quirk;
+
+static void __devinit quirk_pciehp_msi(struct pci_dev *pdev)
+{
+	pciehp_msi_quirk = 1;
+}
+
 /*
  *  The main table of quirks.
  *
@@ -927,7 +934,18 @@ static struct pci_fixup pci_fixups[] __devinitdata = {
 	{ PCI_FIXUP_HEADER,	PCI_VENDOR_ID_VIA,	PCI_DEVICE_ID_VIA_82C586_3,	quirk_vt82c586_acpi },
 	{ PCI_FIXUP_HEADER,	PCI_VENDOR_ID_VIA,	PCI_DEVICE_ID_VIA_82C686_4,	quirk_vt82c686_acpi },
 	{ PCI_FIXUP_HEADER,	PCI_VENDOR_ID_INTEL,	PCI_DEVICE_ID_INTEL_82371AB_3,	quirk_piix4_acpi },
+
+	/* Intel LPC interface bridges all have 128 bytes of magic ACPI/TCO regs and 64 bytes of GPIO */
+	{ PCI_FIXUP_HEADER,     PCI_VENDOR_ID_INTEL,    PCI_DEVICE_ID_INTEL_82801AA_0,	quirk_ich4_lpc_acpi },
+	{ PCI_FIXUP_HEADER,     PCI_VENDOR_ID_INTEL,    PCI_DEVICE_ID_INTEL_82801AB_0,	quirk_ich4_lpc_acpi },
+	{ PCI_FIXUP_HEADER,     PCI_VENDOR_ID_INTEL,    PCI_DEVICE_ID_INTEL_82801BA_0,	quirk_ich4_lpc_acpi },
+	{ PCI_FIXUP_HEADER,     PCI_VENDOR_ID_INTEL,    PCI_DEVICE_ID_INTEL_82801BA_10,	quirk_ich4_lpc_acpi },
+	{ PCI_FIXUP_HEADER,     PCI_VENDOR_ID_INTEL,    PCI_DEVICE_ID_INTEL_82801CA_0,	quirk_ich4_lpc_acpi },
+	{ PCI_FIXUP_HEADER,     PCI_VENDOR_ID_INTEL,    PCI_DEVICE_ID_INTEL_82801CA_12,	quirk_ich4_lpc_acpi },
+	{ PCI_FIXUP_HEADER,     PCI_VENDOR_ID_INTEL,    PCI_DEVICE_ID_INTEL_82801DB_0,	quirk_ich4_lpc_acpi },
 	{ PCI_FIXUP_HEADER,	PCI_VENDOR_ID_INTEL,	PCI_DEVICE_ID_INTEL_82801DB_12,	quirk_ich4_lpc_acpi },
+	{ PCI_FIXUP_HEADER,     PCI_VENDOR_ID_INTEL,    PCI_DEVICE_ID_INTEL_82801EB_0,	quirk_ich4_lpc_acpi },
+
 	{ PCI_FIXUP_HEADER,	PCI_VENDOR_ID_AL,	PCI_DEVICE_ID_AL_M7101,		quirk_ali7101_acpi },
  	{ PCI_FIXUP_HEADER,	PCI_VENDOR_ID_INTEL,	PCI_DEVICE_ID_INTEL_82371SB_2,	quirk_piix3_usb },
 	{ PCI_FIXUP_HEADER,	PCI_VENDOR_ID_INTEL,	PCI_DEVICE_ID_INTEL_82371AB_2,	quirk_piix3_usb },
@@ -984,6 +1002,8 @@ static struct pci_fixup pci_fixups[] __devinitdata = {
 	  quirk_intel_ide_combined },
 #endif /* CONFIG_SCSI_SATA */
 
+	{ PCI_FIXUP_FINAL,      PCI_VENDOR_ID_INTEL,    PCI_DEVICE_ID_INTEL_SMCH,	quirk_pciehp_msi },
+
 	{ 0 }
 };
 
@@ -1008,3 +1028,5 @@ void pci_fixup_device(int pass, struct pci_dev *dev)
 	pci_do_fixups(dev, pass, pcibios_fixups);
 	pci_do_fixups(dev, pass, pci_fixups);
 }
+
+EXPORT_SYMBOL(pciehp_msi_quirk);

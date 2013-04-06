@@ -118,7 +118,7 @@ SYSCALL(sys_newstat,sys_newstat,compat_sys_newstat_wrapper)
 SYSCALL(sys_newlstat,sys_newlstat,compat_sys_newlstat_wrapper)
 SYSCALL(sys_newfstat,sys_newfstat,compat_sys_newfstat_wrapper)
 NI_SYSCALL							/* old uname syscall */
-NI_SYSCALL							/* reserved for sys_lookup_dcache */
+SYSCALL(sys_lookup_dcookie,sys_lookup_dcookie,sys32_lookup_dcookie_wrapper)	/* 110 */
 SYSCALL(sys_vhangup,sys_vhangup,sys_vhangup)
 NI_SYSCALL							/* old "idle" system call */
 NI_SYSCALL							/* vm86old for i386 */
@@ -275,3 +275,13 @@ NI_SYSCALL							/* reserved for vserver */
 SYSCALL(s390_fadvise64_64,sys_ni_syscall,sys32_fadvise64_64_wrapper)
 SYSCALL(sys_statfs64,sys_statfs64,compat_sys_statfs64_wrapper)
 SYSCALL(sys_fstatfs64,sys_fstatfs64,compat_sys_fstatfs64_wrapper)
+NI_SYSCALL							/* 267 new sys_remap_file_pages */
+NI_SYSCALL							/* 268 sys_mbind */
+NI_SYSCALL							/* 269 sys_get_mempolicy */
+NI_SYSCALL							/* 270 sys_set_mempolicy */
+SYSCALL(sys_mq_open,sys_mq_open,compat_sys_mq_open_wrapper)
+SYSCALL(sys_mq_unlink,sys_mq_unlink,sys32_mq_unlink_wrapper)
+SYSCALL(sys_mq_timedsend,sys_mq_timedsend,compat_sys_mq_timedsend_wrapper)
+SYSCALL(sys_mq_timedreceive,sys_mq_timedreceive,compat_sys_mq_timedreceive_wrapper)
+SYSCALL(sys_mq_notify,sys_mq_notify,compat_sys_mq_notify_wrapper)
+SYSCALL(sys_mq_getsetattr,sys_mq_getsetattr,compat_sys_mq_getsetattr_wrapper)

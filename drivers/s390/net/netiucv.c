@@ -1,5 +1,5 @@
 /*
- * $Id: netiucv.c,v 1.47 2004/03/22 07:41:42 braunu Exp $
+ * $Id: netiucv.c,v 1.51 2004/04/23 08:11:21 mschwide Exp $
  *
  * IUCV network driver
  *
@@ -30,7 +30,7 @@
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  *
- * RELEASE-TAG: IUCV network driver $Revision: 1.47 $
+ * RELEASE-TAG: IUCV network driver $Revision: 1.51 $
  *
  */
 
@@ -100,7 +100,6 @@ struct iucv_connection {
 	int                       max_buffsize;
 	int                       flags;
 	fsm_timer                 timer;
-	int                       retry;
 	fsm_instance              *fsm;
 	struct net_device         *netdev;
 	struct connection_profile prof;
@@ -169,13 +168,11 @@ static __inline__ int netiucv_test_and_set_busy(struct net_device *dev)
 	return test_and_set_bit(0, &((struct netiucv_priv *)dev->priv)->tbusy);
 }
 
-#define SET_DEVICE_START(device, value)
-
 static __u8 iucv_host[8] = { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
-static __u8 iucvMagic[16] = {
-	0xF0, 0x40, 0x40, 0x40, 0x40, 0x40, 0x40, 0x40,
-	0xF0, 0x40, 0x40, 0x40, 0x40, 0x40, 0x40, 0x40
-};
+//static __u8 iucvMagic[16] = {
+//	0xF0, 0x40, 0x40, 0x40, 0x40, 0x40, 0x40, 0x40,
+//	0xF0, 0x40, 0x40, 0x40, 0x40, 0x40, 0x40, 0x40
+//};
 
 /**
  * This mask means the 16-byte IUCV "magic" and the origin userid must
@@ -217,7 +214,6 @@ enum dev_states {
 	DEV_STATE_STARTWAIT,
 	DEV_STATE_STOPWAIT,
 	DEV_STATE_RUNNING,
-	DEV_STATE_STARTRETRY,
 	/**
 	 * MUST be always the last element!!
 	 */
@@ -229,7 +225,6 @@ static const char *dev_state_names[] = {
 	"StartWait",
 	"StopWait",
 	"Running",
-	"StartRetry",
 };
 
 /**
@@ -599,7 +594,6 @@ conn_action_txdone(fsm_instance *fi, int event, void *arg)
 
 	pr_debug("%s() called\n", __FUNCTION__);
 
-	fsm_deltimer(&conn->timer);
 	if (conn && conn->netdev && conn->netdev->priv)
 		privptr = (struct netiucv_priv *)conn->netdev->priv;
 	conn->prof.tx_pending--;
@@ -607,11 +601,12 @@ conn_action_txdone(fsm_instance *fi, int event, void *arg)
 		if ((skb = skb_dequeue(&conn->commit_queue))) {
 			atomic_dec(&skb->users);
 			dev_kfree_skb_any(skb);
-		}
-		if (privptr) {
-			privptr->stats.tx_packets++;
-			privptr->stats.tx_bytes +=
-				(skb->len - NETIUCV_HDRLEN - NETIUCV_HDRLEN);
+			if (privptr) {
+				privptr->stats.tx_packets++;
+				privptr->stats.tx_bytes +=
+					(skb->len - NETIUCV_HDRLEN
+					 	  - NETIUCV_HDRLEN);
+			}
 		}
 	}
 	conn->tx_buff->data = conn->tx_buff->tail = conn->tx_buff->head;
@@ -639,8 +634,6 @@ conn_action_txdone(fsm_instance *fi, int event, void *arg)
 		memcpy(skb_put(conn->tx_buff, NETIUCV_HDRLEN), &header,
 		       NETIUCV_HDRLEN);
 
-		fsm_addtimer(&conn->timer, NETIUCV_TIMEOUT_5SEC,
-			     CONN_EVENT_TIMER, conn);
 		conn->prof.send_stamp = xtime;
 		rc = iucv_send(conn->pathid, NULL, 0, 0, 0, 0,
 			       conn->tx_buff->data, conn->tx_buff->len);
@@ -650,7 +643,6 @@ conn_action_txdone(fsm_instance *fi, int event, void *arg)
 		if (conn->prof.tx_pending > conn->prof.tx_max_pending)
 			conn->prof.tx_max_pending = conn->prof.tx_pending;
 		if (rc != 0) {
-			fsm_deltimer(&conn->timer);
 			conn->prof.tx_pending--;
 			fsm_newstate(fi, CONN_STATE_IDLE);
 			if (privptr)
@@ -701,13 +693,20 @@ static void
 conn_action_connreject(fsm_instance *fi, int event, void *arg)
 {
 	struct iucv_event *ev = (struct iucv_event *)arg;
-	// struct iucv_connection *conn = ev->conn;
+	struct iucv_connection *conn = ev->conn;
+	struct net_device *netdev = conn->netdev;
 	iucv_ConnectionPending *eib = (iucv_ConnectionPending *)ev->data;
 	__u8 udata[16];
 
 	pr_debug("%s() called\n", __FUNCTION__);
 
 	iucv_sever(eib->ippathid, udata);
+	if (eib->ippathid != conn->pathid) {
+		printk(KERN_INFO
+			"%s: IR pathid %d does not match original pathid %d\n",
+			netdev->name, eib->ippathid, conn->pathid);
+		iucv_sever(conn->pathid, udata);
+	}
 }
 
 static void
@@ -721,10 +720,29 @@ conn_action_connack(fsm_instance *fi, int event, void *arg)
 
 	pr_debug("%s() called\n", __FUNCTION__);
 
+	fsm_deltimer(&conn->timer);
 	fsm_newstate(fi, CONN_STATE_IDLE);
-	conn->pathid = eib->ippathid;
+	if (eib->ippathid != conn->pathid) {
+		printk(KERN_INFO
+			"%s: IR pathid %d does not match original pathid %d\n",
+			netdev->name, eib->ippathid, conn->pathid);
+		conn->pathid = eib->ippathid;
+	}
 	netdev->tx_queue_len = eib->ipmsglim;
 	fsm_event(privptr->fsm, DEV_EVENT_CONUP, netdev);
+}
+
+static void
+conn_action_conntimsev(fsm_instance *fi, int event, void *arg)
+{
+	struct iucv_connection *conn = (struct iucv_connection *)arg;
+	__u8 udata[16];
+
+	pr_debug("%s() called\n", __FUNCTION__);
+
+	fsm_deltimer(&conn->timer);
+	iucv_sever(conn->pathid, udata);
+	fsm_newstate(fi, CONN_STATE_STARTWAIT);
 }
 
 static void
@@ -732,31 +750,18 @@ conn_action_connsever(fsm_instance *fi, int event, void *arg)
 {
 	struct iucv_event *ev = (struct iucv_event *)arg;
 	struct iucv_connection *conn = ev->conn;
-	// iucv_ConnectionSevered *eib = (iucv_ConnectionSevered *)ev->data;
 	struct net_device *netdev = conn->netdev;
 	struct netiucv_priv *privptr = (struct netiucv_priv *)netdev->priv;
-	int state = fsm_getstate(fi);
+	__u8 udata[16];
 
 	pr_debug("%s() called\n", __FUNCTION__);
 
-	switch (state) {
-		case CONN_STATE_SETUPWAIT:
-			printk(KERN_INFO "%s: Remote dropped connection\n",
-			       netdev->name);
-			fsm_newstate(fi, CONN_STATE_STOPPED);
-			fsm_event(privptr->fsm, DEV_EVENT_CONDOWN, netdev);
-			break;
-		case CONN_STATE_IDLE:
-		case CONN_STATE_TX:
-			printk(KERN_INFO "%s: Remote dropped connection\n",
-			       netdev->name);
-			if (conn->handle)
-				iucv_unregister_program(conn->handle);
-			conn->handle = 0;
-			fsm_newstate(fi, CONN_STATE_STOPPED);
-			fsm_event(privptr->fsm, DEV_EVENT_CONDOWN, netdev);
-			break;
-	}
+	fsm_deltimer(&conn->timer);
+	iucv_sever(conn->pathid, udata);
+	printk(KERN_INFO "%s: Remote dropped connection\n",
+	       netdev->name);
+	fsm_newstate(fi, CONN_STATE_STARTWAIT);
+	fsm_event(privptr->fsm, DEV_EVENT_CONDOWN, netdev);
 }
 
 static void
@@ -766,9 +771,14 @@ conn_action_start(fsm_instance *fi, int event, void *arg)
 	struct iucv_connection *conn = ev->conn;
 	__u16 msglimit;
 	int rc;
+	__u8 iucvMagic[16] = {
+	0xF0, 0x40, 0x40, 0x40, 0x40, 0x40, 0x40, 0x40,
+        0xF0, 0x40, 0x40, 0x40, 0x40, 0x40, 0x40, 0x40
+	};
 
 	pr_debug("%s() called\n", __FUNCTION__);
 
+	memcpy(iucvMagic, conn->netdev->name, IFNAMSIZ);
 	if (conn->handle == 0) {
 		conn->handle =
 			iucv_register_program(iucvMagic, conn->userid, mask,
@@ -798,6 +808,8 @@ conn_action_start(fsm_instance *fi, int event, void *arg)
 	switch (rc) {
 		case 0:
 			conn->netdev->tx_queue_len = msglimit;
+			fsm_addtimer(&conn->timer, NETIUCV_TIMEOUT_5SEC,
+				CONN_EVENT_TIMER, conn);
 			return;
 		case 11:
 			printk(KERN_NOTICE
@@ -864,6 +876,7 @@ conn_action_stop(fsm_instance *fi, int event, void *arg)
 
 	pr_debug("%s() called\n", __FUNCTION__);
 
+	fsm_deltimer(&conn->timer);
 	fsm_newstate(fi, CONN_STATE_STOPPED);
 	netiucv_purge_skb_queue(&conn->collect_queue);
 	if (conn->handle)
@@ -888,7 +901,6 @@ conn_action_inval(fsm_instance *fi, int event, void *arg)
 static const fsm_node conn_fsm[] = {
 	{ CONN_STATE_INVALID,   CONN_EVENT_START,    conn_action_inval      },
 	{ CONN_STATE_STOPPED,   CONN_EVENT_START,    conn_action_start      },
-	{ CONN_STATE_STARTWAIT, CONN_EVENT_START,    conn_action_start      },
 
 	{ CONN_STATE_STOPPED,   CONN_EVENT_STOP,     conn_action_stop       },
 	{ CONN_STATE_STARTWAIT, CONN_EVENT_STOP,     conn_action_stop       },
@@ -905,6 +917,7 @@ static const fsm_node conn_fsm[] = {
 	{ CONN_STATE_TX,        CONN_EVENT_CONN_REQ, conn_action_connreject },
 
 	{ CONN_STATE_SETUPWAIT, CONN_EVENT_CONN_ACK, conn_action_connack    },
+	{ CONN_STATE_SETUPWAIT, CONN_EVENT_TIMER,    conn_action_conntimsev },
 
 	{ CONN_STATE_SETUPWAIT, CONN_EVENT_CONN_REJ, conn_action_connsever  },
 	{ CONN_STATE_IDLE,      CONN_EVENT_CONN_REJ, conn_action_connsever  },
@@ -940,7 +953,6 @@ dev_action_start(fsm_instance *fi, int event, void *arg)
 
 	pr_debug("%s() called\n", __FUNCTION__);
 
-	fsm_deltimer(&privptr->timer);
 	ev.conn = privptr->conn;
 	fsm_newstate(fi, DEV_STATE_STARTWAIT);
 	fsm_event(privptr->conn->fsm, CONN_EVENT_START, &ev);
@@ -964,7 +976,6 @@ dev_action_stop(fsm_instance *fi, int event, void *arg)
 
 	ev.conn = privptr->conn;
 
-	fsm_deltimer(&privptr->timer);
 	fsm_newstate(fi, DEV_STATE_STOPWAIT);
 	fsm_event(privptr->conn->fsm, CONN_EVENT_STOP, &ev);
 }
@@ -981,13 +992,10 @@ static void
 dev_action_connup(fsm_instance *fi, int event, void *arg)
 {
 	struct net_device   *dev = (struct net_device *)arg;
-	struct netiucv_priv *privptr = dev->priv;
 
 	pr_debug("%s() called\n", __FUNCTION__);
 
 	switch (fsm_getstate(fi)) {
-		case DEV_STATE_STARTRETRY:
-			fsm_deltimer(&privptr->timer);
 		case DEV_STATE_STARTWAIT:
 			fsm_newstate(fi, DEV_STATE_RUNNING);
 			printk(KERN_INFO
@@ -1013,22 +1021,11 @@ dev_action_connup(fsm_instance *fi, int event, void *arg)
 static void
 dev_action_conndown(fsm_instance *fi, int event, void *arg)
 {
-	struct net_device   *dev = (struct net_device *)arg;
-	struct netiucv_priv *privptr = dev->priv;
-	struct iucv_event   ev;
-
 	pr_debug("%s() called\n", __FUNCTION__);
 
 	switch (fsm_getstate(fi)) {
 		case DEV_STATE_RUNNING:
 			fsm_newstate(fi, DEV_STATE_STARTWAIT);
-			ev.conn = privptr->conn;
-			fsm_event(privptr->conn->fsm, CONN_EVENT_START, &ev);
-			break;
-		case DEV_STATE_STARTWAIT:
-			fsm_addtimer(&privptr->timer, NETIUCV_TIMEOUT_5SEC,
-				     DEV_EVENT_TIMER, dev);
-			fsm_newstate(fi, DEV_STATE_STARTRETRY);
 			break;
 		case DEV_STATE_STOPWAIT:
 			fsm_newstate(fi, DEV_STATE_STOPPED);
@@ -1044,11 +1041,6 @@ static const fsm_node dev_fsm[] = {
 
 	{ DEV_STATE_STARTWAIT,  DEV_EVENT_STOP,    dev_action_stop     },
 	{ DEV_STATE_STARTWAIT,  DEV_EVENT_CONUP,   dev_action_connup   },
-	{ DEV_STATE_STARTWAIT,  DEV_EVENT_CONDOWN, dev_action_conndown },
-
-	{ DEV_STATE_STARTRETRY, DEV_EVENT_TIMER,   dev_action_start    },
-	{ DEV_STATE_STARTRETRY, DEV_EVENT_CONUP,   dev_action_connup   },
-	{ DEV_STATE_STARTRETRY, DEV_EVENT_STOP,    dev_action_stop     },
 
 	{ DEV_STATE_RUNNING,    DEV_EVENT_STOP,    dev_action_stop     },
 	{ DEV_STATE_RUNNING,    DEV_EVENT_CONDOWN, dev_action_conndown },
@@ -1104,6 +1096,7 @@ netiucv_transmit_skb(struct iucv_connection *conn, struct sk_buff *skb) {
 				       "%s: Could not allocate tx_skb\n",
 				       conn->netdev->name);
 				rc = -ENOMEM;
+				return rc;
 			} else {
 				skb_reserve(nskb, NETIUCV_HDRLEN);
 				memcpy(skb_put(nskb, skb->len),
@@ -1119,10 +1112,7 @@ netiucv_transmit_skb(struct iucv_connection *conn, struct sk_buff *skb) {
 		header.next = 0;
 		memcpy(skb_put(nskb, NETIUCV_HDRLEN), &header,  NETIUCV_HDRLEN);
 
-		conn->retry = 0;
 		fsm_newstate(conn->fsm, CONN_STATE_TX);
-		fsm_addtimer(&conn->timer, NETIUCV_TIMEOUT_5SEC,
-			     CONN_EVENT_TIMER, conn);
 		conn->prof.send_stamp = xtime;
 		
 		rc = iucv_send(conn->pathid, NULL, 0, 0, 1 /* single_flag */,
@@ -1135,7 +1125,6 @@ netiucv_transmit_skb(struct iucv_connection *conn, struct sk_buff *skb) {
 			conn->prof.tx_max_pending = conn->prof.tx_pending;
 		if (rc != 0) {
 			struct netiucv_priv *privptr;
-			fsm_deltimer(&conn->timer);
 			fsm_newstate(conn->fsm, CONN_STATE_IDLE);
 			conn->prof.tx_pending--;
 			privptr = (struct netiucv_priv *)conn->netdev->priv;
@@ -1178,7 +1167,6 @@ netiucv_transmit_skb(struct iucv_connection *conn, struct sk_buff *skb) {
  */
 static int
 netiucv_open(struct net_device *dev) {
-	SET_DEVICE_START(dev, 1);
 	fsm_event(((struct netiucv_priv *)dev->priv)->fsm, DEV_EVENT_START, dev);
 	return 0;
 }
@@ -1193,7 +1181,6 @@ netiucv_open(struct net_device *dev) {
  */
 static int
 netiucv_close(struct net_device *dev) {
-	SET_DEVICE_START(dev, 0);
 	fsm_event(((struct netiucv_priv *)dev->priv)->fsm, DEV_EVENT_STOP, dev);
 	return 0;
 }
@@ -1912,7 +1899,7 @@ static struct device_driver netiucv_driver = {
 static void
 netiucv_banner(void)
 {
-	char vbuf[] = "$Revision: 1.47 $";
+	char vbuf[] = "$Revision: 1.51 $";
 	char *version = vbuf;
 
 	if ((version = strchr(version, ':'))) {

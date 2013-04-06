@@ -33,13 +33,14 @@
 #define NUM_ACRS      16    
 
 #define TASK31_SIZE		(0x80000000UL)
+#undef TASK_SIZE
+#define TASK_SIZE TASK31_SIZE
 
 /* For SVR4/S390 the function pointer to be registered with `atexit` is
    passed in R14. */
 #define ELF_PLAT_INIT(_r, load_addr) \
 	do { \
-	_r->gprs[14] = 0; \
-	set_thread_flag(TIF_31BIT); \
+		_r->gprs[14] = 0; \
 	} while(0)
 
 #define USE_ELF_CORE_DUMP
@@ -80,6 +81,7 @@ do {							\
 		set_personality(PER_SVR4);              \
 	else if (current->personality != PER_LINUX32)   \
 		set_personality(PER_LINUX);             \
+	set_thread_flag(TIF_31BIT);			\
 } while (0)
 
 #include "compat_linux.h"
@@ -115,7 +117,7 @@ static inline int dump_regs32(struct pt_regs *ptregs, elf_gregset_t *regs)
 #include <linux/binfmts.h>
 #include <linux/compat.h>
 
-int setup_arg_pages32(struct linux_binprm *bprm);
+int setup_arg_pages32(struct linux_binprm *bprm, int executable_stack);
 
 #define elf_prstatus elf_prstatus32
 struct elf_prstatus32
@@ -166,7 +168,7 @@ struct elf_prpsinfo32
 
 #undef start_thread
 #define start_thread                    start_thread31 
-#define setup_arg_pages(bprm)           setup_arg_pages32(bprm)
+#define setup_arg_pages(bprm, exec)     setup_arg_pages32(bprm, exec)
 #define elf_map				elf_map32
 
 MODULE_DESCRIPTION("Binary format loader for compatibility with 32bit Linux for S390 binaries,"
@@ -192,10 +194,7 @@ elf_map32 (struct file *filep, unsigned long addr, struct elf_phdr *eppnt, int p
 	unsigned long map_addr;
 
 	if (!addr) 
-		addr = 0x40000000; 
-
-	if (prot & PROT_READ) 
-		prot |= PROT_EXEC; 
+		addr = TASK_UNMAPPED_BASE;
 
 	down_write(&current->mm->mmap_sem);
 	map_addr = do_mmap(filep, ELF_PAGESTART(addr),

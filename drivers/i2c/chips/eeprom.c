@@ -63,6 +63,7 @@ enum eeprom_nature {
 
 /* Each client has this additional data */
 struct eeprom_data {
+	struct i2c_client client;
 	struct semaphore update_lock;
 	u8 valid;			/* bitfield, bit!=0 if slice is valid */
 	unsigned long last_updated[8];	/* In jiffies, 8 slices */
@@ -154,6 +155,7 @@ static struct bin_attribute eeprom_attr = {
 	.attr = {
 		.name = "eeprom",
 		.mode = S_IRUGO,
+		.owner = THIS_MODULE,
 	},
 	.size = EEPROM_SIZE,
 	.read = eeprom_read,
@@ -187,17 +189,14 @@ int eeprom_detect(struct i2c_adapter *adapter, int address, int kind)
 	/* OK. For now, we presume we have a valid client. We now create the
 	   client structure, even though we cannot fill it completely yet.
 	   But it allows us to access eeprom_{read,write}_value. */
-	if (!(new_client = kmalloc(sizeof(struct i2c_client) +
-				   sizeof(struct eeprom_data),
-				   GFP_KERNEL))) {
+	if (!(data = kmalloc(sizeof(struct eeprom_data), GFP_KERNEL))) {
 		err = -ENOMEM;
 		goto exit;
 	}
-	memset(new_client, 0x00, sizeof(struct i2c_client) +
-				 sizeof(struct eeprom_data));
+	memset(data, 0, sizeof(struct eeprom_data));
 
-	data = (struct eeprom_data *) (new_client + 1);
-	memset(data, 0xff, EEPROM_SIZE);
+	new_client = &data->client;
+	memset(data->data, 0xff, EEPROM_SIZE);
 	i2c_set_clientdata(new_client, data);
 	new_client->addr = address;
 	new_client->adapter = adapter;
@@ -244,7 +243,7 @@ int eeprom_detect(struct i2c_adapter *adapter, int address, int kind)
 	return 0;
 
 exit_kfree:
-	kfree(new_client);
+	kfree(data);
 exit:
 	return err;
 }
@@ -259,7 +258,7 @@ static int eeprom_detach_client(struct i2c_client *client)
 		return err;
 	}
 
-	kfree(client);
+	kfree(i2c_get_clientdata(client));
 
 	return 0;
 }

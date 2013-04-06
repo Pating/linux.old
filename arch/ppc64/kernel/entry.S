@@ -95,7 +95,7 @@ _GLOBAL(DoSyscall)
 #endif /* SHOW_SYSCALLS */
 	clrrdi	r10,r1,THREAD_SHIFT
 	ld	r10,TI_FLAGS(r10)
-	andi.	r11,r10,_TIF_SYSCALL_TRACE
+	andi.	r11,r10,_TIF_SYSCALL_T_OR_A
 	bne-	50f
 	cmpli	0,r0,NR_syscalls
 	bge-	66f
@@ -151,7 +151,8 @@ _GLOBAL(ret_from_syscall_1)
 	b	22b
         
 /* Traced system call support */
-50:	bl	.do_syscall_trace
+50:	addi	r3,r1,STACK_FRAME_OVERHEAD
+	bl	.do_syscall_trace_enter
 	ld	r0,GPR0(r1)	/* Restore original registers */
 	ld	r3,GPR3(r1)
 	ld	r4,GPR4(r1)
@@ -201,7 +202,7 @@ _GLOBAL(ret_from_syscall_2)
 	oris	r10,r10,0x1000
 	std	r10,_CCR(r1)
 60:	std	r3,GPR3(r1)	/* Update return value */
-	bl	.do_syscall_trace
+	bl	.do_syscall_trace_leave
 	b	.ret_from_except
 66:	li	r3,ENOSYS
 	b	57b
@@ -234,14 +235,14 @@ _GLOBAL(ppc64_rt_sigreturn)
 
 80:	clrrdi	r4,r1,THREAD_SHIFT
 	ld	r4,TI_FLAGS(r4)
-	andi.	r4,r4,_TIF_SYSCALL_TRACE
+	andi.	r4,r4,_TIF_SYSCALL_T_OR_A
 	bne-	81f
 	cmpi	0,r3,0
 	bge	.ret_from_except
 	b	.ret_from_syscall_1
 81:	cmpi	0,r3,0
 	blt	.ret_from_syscall_2
-	bl	.do_syscall_trace
+	bl	.do_syscall_trace_leave
 	b	.ret_from_except
 
 /*
@@ -310,6 +311,7 @@ BEGIN_FTR_SECTION
 	beq	2f		/* if yes, don't slbie it */
 	oris	r6,r6,0x0800	/* set C (class) bit */
 	slbie	r6
+	slbie	r6		/* Workaround POWER5 < DD2.1 issue */
 2:
 END_FTR_SECTION_IFSET(CPU_FTR_SLB)
 	clrrdi	r7,r8,THREAD_SHIFT	/* base of new stack */
@@ -352,9 +354,9 @@ _GLOBAL(ret_from_fork)
 	bl	.schedule_tail
 	clrrdi	r4,r1,THREAD_SHIFT
 	ld	r4,TI_FLAGS(r4)
-	andi.	r4,r4,_TIF_SYSCALL_TRACE
+	andi.	r4,r4,_TIF_SYSCALL_T_OR_A
 	beq+	.ret_from_except
-	bl	.do_syscall_trace
+	bl	.do_syscall_trace_leave
 	b	.ret_from_except
 
 _GLOBAL(ret_from_except)
@@ -468,6 +470,7 @@ do_work:
 	b	.ret_from_except
 
 unrecov_restore:
+	mfspr   r13,SPRG3
 	addi	r3,r1,STACK_FRAME_OVERHEAD
 	bl	.unrecoverable_exception
 	b	unrecov_restore
@@ -485,7 +488,7 @@ _GLOBAL(enter_rtas)
 	mflr	r0
 	std	r0,16(r1)
         stdu	r1,-RTAS_FRAME_SIZE(r1)	/* Save SP and create stack space. */
-
+	
 	/* Because RTAS is running in 32b mode, it clobbers the high order half
 	 * of all registers that it saves.  We therefore save those registers
 	 * RTAS might touch to the stack.  (r0, r3-r13 are caller saved)
@@ -510,12 +513,25 @@ _GLOBAL(enter_rtas)
 	mfsrr1	r10
 	std	r10,_SRR1(r1)
 
+	/* There is no way it is acceptable to get here with interrupts enabled,
+	 * check it with the asm equivalent of WARN_ON
+	 */
+	mfmsr	r6
+	andi.	r0,r6,MSR_EE
+1:	tdnei	r0,0
+.section __bug_table,"a"
+	.llong	1b,__LINE__ + 0x1000000, 1f, 2f
+.previous
+.section .rodata,"a"
+1:	.asciz	__FILE__
+2:	.asciz "enter_rtas"
+.previous
+	
 	/* Unfortunately, the stack pointer and the MSR are also clobbered,
 	 * so they are saved in the PACA which allows us to restore
 	 * our original state after RTAS returns.
          */
 	std	r1,PACAR1(r13)
-	mfmsr	r6
         std	r6,PACASAVEDMSR(r13)
 
 	/* Setup our real return addr */	

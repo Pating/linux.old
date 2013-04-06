@@ -256,10 +256,11 @@ void exit_thread(void)
 {
 	struct task_struct *me = current;
 	if (me->thread.io_bitmap_ptr) { 
+		struct tss_struct *tss = init_tss + get_cpu();
 		kfree(me->thread.io_bitmap_ptr); 
 		me->thread.io_bitmap_ptr = NULL;
-		(init_tss + smp_processor_id())->io_bitmap_base = 
-			INVALID_IO_BITMAP_OFFSET;
+		tss->io_bitmap_base = INVALID_IO_BITMAP_OFFSET;
+		put_cpu();
 	}
 }
 
@@ -576,8 +577,6 @@ asmlinkage long sys_vfork(struct pt_regs regs)
 /*
  * These bracket the sleeping functions..
  */
-extern void scheduling_functions_start_here(void);
-extern void scheduling_functions_end_here(void);
 #define first_sched	((unsigned long) scheduling_functions_start_here)
 #define last_sched	((unsigned long) scheduling_functions_end_here)
 

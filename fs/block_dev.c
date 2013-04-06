@@ -148,15 +148,15 @@ blkdev_get_blocks(struct inode *inode, sector_t iblock,
 	return 0;
 }
 
-static int
+static ssize_t
 blkdev_direct_IO(int rw, struct kiocb *iocb, const struct iovec *iov,
 			loff_t offset, unsigned long nr_segs)
 {
 	struct file *file = iocb->ki_filp;
 	struct inode *inode = file->f_mapping->host;
 
-	return blockdev_direct_IO(rw, iocb, inode, I_BDEV(inode), iov, offset,
-				nr_segs, blkdev_get_blocks, NULL);
+	return blockdev_direct_IO_no_locking(rw, iocb, inode, I_BDEV(inode),
+				iov, offset, nr_segs, blkdev_get_blocks, NULL);
 }
 
 static int blkdev_writepage(struct page *page, struct writeback_control *wbc)
@@ -251,6 +251,7 @@ static void init_once(void * foo, kmem_cache_t * cachep, unsigned long flags)
 	{
 		memset(bdev, 0, sizeof(*bdev));
 		sema_init(&bdev->bd_sem, 1);
+		sema_init(&bdev->bd_mount_sem, 1);
 		INIT_LIST_HEAD(&bdev->bd_inodes);
 		INIT_LIST_HEAD(&bdev->bd_list);
 		inode_init_once(&ei->vfs_inode);
@@ -796,7 +797,7 @@ struct file_operations def_blk_fops = {
 	.fsync		= block_fsync,
 	.ioctl		= block_ioctl,
 	.readv		= generic_file_readv,
-	.writev		= generic_file_writev,
+	.writev		= generic_file_write_nolock,
 	.sendfile	= generic_file_sendfile,
 };
 

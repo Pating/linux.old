@@ -65,9 +65,6 @@ struct mm_struct ioremap_mm = {
 	.page_table_lock = SPIN_LOCK_UNLOCKED,
 };
 
-char *sysmap = NULL;
-unsigned long sysmap_size = 0;
-
 void enable_kernel_fp(void)
 {
 #ifdef CONFIG_SMP
@@ -475,8 +472,6 @@ static inline int validate_sp(unsigned long sp, struct task_struct *p)
 /*
  * These bracket the sleeping functions..
  */
-extern void scheduling_functions_start_here(void);
-extern void scheduling_functions_end_here(void);
 #define first_sched    (*(unsigned long *)scheduling_functions_start_here)
 #define last_sched     (*(unsigned long *)scheduling_functions_end_here)
 
@@ -538,10 +533,4 @@ void dump_stack(void)
 {
 	show_stack(current, (unsigned long *)__get_SP());
 }
-
 EXPORT_SYMBOL(dump_stack);
-
-void show_trace_task(struct task_struct *tsk)
-{
-	show_stack(tsk, (unsigned long *)tsk->thread.ksp);
-}

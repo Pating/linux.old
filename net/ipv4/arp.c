@@ -860,7 +860,7 @@ int arp_process(struct sk_buff *skb)
 				if (n)
 					neigh_release(n);
 
-				if (skb->stamp.tv_sec == 0 ||
+				if (skb->stamp.tv_sec == LOCALLY_ENQUEUED || 
 				    skb->pkt_type == PACKET_HOST ||
 				    in_dev->arp_parms->proxy_delay == 0) {
 					arp_send(ARPOP_REPLY,ETH_P_ARP,sip,dev,tip,sha,dev->dev_addr,sha);
@@ -891,15 +891,14 @@ int arp_process(struct sk_buff *skb)
 
 	if (n) {
 		int state = NUD_REACHABLE;
-		int override = 0;
+		int override;
 
 		/* If several different ARP replies follows back-to-back,
 		   use the FIRST one. It is possible, if several proxy
 		   agents are active. Taking the first reply prevents
 		   arp trashing and chooses the fastest router.
 		 */
-		if (jiffies - n->updated >= n->parms->locktime)
-			override = 1;
+		override = time_after(jiffies, n->updated + n->parms->locktime);
 
 		/* Broadcast replies and request packets
 		   do not assert neighbour reachability.

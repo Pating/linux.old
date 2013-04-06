@@ -18,6 +18,7 @@ enum dev_state {
 	DEV_STATE_CLEAR_VERIFY,
 	DEV_STATE_TIMEOUT_KILL,
 	DEV_STATE_WAIT4IO,
+	DEV_STATE_QUIESCE,
 	/* special states for devices gone not operational */
 	DEV_STATE_DISCONNECTED,
 	DEV_STATE_DISCONNECTED_SENSE_ID,
@@ -65,12 +66,15 @@ dev_fsm_final_state(struct ccw_device *cdev)
 }
 
 extern struct workqueue_struct *ccw_device_work;
+extern struct workqueue_struct *ccw_device_notify_work;
 
 void io_subchannel_recog_done(struct ccw_device *cdev);
 
+int ccw_device_cancel_halt_clear(struct ccw_device *);
+
 int ccw_device_register(struct ccw_device *);
 void ccw_device_do_unreg_rereg(void *);
-
+void ccw_device_call_sch_unregister(void *);
 
 int ccw_device_recognition(struct ccw_device *);
 int ccw_device_online(struct ccw_device *);

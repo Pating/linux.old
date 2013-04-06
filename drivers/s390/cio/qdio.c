@@ -56,7 +56,7 @@
 #include "ioasm.h"
 #include "chsc.h"
 
-#define VERSION_QDIO_C "$Revision: 1.78 $"
+#define VERSION_QDIO_C "$Revision: 1.80 $"
 
 /****************** MODULE PARAMETER VARIABLES ********************/
 MODULE_AUTHOR("Utz Bacher <utz.bacher@de.ibm.com>");
@@ -392,6 +392,11 @@ qdio_unmark_q(struct qdio_q *q)
 	if ((q->is_thinint_q)&&(q->is_input_q)) {
 		/* iQDIO */
 		spin_lock_irqsave(&ttiq_list_lock,flags);
+		/* in case cleanup has done this already and simultanously
+		 * qdio_unmark_q is called from the interrupt handler, we've
+		 * got to check this in this specific case again */
+		if ((!q->list_prev)||(!q->list_next))
+			goto out;
 		if (q->list_next==q) {
 			/* q was the only interesting q */
 			tiq_list=NULL;
@@ -404,6 +409,7 @@ qdio_unmark_q(struct qdio_q *q)
 			q->list_next=NULL;
 			q->list_prev=NULL;
 		}
+out:
 		spin_unlock_irqrestore(&ttiq_list_lock,flags);
 	}
 }
@@ -455,12 +461,12 @@ check_next:
 
 	switch(slsb[f_mod_no]) {
 
-        /* the hydra has not fetched the output yet */
+        /* the adapter has not fetched the output yet */
 	case SLSB_CU_OUTPUT_PRIMED:
 		QDIO_DBF_TEXT5(0,trace,"outpprim");
 		break;
 
-	/* the hydra got it */
+	/* the adapter got it */
 	case SLSB_P_OUTPUT_EMPTY:
 		atomic_dec(&q->number_of_buffers_used);
 		f++;
@@ -913,7 +919,7 @@ qdio_is_inbound_q_done(struct qdio_q *q)
 	no_used=atomic_read(&q->number_of_buffers_used);
 
 	/* 
-	 * we need that one for synchronization with Hydra, as Hydra
+	 * we need that one for synchronization with the adapter, as it
 	 * does a kind of PCI avoidance 
 	 */
 	SYNC_MEMORY;
@@ -1063,7 +1069,7 @@ __tiqdio_inbound_processing(struct qdio_q *q, int spare_ind_was_set)
 	}
 	/*
 	 * maybe we have to do work on our outbound queues... at least
-	 * we have to check Hydra outbound-int-capable thinint-capable
+	 * we have to check the outbound-int-capable thinint-capable
 	 * queues
 	 */
 	if (q->hydra_gives_outbound_pcis) {
@@ -2021,7 +2027,7 @@ tiqdio_check_chsc_availability(void)
 		goto exit;
 	}
 
-	/* Check for hydra thin interrupts (bit 67). */
+	/* Check for OSA/FCP thin interrupts (bit 67). */
 	hydra_thinints = ((scsc_area->general_char[2] & 0x10000000)
 		== 0x10000000);
 	sprintf(dbf_text,"hydrati%1x", hydra_thinints);

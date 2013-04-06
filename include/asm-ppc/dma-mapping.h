@@ -77,7 +77,7 @@ dma_map_page(struct device *dev, struct page *page,
 }
 
 /* We do nothing. */
-#define dma_unmap_single(dev, addr, size, dir)	do { } while (0)
+#define dma_unmap_page(dev, addr, size, dir)	do { } while (0)
 
 static inline int
 dma_map_sg(struct device *dev, struct scatterlist *sg, int nents,
@@ -184,4 +184,10 @@ static inline void dma_cache_sync(void *vaddr, size_t size,
 {
 	consistent_sync(vaddr, size, (int)direction);
 }
+
+static inline int dma_mapping_error(dma_addr_t dma_addr)
+{
+	return 0;
+}
+
 #endif				/* __ASM_PPC_DMA_MAPPING_H */

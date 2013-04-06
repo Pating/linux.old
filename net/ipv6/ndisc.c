@@ -452,6 +452,7 @@ static void ndisc_send_na(struct net_device *dev, struct neighbour *neigh,
 
 	skb->dst = dst;
 	idev = in6_dev_get(dst->dev);
+	IP6_INC_STATS(Ip6OutRequests);
 	err = NF_HOOK(PF_INET6, NF_IP6_LOCAL_OUT, skb, NULL, dst->dev, dst_output);
 	if (!err) {
 		ICMP6_INC_STATS(idev, Icmp6OutNeighborAdvertisements);
@@ -535,6 +536,7 @@ void ndisc_send_ns(struct net_device *dev, struct neighbour *neigh,
 	/* send it! */
 	skb->dst = dst;
 	idev = in6_dev_get(dst->dev);
+	IP6_INC_STATS(Ip6OutRequests);
 	err = NF_HOOK(PF_INET6, NF_IP6_LOCAL_OUT, skb, NULL, dst->dev, dst_output);
 	if (!err) {
 		ICMP6_INC_STATS(idev, Icmp6OutNeighborSolicits);
@@ -607,6 +609,7 @@ void ndisc_send_rs(struct net_device *dev, struct in6_addr *saddr,
 	/* send it! */
 	skb->dst = dst;
 	idev = in6_dev_get(dst->dev);
+	IP6_INC_STATS(Ip6OutRequests);	
 	err = NF_HOOK(PF_INET6, NF_IP6_LOCAL_OUT, skb, NULL, dst->dev, dst_output);
 	if (!err) {
 		ICMP6_INC_STATS(idev, Icmp6OutRouterSolicits);
@@ -761,7 +764,7 @@ static void ndisc_recv_ns(struct sk_buff *skb)
 		if (ipv6_chk_acast_addr(dev, &msg->target) ||
 		    (idev->cnf.forwarding && 
 		     pneigh_lookup(&nd_tbl, &msg->target, dev, 0))) {
-			if (skb->stamp.tv_sec != 0 &&
+			if (skb->stamp.tv_sec != LOCALLY_ENQUEUED &&
 			    skb->pkt_type != PACKET_HOST &&
 			    inc != 0 &&
 			    idev->nd_parms->proxy_delay != 0) {
@@ -1332,6 +1335,7 @@ void ndisc_send_redirect(struct sk_buff *skb, struct neighbour *neigh,
 
 	buff->dst = dst;
 	idev = in6_dev_get(dst->dev);
+	IP6_INC_STATS(Ip6OutRequests);
 	err = NF_HOOK(PF_INET6, NF_IP6_LOCAL_OUT, buff, NULL, dst->dev, dst_output);
 	if (!err) {
 		ICMP6_INC_STATS(idev, Icmp6OutRedirects);
@@ -1403,6 +1407,10 @@ static int ndisc_netdev_event(struct notifier_block *this, unsigned long event, 
 		neigh_changeaddr(&nd_tbl, dev);
 		fib6_run_gc(0);
 		break;
+	case NETDEV_DOWN:
+		neigh_ifdown(&nd_tbl, dev);
+		fib6_run_gc(0);
+		break;
 	default:
 		break;
 	}
@@ -1410,7 +1418,7 @@ static int ndisc_netdev_event(struct notifier_block *this, unsigned long event, 
 	return NOTIFY_DONE;
 }
 
-struct notifier_block ndisc_netdev_notifier = {
+static struct notifier_block ndisc_netdev_notifier = {
 	.notifier_call = ndisc_netdev_event,
 };
 
@@ -1435,7 +1443,7 @@ int __init ndisc_init(struct net_proto_family *ops)
 	struct sock *sk;
         int err;
 
-	err = sock_create(PF_INET6, SOCK_RAW, IPPROTO_ICMPV6, &ndisc_socket);
+	err = sock_create_kern(PF_INET6, SOCK_RAW, IPPROTO_ICMPV6, &ndisc_socket);
 	if (err < 0) {
 		ND_PRINTK0(KERN_ERR
 			   "ICMPv6 NDISC: Failed to initialize the control socket (err %d).\n", 
