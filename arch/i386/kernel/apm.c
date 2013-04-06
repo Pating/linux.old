@@ -1,8 +1,8 @@
 /* -*- linux-c -*-
  * APM BIOS driver for Linux
- * Copyright 1994-1998 Stephen Rothwell
- *                     (Stephen.Rothwell@canb.auug.org.au)
- * Development of this driver was funded by NEC Australia P/L
+ * Copyright 1994-1999 Stephen Rothwell (sfr@linuxcare.com)
+ *
+ * Initial development of this driver was funded by NEC Australia P/L
  *	and NEC Corporation
  *
  * This program is free software; you can redistribute it and/or modify it
@@ -132,6 +132,12 @@
 #include <asm/system.h>
 #include <asm/uaccess.h>
 #include <asm/desc.h>
+
+/*
+ * Make APM look as much as just another ACPI module as possible..
+ */
+#include <linux/acpi.h>
+
 
 EXPORT_SYMBOL(apm_register_callback);
 EXPORT_SYMBOL(apm_unregister_callback);
@@ -1400,6 +1406,11 @@ static int apm(void *unused)
 			apm_bios_info.flags &= ~APM_BIOS_DISENGAGED;
 	}
 
+/* Install our power off handler.. */
+#ifdef CONFIG_APM_POWER_OFF
+	acpi_power_off = apm_power_off;
+#endif
+
 	apm_mainloop();
 	return 0;
 }
@@ -1441,8 +1452,6 @@ __setup("apm=", apm_setup);
  */
 static int __init apm_init(void)
 {
-	static struct proc_dir_entry *ent;
-
 	if (apm_bios_info.version == 0) {
 		printk(KERN_INFO "apm: BIOS not found.\n");
 		return -1;
@@ -1536,9 +1545,7 @@ static int __init apm_init(void)
 	}
 #endif
 
-	ent = create_proc_entry("apm", 0, 0);
-	if (ent != NULL)
-		ent->get_info = apm_get_info;
+ 	create_proc_info_entry("apm", 0, 0, apm_get_info);
 
 	misc_register(&apm_device);
 
