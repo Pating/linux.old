@@ -13,6 +13,7 @@
 #include <linux/suspend.h>
 #include <linux/root_dev.h>
 #include <linux/mount.h>
+#include <linux/security.h>
 
 #include <linux/nfs_fs.h>
 #include <linux/nfs_fs_sb.h>
@@ -595,7 +596,8 @@ static int __init rd_load_image(char *from)
 
 #ifdef CONFIG_BLK_DEV_RAM
 	int in_fd, out_fd;
-	int nblocks, rd_blocks, devblocks, i;
+	unsigned long rd_blocks, devblocks;
+	int nblocks, i;
 	char *buf;
 	unsigned short rotate = 0;
 #if !defined(CONFIG_ARCH_S390) && !defined(CONFIG_PPC_ISERIES)
@@ -887,7 +889,7 @@ out:
 	sys_umount("/dev", 0);
 	sys_mount(".", "/", NULL, MS_MOVE, NULL);
 	sys_chroot(".");
-	security_ops->sb_post_mountroot();
+	security_sb_post_mountroot();
 	mount_devfs_fs ();
 }
 
