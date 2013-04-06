@@ -996,13 +996,6 @@ nfsd_rename(struct svc_rqst *rqstp, struct svc_fh *ffhp, char *fname, int flen,
 	    (tlen == 1 || (tlen == 2 && tname[1] == '.'))))
 		goto out;
 
-	err = -EXDEV;
-	if (fdir->i_dev != tdir->i_dev)
-		goto out_nfserr;
-	err = -EPERM;
-	if (!fdir->i_op || !fdir->i_op->rename)
-		goto out_nfserr;
-
 	odentry = lookup_dentry(fname, dget(fdentry), 0);
 	err = PTR_ERR(odentry);
 	if (IS_ERR(odentry))
@@ -1019,9 +1012,7 @@ nfsd_rename(struct svc_rqst *rqstp, struct svc_fh *ffhp, char *fname, int flen,
 	nfsd_double_down(&tdir->i_sem, &fdir->i_sem);
 	/* N.B. check for parent changes after locking?? */
 
-	DQUOT_INIT(fdir);
-	DQUOT_INIT(tdir);
-	err = fdir->i_op->rename(fdir, odentry, tdir, ndentry);
+	err = vfs_rename(fdir, odentry, tdir, ndentry);
 	if (!err && EX_ISSYNC(tfhp->fh_export)) {
 		write_inode_now(fdir);
 		write_inode_now(tdir);
@@ -1072,29 +1063,43 @@ nfsd_unlink(struct svc_rqst *rqstp, struct svc_fh *fhp, int type,
 	if (IS_ERR(rdentry))
 		goto out_nfserr;
 
-	/*
-	 * FIXME!!
-	 *
-	 * This should do a double-lock on both rdentry and the parent
-	 */
-	err = fh_lock_parent(fhp, rdentry);
-	if (err)
-		goto out;
+	if (type != S_IFDIR) {
+		/* It's UNLINK */
+		err = fh_lock_parent(fhp, rdentry);
+		if (err)
+			goto out;
 
-	DQUOT_INIT(dirp);
-	if (type == S_IFDIR) {
-		err = -ENOTDIR;
-		if (dirp->i_op && dirp->i_op->rmdir)
-			err = dirp->i_op->rmdir(dirp, rdentry);
+		err = vfs_unlink(dirp, rdentry);
+
+		DQUOT_DROP(dirp);
+		fh_unlock(fhp);
+
+		dput(rdentry);
+
 	} else {
-		err = -EPERM;
-		if (dirp->i_op && dirp->i_op->unlink)
-			err = dirp->i_op->unlink(dirp, rdentry);
-	}
-	DQUOT_DROP(dirp);
-	fh_unlock(fhp);
+		/* It's RMDIR */
+		/* See comments in fs/namei.c:do_rmdir */
+		rdentry->d_count++;
+		nfsd_double_down(&dirp->i_sem, &rdentry->d_inode->i_sem);
+		if (!fhp->fh_pre_mtime)
+			fhp->fh_pre_mtime = dirp->i_mtime;
+		fhp->fh_locked = 1;
+		/* CHECKME: Should we do something with the child? */
 
-	dput(rdentry);
+		err = -ENOENT;
+		if (rdentry->d_parent->d_inode == dirp)
+			err = vfs_rmdir(dirp, rdentry);
+
+		rdentry->d_count--;
+		DQUOT_DROP(dirp);
+		if (!fhp->fh_post_version)
+			fhp->fh_post_version = dirp->i_version;
+		fhp->fh_locked = 0;
+		nfsd_double_up(&dirp->i_sem, &rdentry->d_inode->i_sem);
+
+		dput(rdentry);
+	}
+
 	if (err)
 		goto out_nfserr;
 	if (EX_ISSYNC(fhp->fh_export))

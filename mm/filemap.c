@@ -118,50 +118,58 @@ void remove_inode_page(struct page *page)
 	__free_page(page);
 }
 
-/*
- * Check whether we can free this page.
- */
-static inline int shrink_one_page(struct page *page, int gfp_mask)
+int shrink_mmap(int priority, int gfp_mask)
 {
-	struct buffer_head *tmp, *bh;
+	static unsigned long clock = 0;
+	unsigned long limit = num_physpages;
+	struct page * page;
+	int count;
 
-	if (PageLocked(page))
-		goto next;
-	if ((gfp_mask & __GFP_DMA) && !PageDMA(page))
-		goto next;
-	/* First of all, regenerate the page's referenced bit
-         * from any buffers in the page
-	 */
-	bh = page->buffers;
-	if (bh) {
-		tmp = bh;
-		do {
-			if (buffer_touched(tmp)) {
-				clear_bit(BH_Touched, &tmp->b_state);
-				set_bit(PG_referenced, &page->flags);
-			}
-			tmp = tmp->b_this_page;
-		} while (tmp != bh);
+	count = (limit<<1) >> (priority);
 
-		/* Refuse to swap out all buffer pages */
-		if (buffer_under_min())
-			goto next;
-	}
+	page = mem_map + clock;
+	do {
+		page++;
+		clock++;
+		if (clock >= max_mapnr) {
+			clock = 0;
+			page = mem_map;
+		}
+		if (PageSkip(page)) {
+			/* next_hash is overloaded for PageSkip */
+			page = page->next_hash;
+			clock = page->map_nr;
+		}
+		
+		if (test_and_clear_bit(PG_referenced, &page->flags))
+			continue;
 
-	/* We can't throw away shared pages, but we do mark
-	   them as referenced.  This relies on the fact that
-	   no page is currently in both the page cache and the
-	   buffer cache; we'd have to modify the following
-	   test to allow for that case. */
+		/* Decrement count only for non-referenced pages */
+		count--;
+		if (PageLocked(page))
+			continue;
 
-	switch (atomic_read(&page->count)) {
-	case 1:
+		if ((gfp_mask & __GFP_DMA) && !PageDMA(page))
+			continue;
+
+		/* We can't free pages unless there's just one user */
+		if (atomic_read(&page->count) != 1)
+			continue;
+
+		/* Is it a buffer page? */
+		if (page->buffers) {
+			struct buffer_head *bh = page->buffers;
+			if (buffer_under_min())
+				continue;
+			if (!try_to_free_buffer(bh, &bh))
+				continue;
+			return 1;
+		}
+
 		/* is it a swap-cache or page-cache page? */
 		if (page->inode) {
-			if (test_and_clear_bit(PG_referenced, &page->flags))
-				break;
 			if (pgcache_under_min())
-				break;
+				continue;
 			if (PageSwapCache(page)) {
 				delete_from_swap_cache(page);
 				return 1;
@@ -169,68 +177,8 @@ static inline int shrink_one_page(struct page *page, int gfp_mask)
 			remove_inode_page(page);
 			return 1;
 		}
-		/* It's not a cache page, so we don't do aging.
-		 * If it has been referenced recently, don't free it */
-		if (test_and_clear_bit(PG_referenced, &page->flags))
-			break;
 
-		if (buffer_under_min())
-			break;
-
-		/* is it a buffer cache page? */
-		if (bh && try_to_free_buffer(bh, &bh, 6))
-			return 1;
-		break;
-
-	default:
-		/* more than one user: we can't throw it away */
-		set_bit(PG_referenced, &page->flags);
-		/* fall through */
-	case 0:
-		/* nothing */
-	}
-next:
-	return 0;
-}
-
-int shrink_mmap(int priority, int gfp_mask)
-{
-	static unsigned long clock = 0;
-	unsigned long limit = num_physpages;
-	struct page * page;
-	int count_max, count_min;
-
-	count_max = limit;
-	count_min = (limit<<2) >> (priority);
-
-	page = mem_map + clock;
-	do {
-		if (PageSkip(page)) {
-			/* next_hash is overloaded for PageSkip */
-			page = page->next_hash;
-			clock = page->map_nr;
-		}
-		
-		if (shrink_one_page(page, gfp_mask))
-			return 1;
-		count_max--;
-		/* 
-		 * If the page we looked at was recyclable but we didn't
-		 * reclaim it (presumably due to PG_referenced), don't
-		 * count it as scanned.  This way, the more referenced
-		 * page cache pages we encounter, the more rapidly we
-		 * will age them. 
-		 */
-		if (atomic_read(&page->count) != 1 ||
-		    (!page->inode && !page->buffers))
-			count_min--;
-		page++;
-		clock++;
-		if (clock >= max_mapnr) {
-			clock = 0;
-			page = mem_map;
-		}
-	} while (count_max > 0 && count_min > 0);
+	} while (count > 0);
 	return 0;
 }
 
@@ -974,7 +922,7 @@ static unsigned long filemap_nopage(struct vm_area_struct * area, unsigned long 
 	struct file * file = area->vm_file;
 	struct dentry * dentry = file->f_dentry;
 	struct inode * inode = dentry->d_inode;
-	unsigned long offset;
+	unsigned long offset, reada, i;
 	struct page * page, **hash;
 	unsigned long old_page, new_page;
 
@@ -1035,7 +983,18 @@ success:
 	return new_page;
 
 no_cached_page:
-	new_page = __get_free_page(GFP_USER);
+	/*
+	 * Try to read in an entire cluster at once.
+	 */
+	reada   = offset;
+	reada >>= PAGE_SHIFT + page_cluster;
+	reada <<= PAGE_SHIFT + page_cluster;
+
+	for (i = 1 << page_cluster; i > 0; --i, reada += PAGE_SIZE)
+		new_page = try_to_read_ahead(file, reada, new_page);
+
+	if (!new_page)
+		new_page = __get_free_page(GFP_USER);
 	if (!new_page)
 		goto no_page;
 
@@ -1059,11 +1018,6 @@ no_cached_page:
 	if (inode->i_op->readpage(file, page) != 0)
 		goto failure;
 
-	/*
-	 * Do a very limited read-ahead if appropriate
-	 */
-	if (PageLocked(page))
-		new_page = try_to_read_ahead(file, offset + PAGE_SIZE, 0);
 	goto found_page;
 
 page_locked_wait:
@@ -1637,7 +1591,7 @@ unsigned long get_cached_page(struct inode * inode, unsigned long offset,
 	if (!page) {
 		if (!new)
 			goto out;
-		page_cache = get_free_page(GFP_KERNEL);
+		page_cache = get_free_page(GFP_USER);
 		if (!page_cache)
 			goto out;
 		page = mem_map + MAP_NR(page_cache);

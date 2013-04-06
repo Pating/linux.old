@@ -1416,12 +1416,6 @@ static int vfat_rmdir_free_ino(struct inode *dir,struct buffer_head *bh,
 	struct super_block *sb = dir->i_sb;
 	int res;
 
-	if (!S_ISDIR(dentry->d_inode->i_mode)) {
-		return -ENOTDIR;
-	}
-	if (dir->i_dev != dentry->d_inode->i_dev || dir == dentry->d_inode) {
-		return -EBUSY;
-	}
 	if (!list_empty(&dentry->d_hash))
 		return -EBUSY;
 
@@ -1814,6 +1808,10 @@ int vfat_rename(struct inode *old_dir,struct dentry *old_dentry,
 
 	if (res == 0) {
 		drop_replace_inodes(old_dentry, new_inode);
+		list_del(&old_dentry->d_alias);
+		iput(old_dentry->d_inode);
+		d_instantiate(old_dentry, new_inode);
+
 		d_move(old_dentry, new_dentry);
 		put_new_inode = 0;
 	}

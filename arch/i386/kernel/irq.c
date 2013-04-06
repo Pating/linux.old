@@ -335,16 +335,17 @@ static void show(char * str)
 	int i;
 	unsigned long *stack;
 	int cpu = smp_processor_id();
+	extern char *get_options(char *str, int *ints);
 
 	printk("\n%s, CPU %d:\n", str, cpu);
 	printk("irq:  %d [%d %d]\n",
 		atomic_read(&global_irq_count), local_irq_count[0], local_irq_count[1]);
 	printk("bh:   %d [%d %d]\n",
 		atomic_read(&global_bh_count), local_bh_count[0], local_bh_count[1]);
-	stack = (unsigned long *) &str;
+	stack = (unsigned long *) &stack;
 	for (i = 40; i ; i--) {
 		unsigned long x = *++stack;
-		if (x > (unsigned long) &init_task_union && x < (unsigned long) &vsprintf) {
+		if (x > (unsigned long) &get_options && x < (unsigned long) &vsprintf) {
 			printk("<[%08lx]> ", x);
 		}
 	}
@@ -691,8 +692,10 @@ void disable_irq(unsigned int irq)
 	unsigned long flags;
 
 	spin_lock_irqsave(&irq_controller_lock, flags);
-	irq_desc[irq].status |= IRQ_DISABLED;
-	irq_desc[irq].handler->disable(irq);
+	if (!irq_desc[irq].depth++) {
+		irq_desc[irq].status |= IRQ_DISABLED;
+		irq_desc[irq].handler->disable(irq);
+	}
 	spin_unlock_irqrestore(&irq_controller_lock, flags);
 
 	if (irq_desc[irq].status & IRQ_INPROGRESS)
@@ -704,16 +707,18 @@ void enable_irq(unsigned int irq)
 	unsigned long flags;
 
 	spin_lock_irqsave(&irq_controller_lock, flags);
-	/*
-	 * In contrast to the above, we should _not_ have any concurrent
-	 * interrupt activity here, so we just clear both disabled bits.
-	 *
-	 * This allows us to have IRQ_INPROGRESS set until we actually
-	 * install a handler for this interrupt (make irq autodetection
-	 * work by just looking at the status field for the irq)
-	 */
-	irq_desc[irq].status &= ~(IRQ_DISABLED | IRQ_INPROGRESS);
-	irq_desc[irq].handler->enable(irq);
+	switch (irq_desc[irq].depth) {
+	case 1:
+		irq_desc[irq].status &= ~IRQ_DISABLED;
+		irq_desc[irq].handler->enable(irq);
+		/* fall throught */
+	default:
+		irq_desc[irq].depth--;
+		break;
+	case 0:
+		printk("enable_irq() unbalanced from %p\n",
+		       __builtin_return_address(0));
+	}
 	spin_unlock_irqrestore(&irq_controller_lock, flags);
 }
 
@@ -798,6 +803,7 @@ int setup_x86_irq(unsigned int irq, struct irqaction * new)
 	*p = new;
 
 	if (!shared) {
+		irq_desc[irq].depth = 0;
 		irq_desc[irq].status &= ~(IRQ_DISABLED | IRQ_INPROGRESS);
 		irq_desc[irq].handler->startup(irq);
 	}

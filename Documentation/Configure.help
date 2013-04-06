@@ -798,6 +798,16 @@ CONFIG_PARIDE_FIT3
   called fit3.o. You must also have a high-level driver for the type
   of device that you want to support.
 
+Freecom IQ ASIC-2 protocol
+CONFIG_PARIDE_FRIQ
+  This option enables support for version 2 of the Freecom IQ parallel
+  port IDE adapter.  This adapter is used by the Maxell Superdisk 
+  drive.  If you chose to build PARIDE support into your kernel, you
+  may answer Y here to build in the protocol driver, otherwise you
+  should answer M to build it as a loadable module. The module will be
+  called friq.o. You must also have a high-level driver for the type
+  of device that you want to support. 
+
 FreeCom power protocol
 CONFIG_PARIDE_FRPW
   This option enables support for the Freecom power parallel port IDE
@@ -1767,7 +1777,7 @@ CONFIG_FB_MATROX
 
 Matrox Millennium support
 CONFIG_FB_MATROX_MILLENIUM
-  Say Y here if you have Matrox Millennium  or Matrox Milleninium II in 
+  Say Y here if you  have Matrox Millennium  or Matrox Millennium II in 
   the box. If you select "Advanced lowlevel driver options", you should 
   check 4 bpp packed pixel, 8 bpp packed pixel, 16 bpp packed pixel, 24
   bpp  packed pixel  and 32  bpp packed  pixel. You  can also  use font 
@@ -1783,13 +1793,10 @@ CONFIG_FB_MATROX_MYSTIQUE
 
 Matrox G100 support
 CONFIG_FB_MATROX_G100
-  Say Y here  if you have  Matrox Productiva G100  in the box. But THIS 
-  DRIVER  IS NOT  TESTED BECAUSE  OF I  HAVE NO  G100  board  and  G100 
-  technical sheets  are top secret at this time.  But driver should not 
-  cause any damage to your computer.
-  If you select  "Advanced lowlevel  driver options",  you should check
-  8 bpp  packed pixel,  16 bpp  packed pixel,  24 bpp  packed pixel and 
-  32 bpp packed pixel. You can also use font widths different from 8.
+  Say Y  here if  you have  Matrox Productiva G100  in the box.  If you
+  select  "Advanced lowlevel  driver options",  you should  check 8 bpp
+  packed pixel,  16 bpp packed  pixel, 24 bpp  packed pixel  and 32 bpp
+  packed pixel. You can also use font widths different from 8.
 
 Matrox unified driver multihead support
 CONFIG_FB_MATROX_MULTIHEAD
@@ -7417,6 +7424,21 @@ CONFIG_NLS_ISO8859_10
   set, which adds the last Inuit (Greenlandic) and Sami (Lappish)
   letters that were missing in Latin 4 to cover the entire Nordic
   area.
+
+nls iso8859-15
+CONFIG_NLS_ISO8859_15
+  If you want to display filenames with native language characters
+  from the Microsoft fat filesystem family or from JOLIET CDROMs
+  correctly on the screen, you need to include the appropriate
+  input/output character sets. Say Y here for the Latin 9 character
+  set, which covers most West European languages such as Albanian,
+  Catalan, Danish, Dutch, English, Estonian, Faeroese, Finnish,
+  French, German, Galician, Irish, Icelandic, Italian, Norwegian,
+  Portuguese, Spanish, Swedish, and Valencian. Latin 9 is an update to
+  Latin 1 (ISO 8859-1) that removes a handful of rarely used
+  characters and instead adds support for Estonian, corrects the
+  support for French and Finnish, and adds the new Euro character.  If
+  unsure, say Y.
 
 nls koi8-r
 CONFIG_NLS_KOI8_R

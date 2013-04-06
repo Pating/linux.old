@@ -30,6 +30,8 @@
  *  Leonard N. Zubkoff <lnz@dandelion.com>
  *
  *  Converted cli() code to spinlocks, Ingo Molnar
+ *
+ *  Jiffies wrap fixes (host->resetting), 3 Dec 1998 Andrea Arcangeli
  */
 
 #include <linux/config.h>
@@ -521,9 +523,18 @@ static void scan_scsis (struct Scsi_Host *shpnt,
 
   }
   else {
+    /* Actual LUN. PC ordering is 0->n IBM/spec ordering is n->0 */
+    int order_dev;
+    
     for (channel = 0; channel <= shpnt->max_channel; channel++) {
       for (dev = 0; dev < shpnt->max_id; ++dev) {
-        if (shpnt->this_id != dev) {
+        if( shpnt->reverse_ordering)
+        	/* Shift to scanning 15,14,13... or 7,6,5,4, */
+        	order_dev = shpnt->max_channel-dev-1;
+        else
+        	order_dev = dev;
+        	
+        if (shpnt->this_id != order_dev) {
 
           /*
            * We need the for so our continue, etc. work fine. We put this in
@@ -534,7 +545,7 @@ static void scan_scsis (struct Scsi_Host *shpnt,
                          max_scsi_luns : shpnt->max_lun);
 	  sparse_lun = 0;
           for (lun = 0; lun < max_dev_lun; ++lun) {
-            if (!scan_scsis_single (channel, dev, lun, &max_dev_lun,
+            if (!scan_scsis_single (channel, order_dev, lun, &max_dev_lun,
 				    &sparse_lun, &SDpnt, SCpnt, shpnt,
 				    scsi_result)
 		&& !sparse_lun)
@@ -1297,7 +1308,7 @@ inline int internal_cmnd (Scsi_Cmnd * SCpnt)
      */
     timeout = host->last_reset + MIN_RESET_DELAY;
 
-    if (jiffies < timeout) {
+    if (host->resetting && time_before(jiffies, timeout)) {
 	int ticks_remaining = timeout - jiffies;
 	/*
 	 * NOTE: This may be executed from within an interrupt
@@ -1310,7 +1321,7 @@ inline int internal_cmnd (Scsi_Cmnd * SCpnt)
 	 */
 	spin_unlock_irq(&io_request_lock);
 	while (--ticks_remaining >= 0) mdelay(1+999/HZ);
-	host->last_reset = jiffies - MIN_RESET_DELAY;
+	host->resetting = 0;
 	spin_lock_irq(&io_request_lock);
     }
 
@@ -1367,7 +1378,7 @@ inline int internal_cmnd (Scsi_Cmnd * SCpnt)
 #ifdef DEBUG_DELAY
 	clock = jiffies + 4 * HZ;
 	spin_unlock_irq(&io_request_lock);
-	while (jiffies < clock) barrier();
+	while (time_before(jiffies, clock)) barrier();
 	spin_lock_irq(&io_request_lock);
 	printk("done(host = %d, result = %04x) : routine at %p\n",
 	       host->host_no, temp, host->hostt->command);
@@ -2743,7 +2754,7 @@ static void scsi_unregister_host(Scsi_Host_Template * tpnt)
         {
             if(SDpnt->host->hostt == tpnt 
                && SDpnt->host->hostt->module
-               && SDpnt->host->hostt->module->usecount) return;
+               && GET_USE_COUNT(SDpnt->host->hostt->module)) return;
             /* 
              * FIXME(eric) - We need to find a way to notify the
              * low level driver that we are shutting down - via the
@@ -3032,7 +3043,7 @@ static int scsi_unregister_device(struct Scsi_Device_Template * tpnt)
     /*
      * If we are busy, this is not going to fly.
      */
-    if(tpnt->module->usecount != 0) return 0;
+    if(GET_USE_COUNT(tpnt->module) != 0) return 0;
 
     /*
      * Next, detach the devices from the driver.

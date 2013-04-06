@@ -23,12 +23,10 @@
  *
  *
  * Module command line parameters:
- *   joystick if 1 enables the joystick interface on the card; but it still
- *            needs a separate joystick driver (presumably PC standard, although
- *            the chip doc doesn't say anything and it looks slightly fishy from
- *            the PCI standpoint...)
- *
- *
+ *   joystick must be set to the base I/O-Port to be used for
+ *   the gameport. Legal values are 0x200, 0x208, 0x210 and 0x218.         
+ *   The gameport is mirrored eight times.
+ *        
  *  Supported devices:
  *  /dev/dsp    standard /dev/dsp device, (mostly) OSS compatible
  *  /dev/mixer  standard /dev/mixer device, (mostly) OSS compatible
@@ -49,11 +47,15 @@
  *                     Now mixer behaviour can basically be selected between
  *                     "OSS documented" and "OSS actual" behaviour
  *    31.08.98   0.4   Fix realplayer problems - dac.count issues
+ *    27.10.98   0.5   Fix joystick support
+ *                     -- Oliver Neukum (c188@org.chemie.uni-muenchen.de)
+ *    10.12.98   0.6   Fix drain_dac trying to wait on not yet initialized DMA
  *
  */
 
 /*****************************************************************************/
       
+#include <linux/config.h>
 #include <linux/version.h>
 #include <linux/module.h>
 #include <linux/string.h>
@@ -1443,7 +1445,7 @@ static int drain_dac1(struct es1371_state *s, int nonblock)
 	unsigned long flags;
 	int count, tmo;
 	
-	if (s->dma_dac1.mapped)
+	if (s->dma_dac1.mapped || !s->dma_dac1.ready)
 		return 0;
         current->state = TASK_INTERRUPTIBLE;
         add_wait_queue(&s->dma_dac1.wait, &wait);
@@ -1478,7 +1480,7 @@ static int drain_dac2(struct es1371_state *s, int nonblock)
 	unsigned long flags;
 	int count, tmo;
 
-	if (s->dma_dac2.mapped)
+	if (s->dma_dac2.mapped || !s->dma_dac2.ready)
 		return 0;
         current->state = TASK_INTERRUPTIBLE;
         add_wait_queue(&s->dma_dac2.wait, &wait);
@@ -2672,7 +2674,13 @@ static /*const*/ struct file_operations es1371_midi_fops = {
 /* maximum number of devices */
 #define NR_DEVICE 5
 
+#if CONFIG_SOUND_ES1371_JOYPORT_BOOT
+static int joystick[NR_DEVICE] = { 
+CONFIG_SOUND_ES1371_GAMEPORT
+, 0, };
+#else
 static int joystick[NR_DEVICE] = { 0, };
+#endif
 
 /* --------------------------------------------------------------------- */
 
@@ -2708,7 +2716,7 @@ __initfunc(int init_es1371(void))
 
 	if (!pci_present())   /* No PCI bus in this machine! */
 		return -ENODEV;
-	printk(KERN_INFO "es1371: version v0.4 time " __TIME__ " " __DATE__ "\n");
+	printk(KERN_INFO "es1371: version v0.6 time " __TIME__ " " __DATE__ "\n");
 	while (index < NR_DEVICE && 
 	       (pcidev = pci_find_device(PCI_VENDOR_ID_ENSONIQ, PCI_DEVICE_ID_ENSONIQ_ES1371, pcidev))) {
 		if (pcidev->base_address[0] == 0 || 
@@ -2758,7 +2766,6 @@ __initfunc(int init_es1371(void))
 				printk(KERN_ERR "es1371: joystick address 0x%x already in use\n", joystick[index]);
 			else {
 				s->ctrl |= CTRL_JYSTK_EN | (((joystick[index] >> 3) & CTRL_JOY_MASK) << CTRL_JOY_SHIFT);
-				request_region(joystick[index], JOY_EXTENT, "es1371");
 			}
 		}
 		s->sctrl = 0;
@@ -2880,8 +2887,6 @@ void cleanup_module(void)
 		synchronize_irq();
 		free_irq(s->irq, s);
 		release_region(s->io, ES1371_EXTENT);
-		if (s->ctrl & CTRL_JYSTK_EN)
-			release_region(((((s->ctrl >> CTRL_JOY_SHIFT) & CTRL_JOY_MASK) << 3) | 0x200), JOY_EXTENT);
 		unregister_sound_dsp(s->dev_audio);
 		unregister_sound_mixer(s->dev_mixer);
 		unregister_sound_dsp(s->dev_dac);
