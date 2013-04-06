@@ -1,4 +1,4 @@
-/* $Id: process.c,v 1.5 2000/01/29 01:41:59 ralf Exp $
+/* $Id: process.c,v 1.4 2000/01/16 01:34:01 ralf Exp $
  *
  * This file is subject to the terms and conditions of the GNU General Public
  * License.  See the file "COPYING" in the main directory of this archive
@@ -33,6 +33,7 @@
 asmlinkage int cpu_idle(void)
 {
 	/* endless idle loop with no priority at all */
+	init_idle();
 	current->priority = 0;
 	current->counter = -100;
 	while (1) {
@@ -51,20 +52,20 @@ asmlinkage void ret_from_fork(void);
 void exit_thread(void)
 {
 	/* Forget lazy fpu state */
-	if (last_task_used_math == current) {
+	if (IS_FPU_OWNER()) {
 		set_cp0_status(ST0_CU1, ST0_CU1);
 		__asm__ __volatile__("cfc1\t$0,$31");
-		last_task_used_math = NULL;
+		CLEAR_FPU_OWNER();
 	}
 }
 
 void flush_thread(void)
 {
 	/* Forget lazy fpu state */
-	if (last_task_used_math == current) {
+	if (IS_FPU_OWNER()) {
 		set_cp0_status(ST0_CU1, ST0_CU1);
 		__asm__ __volatile__("cfc1\t$0,$31");
-		last_task_used_math = NULL;
+		CLEAR_FPU_OWNER();
 	}
 }
 
@@ -76,8 +77,7 @@ int copy_thread(int nr, unsigned long clone_flags, unsigned long usp,
 
 	childksp = (unsigned long)p + KERNEL_STACK_SIZE - 32;
 
-	if (last_task_used_math == current) {
-		set_cp0_status(ST0_CU1, ST0_CU1);
+	if (IS_FPU_OWNER()) {
 		save_fp(p);
 	}
 	/* set up new TSS. */
