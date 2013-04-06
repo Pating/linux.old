@@ -28,9 +28,22 @@
 #include <asm/unaligned.h>
 #include <asm/semaphore.h>
 #include <asm/spinlock.h>
-#include <asm/namei.h>
 #include <asm/page.h>
 #include <asm/pgtable.h>
+
+/*
+ * The bitmask for a lookup event:
+ *  - follow links at the end
+ *  - require a directory
+ *  - ending slashes ok even for nonexistent files
+ *  - internal "there are more path compnents" flag
+ */
+#define LOOKUP_FOLLOW		(1)
+#define LOOKUP_DIRECTORY	(2)
+#define LOOKUP_SLASHOK		(4)
+#define LOOKUP_CONTINUE		(8)
+
+#include <asm/namei.h>
 
 /* This can be removed after the beta phase. */
 #define CACHE_SUPERVISE	/* debug the correctness of dcache entries */
@@ -282,18 +295,6 @@ static struct dentry * real_lookup(struct dentry * parent, struct qstr * name)
 	return result;
 }
 
-/*
- * The bitmask for a lookup event:
- *  - follow links at the end
- *  - require a directory
- *  - ending slashes ok even for nonexistent files
- *  - internal "there are more path compnents" flag
- */
-#define LOOKUP_FOLLOW		(1)
-#define LOOKUP_DIRECTORY	(2)
-#define LOOKUP_SLASHOK		(4)
-#define LOOKUP_CONTINUE		(8)
-
 static struct dentry * do_follow_link(struct dentry *base, struct dentry *dentry, unsigned int follow)
 {
 	struct inode * inode = dentry->d_inode;
@@ -342,10 +343,10 @@ struct dentry * lookup_dentry(const char * name, struct dentry * base, unsigned 
 	if (*name == '/') {
 		if (base)
 			dput(base);
-		base = dget(current->fs->root);
 		do {
 			name++;
 		} while (*name == '/');
+		base = dget(current->fs->root);
 	} else if (!base) {
 		base = dget(current->fs->pwd);
 	}
@@ -626,7 +627,7 @@ struct dentry * open_namei(const char * pathname, int flag, int mode)
 	if (!inode)
 		goto exit;
 
-	error = -EACCES;
+	error = -ELOOP;
 	if (S_ISLNK(inode->i_mode))
 		goto exit;
 	
@@ -1195,7 +1196,7 @@ static inline int do_rename(const char * oldname, const char * newname)
 
 	error = -ENOENT;
 	if (!old_dentry->d_inode)
-		goto exit;
+		goto exit_old;
 
 	{
 		unsigned int flags = 0;

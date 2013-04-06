@@ -186,6 +186,12 @@ W:	http://qsl.net/dl1bke/
 L:	linux-hams@vger.rutgers.edu
 S:	Maintained
 
+DC390/AM53C974 SCSI driver
+P:	Kurt Garloff
+M:	K.Garloff@ping.de
+W:	ftp://student.physik.uni-dortmund.de/pub/linux/kernel/dc390/
+S:	Maintained
+
 DECnet NETWORK LAYER
 P:	Steven Whitehouse
 M:	SteveW@ACM.org
@@ -328,8 +334,10 @@ L:	linux-kernel@vger.rutgers.edu
 S:	Odd Fixes
 
 IDE/ATAPI CDROM DRIVER 
-P:	Erik Andersen
-M:	andersee@debian.org
+P:	Jens Axboe
+M:	axboe@image.dk
+P:	Chris Zwilling
+M:	chris@cloudnet.com
 L:	linux-kernel@vger.rutgers.edu
 S:	Maintained
 
@@ -671,8 +679,10 @@ L:	linux-kernel@vger.rutgers.edu
 S:	Maintained
 
 UNIFORM CDROM DRIVER 
-P:	Erik Andersen
-M:	andersee@debian.org
+P:	Jens Axboe
+M:	axboe@image.dk
+P:	Chris Zwilling
+M:	chris@cloudnet.com
 L:	linux-kernel@vger.rutgers.edu
 S:	Maintained
 

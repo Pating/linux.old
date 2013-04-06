@@ -56,7 +56,7 @@ unsigned char pckbd_sysrq_xlate[128] =
 
 static void kbd_write(int address, int data);
 
-static spinlock_t kbd_controller_lock = SPIN_LOCK_UNLOCKED;
+spinlock_t kbd_controller_lock = SPIN_LOCK_UNLOCKED;
 
 /* used only by send_data - set by keyboard_interrupt */
 static volatile unsigned char reply_expected = 0;
@@ -904,10 +904,18 @@ static struct miscdevice psaux_mouse = {
 
 static int __init psaux_init(void)
 {
+#if 0
+	/*
+	 * Don't bother with the BIOS flag: even if we don't have
+	 * a mouse connected at bootup we may still want to connect
+	 * one later, and we don't want to just let the BIOS tell
+	 * us that it has no mouse..
+	 */
 	if (aux_device_present != 0xaa)
 		return -EIO;
 
 	printk(KERN_INFO "PS/2 auxiliary pointing device detected -- driver installed.\n");
+#endif
 	misc_register(&psaux_mouse);
 	queue = (struct aux_queue *) kmalloc(sizeof(*queue), GFP_KERNEL);
 	memset(queue, 0, sizeof(*queue));

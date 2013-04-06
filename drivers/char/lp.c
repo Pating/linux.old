@@ -162,17 +162,17 @@ static __inline__ void lp_yield (int minor)
 		lp_table[minor].irq_missed = 1;
 }
 
-static __inline__ void lp_schedule(int minor)
+static __inline__ void lp_schedule(int minor, long timeout)
 {
 	struct pardevice *dev = lp_table[minor].dev;
 	register unsigned long int timeslip = (jiffies - dev->time);
 	if ((timeslip > dev->timeslice) && (dev->port->waithead != NULL)) {
 		lp_parport_release(minor);
 		lp_table[minor].irq_missed = 1;
-		schedule ();
+		schedule_timeout(timeout);
 		lp_parport_claim(minor);
 	} else
-		schedule();
+		schedule_timeout(timeout);
 }
 
 static int lp_reset(int minor)
@@ -269,9 +269,8 @@ static void lp_error(int minor)
 {
 	if (LP_POLLED(minor) || LP_PREEMPTED(minor)) {
 		current->state = TASK_INTERRUPTIBLE;
-		current->timeout = jiffies + LP_TIMEOUT_POLLED;
 		lp_parport_release(minor);
-		schedule();
+		schedule_timeout(LP_TIMEOUT_POLLED);
 		lp_parport_claim(minor);
 		lp_table[minor].irq_missed = 1;
 	}
@@ -381,8 +380,7 @@ static int lp_write_buf(unsigned int minor, const char *buf, int count)
 					printk(KERN_DEBUG "lp%d sleeping at %d characters for %d jiffies\n", minor, lp->runchars, LP_TIME(minor));
 #endif
 					current->state = TASK_INTERRUPTIBLE;
-					current->timeout = jiffies + LP_TIME(minor);
-					lp_schedule (minor);
+					lp_schedule(minor, LP_TIME(minor));
 				} else {
 					cli();
 					if (LP_PREEMPTED(minor))
@@ -399,8 +397,7 @@ static int lp_write_buf(unsigned int minor, const char *buf, int count)
 					}
 					if (!lp_table[minor].irq_detected)
 					{
-						current->timeout = jiffies + LP_TIMEOUT_INTERRUPT;
-						interruptible_sleep_on(&lp->wait_q);
+						interruptible_sleep_on_timeout(&lp->wait_q, LP_TIMEOUT_INTERRUPT);
 					}
 					sti();
 				}
@@ -535,8 +532,7 @@ static ssize_t lp_read(struct file * file, char * buf,
 					return -EINTR;
 			}
 			current->state=TASK_INTERRUPTIBLE;
-			current->timeout=jiffies + LP_TIME(minor);
-			schedule ();
+			schedule_timeout(LP_TIME(minor));
 		}
 
 		counter=0;

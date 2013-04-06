@@ -14,6 +14,7 @@
  * Copyright (C) 1995, 1996, 1997 Olaf Kirch <okir@monad.swb.de>
  */
 
+#include <linux/config.h>
 #include <linux/version.h>
 #include <linux/sched.h>
 #include <linux/errno.h>
@@ -554,13 +555,10 @@ nfsd_write(struct svc_rqst *rqstp, struct svc_fh *fhp, loff_t offset,
 		if (EX_WGATHER(exp) && (inode->i_writecount > 1
 		 || (last_ino == inode->i_ino && last_dev == inode->i_dev))) {
 #if 0
-			current->timeout = jiffies + 10 * HZ / 1000;
-			interruptible_sleep_on(&inode->i_wait);
+			interruptible_sleep_on_timeout(&inode->i_wait, 10 * HZ / 1000);
 #else
 			dprintk("nfsd: write defer %d\n", current->pid);
-			current->need_resched = 1;
-			current->timeout = jiffies + HZ / 100;
-			schedule();
+			schedule_timeout((HZ+99)/100);
 			dprintk("nfsd: write resume %d\n", current->pid);
 #endif
 		}

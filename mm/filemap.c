@@ -293,7 +293,7 @@ static inline void add_to_page_cache(struct page * page,
 	struct page **hash)
 {
 	atomic_inc(&page->count);
-	page->flags &= ~((1 << PG_uptodate) | (1 << PG_error));
+	page->flags = (page->flags & ~((1 << PG_uptodate) | (1 << PG_error))) | (1 << PG_referenced);
 	page->offset = offset;
 	add_page_to_inode_queue(inode, page);
 	__add_page_to_hash_queue(page, hash);
@@ -314,7 +314,7 @@ static unsigned long try_to_read_ahead(struct file * file,
 	offset &= PAGE_MASK;
 	switch (page_cache) {
 	case 0:
-		page_cache = __get_free_page(GFP_KERNEL);
+		page_cache = __get_free_page(GFP_USER);
 		if (!page_cache)
 			break;
 	default:
@@ -328,7 +328,6 @@ static unsigned long try_to_read_ahead(struct file * file,
 			 */
 			page = mem_map + MAP_NR(page_cache);
 			add_to_page_cache(page, inode, offset, hash);
-			set_bit(PG_referenced, &page->flags);
 			inode->i_op->readpage(file, page);
 			page_cache = 0;
 		}
@@ -737,7 +736,7 @@ no_cached_page:
 		 * page..
 		 */
 		if (!page_cache) {
-			page_cache = __get_free_page(GFP_KERNEL);
+			page_cache = __get_free_page(GFP_USER);
 			/*
 			 * That could have slept, so go around to the
 			 * very beginning..
@@ -1003,7 +1002,7 @@ found_page:
 	 * extra page -- better to overlap the allocation with the I/O.
 	 */
 	if (no_share && !new_page) {
-		new_page = __get_free_page(GFP_KERNEL);
+		new_page = __get_free_page(GFP_USER);
 		if (!new_page)
 			goto failure;
 	}
@@ -1040,7 +1039,7 @@ success:
 	return new_page;
 
 no_cached_page:
-	new_page = __get_free_page(GFP_KERNEL);
+	new_page = __get_free_page(GFP_USER);
 	if (!new_page)
 		goto no_page;
 
@@ -1570,7 +1569,7 @@ generic_file_write(struct file *file, const char *buf,
 		hash = page_hash(inode, pgpos);
 		if (!(page = __find_page(inode, pgpos, *hash))) {
 			if (!page_cache) {
-				page_cache = __get_free_page(GFP_KERNEL);
+				page_cache = __get_free_page(GFP_USER);
 				if (page_cache)
 					continue;
 				status = -ENOMEM;

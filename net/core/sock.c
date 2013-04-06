@@ -7,7 +7,7 @@
  *		handler for protocols to use and generic option handler.
  *
  *
- * Version:	$Id: sock.c,v 1.73 1998/10/03 16:08:10 freitag Exp $
+ * Version:	$Id: sock.c,v 1.75 1998/11/07 10:54:38 davem Exp $
  *
  * Authors:	Ross Biro, <bir7@leland.Stanford.Edu>
  *		Fred N. van Kempen, <waltje@uWalt.NL.Mugnet.ORG>
@@ -293,6 +293,10 @@ int sock_setsockopt(struct socket *sock, int level, int optname,
 		case SO_BINDTODEVICE:
 		{
 			char devname[IFNAMSIZ]; 
+
+			/* Sorry... */ 
+			if (!capable(CAP_NET_RAW)) 
+				return -EPERM; 
 
 			/* Bind this socket to a particular device like "eth0",
 			 * as specified in the passed interface name. If the
@@ -965,8 +969,7 @@ void sock_def_wakeup(struct sock *sk)
 
 void sock_def_error_report(struct sock *sk)
 {
-	if (!sk->dead) 
-	{
+	if (!sk->dead) {
 		wake_up_interruptible(sk->sleep);
 		sock_wake_async(sk->socket,0); 
 	}
@@ -974,8 +977,7 @@ void sock_def_error_report(struct sock *sk)
 
 void sock_def_readable(struct sock *sk, int len)
 {
-	if(!sk->dead)
-	{
+	if(!sk->dead) {
 		wake_up_interruptible(sk->sleep);
 		sock_wake_async(sk->socket,1);
 	}
@@ -983,11 +985,14 @@ void sock_def_readable(struct sock *sk, int len)
 
 void sock_def_write_space(struct sock *sk)
 {
-	if(!sk->dead)
-	{
+	/* Do not wake up a writer until he can make "significant"
+	 * progress.  --DaveM
+	 */
+	if(!sk->dead &&
+	   ((atomic_read(&sk->wmem_alloc) << 1) <= sk->sndbuf)) {
 		wake_up_interruptible(sk->sleep);
 
-		/* Should agree with poll, otherwise some programs break */ 
+		/* Should agree with poll, otherwise some programs break */
 		if (sock_writeable(sk))
 			sock_wake_async(sk->socket, 2);
 	}
