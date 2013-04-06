@@ -95,6 +95,8 @@ static int sg_ioctl(struct inode * inode,struct file * file,
 	return 0;
     case SG_GET_TIMEOUT:
 	return scsi_generics[dev].timeout;
+    case SG_EMULATED_HOST:
+    	return put_user(scsi_generics[dev].device->host->hostt->emulated, (int *) arg);
     default:
 	return scsi_ioctl(scsi_generics[dev].device, cmd_in, (void *) arg);
     }
@@ -226,7 +228,6 @@ static ssize_t sg_read(struct file *filp, char *buf,
     struct inode *inode = filp->f_dentry->d_inode;
     int dev=MINOR(inode->i_rdev);
     int i;
-    unsigned long flags;
     struct scsi_generic *device=&scsi_generics[dev];
 
     /*
@@ -250,22 +251,18 @@ static ssize_t sg_read(struct file *filp, char *buf,
     /*
      * Wait until the command is actually done.
      */
-    spin_lock_irqsave(&io_request_lock, flags);
     while(!device->pending || !device->complete)
     {
 	if (filp->f_flags & O_NONBLOCK)
 	{
-	    spin_unlock_irqrestore(&io_request_lock, flags);
 	    return -EAGAIN;
 	}
 	interruptible_sleep_on(&device->read_wait);
 	if (signal_pending(current))
 	{
-	    spin_unlock_irqrestore(&io_request_lock, flags);
 	    return -ERESTARTSYS;
 	}
     }
-    spin_unlock_irqrestore(&io_request_lock, flags);
 
     /*
      * Now copy the result back to the user buffer.
@@ -364,6 +361,7 @@ static void sg_command_done(Scsi_Cmnd * SCpnt)
 static ssize_t sg_write(struct file *filp, const char *buf, 
                         size_t count, loff_t *ppos)
 {
+    unsigned long	  flags;
     struct inode         *inode = filp->f_dentry->d_inode;
     int			  bsize,size,amt,i;
     unsigned char	  cmnd[MAX_COMMAND_SIZE];
@@ -531,9 +529,11 @@ static ssize_t sg_write(struct file *filp, const char *buf,
      * do not do any more here - when the interrupt arrives, we will
      * then do the post-processing.
      */
+    spin_lock_irqsave(&io_request_lock, flags);
     scsi_do_cmd (SCpnt,(void *) cmnd,
 		 (void *) device->buff,amt,
 		 sg_command_done,device->timeout,SG_DEFAULT_RETRIES);
+    spin_unlock_irqrestore(&io_request_lock, flags);
 
 #ifdef DEBUG
     printk("done cmd\n");
