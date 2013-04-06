@@ -130,18 +130,26 @@ struct iso9660_options{
 
 static int strnicmp(const char *s1, const char *s2, int len)
 {
-	int n = 0;
-	while (*s1 && *s2 && (tolower(*s1) == tolower(*s2))) {
-		s1++; s2++; n++;
-		if (n == len) return 0;
+	/* Yes, Virginia, it had better be unsigned */
+	unsigned char c1, c2;
+
+	c1 = 0;	c2 = 0;
+	while (len > 0) {
+		c1 = *s1; c2 = *s2;
+		s1++; s2++;
+		if (!c1)
+			break;
+		if (!c2)
+			break;
+		if (c1 == c2)
+			continue;
+		c1 = tolower(c1);
+		c2 = tolower(c2);
+		if (c1 != c2)
+			break;
+		len--;
 	}
-	if (*s1 == 0 && *s2 == 0) return 0;
-	if (*s1 && *s2) {
-		if (*s1 > *s2) return 1;
-		return -1;
-	}
-	if (*s1) return 1;
-	return -1;
+	return (int)c1 - (int)c2;
 }
 
 /*
@@ -295,7 +303,7 @@ static int parse_options(char *options, struct iso9660_options * popt)
 {
 	char *this_char,*value;
 
-	popt->map = 'a';
+	popt->map = 'n';
 	popt->rock = 'y';
 	popt->joliet = 'y';
 	popt->cruft = 'n';

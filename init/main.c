@@ -1005,6 +1005,8 @@ int cpu_idle(void *unused)
 		idle();
 }
 
+#define smp_init()	do { } while (0)
+
 #else
 
 /*
@@ -1018,20 +1020,10 @@ static void __init smp_init(void)
 {
 	/* Get other processors into their bootup holding patterns. */
 	smp_boot_cpus();
-}		
-
-/*
- *	The autoprobe routines assume CPU#0 on the i386
- *	so we don't actually set the game in motion until
- *	they are finished.
- */
- 
-static void __init smp_begin(void)
-{
 	smp_threads_ready=1;
 	smp_commence();
-}
-	
+}		
+
 #endif
 
 extern void initialize_secondary(void);
@@ -1112,13 +1104,10 @@ asmlinkage void __init start_kernel(void)
 #if defined(CONFIG_QUOTA)
 	dquot_init_hash();
 #endif
+	check_bugs();
 	printk("POSIX conformance testing by UNIFIX\n");
 
-#ifdef __SMP__
 	smp_init();
-#endif
-
-	check_bugs();
 
 #if defined(CONFIG_MTRR)	/* Do this after SMP initialization */
 /*
@@ -1126,10 +1115,9 @@ asmlinkage void __init start_kernel(void)
  * everything is up" style function where this would belong better
  * than in init/main.c..
  */
-	mtrr_init ();
+	mtrr_init();
 #endif
 
-	sock_init();
 #ifdef CONFIG_SYSCTL
 	sysctl_init();
 #endif
@@ -1200,6 +1188,9 @@ static int init(void * unused)
 	int real_root_mountflags;
 #endif
 
+	/* Networking initialization needs a process context */ 
+	sock_init();
+
 	/* Launch bdflush from here, instead of the old syscall way. */
 	kernel_thread(bdflush, NULL, CLONE_FS | CLONE_FILES | CLONE_SIGHAND);
 	/* Start the background pageout daemon. */
@@ -1221,15 +1212,6 @@ static int init(void * unused)
 	else mount_initrd =0;
 #endif
 	setup(0);
-
-#ifdef __SMP__
-	/*
-	 *	With the devices probed and setup we can
-	 *	now enter SMP mode.
-	 */
-	
-	smp_begin();
-#endif	
 
 #ifdef CONFIG_UMSDOS_FS
 	{

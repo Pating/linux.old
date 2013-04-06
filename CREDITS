@@ -212,12 +212,14 @@ S: Nexus Electronics Ltd
 S: 10 St Barnabas Road, Cambridge CB1 2BY
 S: United Kingdom
 
-N: Thomas Bogendoerfer
+N: Thomas Bogendörfer
 E: tsbogend@alpha.franken.de
-D: PCnet32 driver
+D: PCnet32 driver, SONIC driver, JAZZ_ESP driver
+D: newport abscon driver, g364 framebuffer driver
 D: strace for Linux/Alpha
-S: Baumgartenweg 5
-S: 91452 Wilhermsdorf
+D: Linux/MIPS hacker
+S: Schafhofstr. 40
+S: 90556 Cadolzburg
 S: Germany
 
 N: Bill Bogstad
@@ -1233,12 +1235,12 @@ S: 7546 JA  Enschede
 S: Netherlands
 
 N: David S. Miller
-E: davem@caip.rutgers.edu
-D: Sparc hacker
-D: New Linux-Activists maintainer
+E: davem@dm.cobaltmicro.com
+D: Sparc and blue box hacker
+D: Vger Linux mailing list co-maintainer
 D: Linux Emacs elf/qmagic support + other libc/gcc things
 D: Yee bore de yee bore! ;-)
-S: 111 Alta Tierra Court
+S: 331 Santa Rosa Drive
 S: Los Gatos, California 95032
 S: USA
 
@@ -1445,14 +1447,11 @@ S: USA
 
 N: Eric S. Raymond
 E: esr@thyrsus.com
-W: http://www.ccil.org/~esr/home.html
-D: ncurses library co-maintainer
+W: http://www.tuxedo.org/~esr/
 D: terminfo master file maintainer
-D: Distributions HOWTO editor
-D: Instigator, FHS standard
-D: Keeper of the Jargon File and curator of the Retrocomputing Museum
-D: Author, Emacs VC and GUD modes
-S: 22 South Warren Avenue
+D: Editor: Installation HOWTO, Distributions HOWTO, XFree86 HOWTO
+D: Author: fetchmail, Emacs VC mode, Emacs GUD mode
+S: 6 Karen Drive
 S: Malvern, Pennsylvania 19355
 S: USA
 
@@ -1473,8 +1472,8 @@ D: Generic Z8530 driver, AX.25 DAMA slave implementation
 D: Several AX.25 hacks
 
 N: Francois-Rene Rideau
-E: rideau@ens.fr
-W: http://www.eleves.ens.fr:8080/home/rideau/
+E: fare@tunes.org
+W: http://www.tunes.org/~fare
 D: petty kernel janitor (byteorder, ufs)
 S: 6, rue Augustin Thierry
 S: 75019 Paris
@@ -1512,10 +1511,12 @@ S: Germany
 
 N: Stephen Rothwell
 E: Stephen.Rothwell@canb.auug.org.au
+W: http://www.canb.auug.org.au/~sfr
+P: 1024/BD8C7805 CD A4 9D 01 10 6E 7E 3B  91 88 FA D9 C8 40 AA 02
 D: Boot/setup/build work for setup > 2K
 D: Author, APM driver
-S: 59 Bugden Avenue
-S: Gowrie ACT 2904
+S: 66 Maltby Circuit
+S: Wanniassa ACT 2903
 S: Australia
 
 N: Gerard Roudier

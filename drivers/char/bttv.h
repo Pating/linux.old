@@ -57,6 +57,12 @@ struct bttv_window
 };
 
 
+struct bttv_pll_info {
+	unsigned int pll_ifreq;	/* PLL input frequency 	  */
+	unsigned int pll_ofreq;	/* PLL output frequency   */
+	unsigned int pll_crystal;	/* Crystal used for input */
+};
+
 struct bttv 
 {
 	struct video_device video_dev;
@@ -130,14 +136,13 @@ struct bttv
 	int grab;
 	int grabcount;
 
-	int pll;
+	struct bttv_pll_info pll;
 	unsigned int Fsc;
 	unsigned int field;
 	unsigned int last_field; /* number of last grabbed field */
 	int i2c_command;
 	int triton1;
 };
-
 #endif
 
 /*The following should be done in more portable way. It depends on define
@@ -161,6 +166,7 @@ struct bttv
 #define BTTV_WRITEE		_IOR('v',  BASE_VIDIOCPRIVATE+1, char [256])
 #define BTTV_GRAB		_IOR('v' , BASE_VIDIOCPRIVATE+2, struct gbuf)
 #define BTTV_FIELDNR		_IOR('v' , BASE_VIDIOCPRIVATE+2, unsigned int)
+#define BTTV_PLLSET		_IOW('v' , BASE_VIDIOCPRIVATE+3, struct bttv_pll_info)
 
 
 #define BTTV_UNKNOWN       0x00
@@ -172,6 +178,7 @@ struct bttv
 #define BTTV_AVERMEDIA     0x06 
 #define BTTV_MATRIX_VISION 0x07 
 #define BTTV_FLYVIDEO      0x08
+#define BTTV_HAUPPAUGE878  0x09
 
 #define AUDIO_TUNER        0x00
 #define AUDIO_RADIO        0x01
