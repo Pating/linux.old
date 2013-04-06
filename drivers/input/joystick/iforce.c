@@ -51,10 +51,10 @@ MODULE_LICENSE("GPL");
 
 #define IFORCE_MAX_LENGTH	16
 
-#if defined(CONFIG_INPUT_IFORCE_232) || defined(CONFIG_INPUT_IFORCE_232_MODULE)
+#if defined(CONFIG_JOYSTICK_IFORCE_232) || defined(CONFIG_JOYSTICK_IFORCE_232_MODULE)
 #define IFORCE_232	1
 #endif
-#if defined(CONFIG_INPUT_IFORCE_USB) || defined(CONFIG_INPUT_IFORCE_USB_MODULE)
+#if defined(CONFIG_JOYSTICK_IFORCE_USB) || defined(CONFIG_JOYSTICK_IFORCE_USB_MODULE)
 #define IFORCE_USB	2
 #endif
 
@@ -204,7 +204,7 @@ static void send_packet(struct iforce *iforce, u16 cmd, unsigned char* data)
 			set_current_state(TASK_INTERRUPTIBLE);
 			add_wait_queue(&iforce->wait, &wait);
 
-			if (usb_submit_urb(iforce->out)) {
+			if (usb_submit_urb(iforce->out, GFP_ATOMIC)) {
 				set_current_state(TASK_RUNNING);
 				remove_wait_queue(&iforce->wait, &wait);
 				return;
@@ -289,7 +289,7 @@ static int get_id_packet(struct iforce *iforce, char *packet)
 			set_current_state(TASK_INTERRUPTIBLE);
 			add_wait_queue(&iforce->wait, &wait);
 
-			if (usb_submit_urb(iforce->ctrl)) {
+			if (usb_submit_urb(iforce->ctrl, GFP_ATOMIC)) {
 				set_current_state(TASK_RUNNING);
 				remove_wait_queue(&iforce->wait, &wait);
 				return -1;
@@ -345,7 +345,7 @@ static int iforce_open(struct input_dev *dev)
 			if (iforce->open++)
 				break;
 			iforce->irq->dev = iforce->usbdev;
-			if (usb_submit_urb(iforce->irq))
+			if (usb_submit_urb(iforce->irq, GFP_KERNEL))
 					return -EIO;
 			break;
 #endif
@@ -641,7 +641,7 @@ static int iforce_upload_periodic(struct iforce* iforce, struct ff_effect* effec
 		effect->replay.delay,
 		effect->trigger.button,
 		effect->trigger.interval,
-		effect->u.periodic.direction);
+		effect->direction);
 
 	return err;
 }
@@ -680,7 +680,7 @@ static int iforce_upload_constant(struct iforce* iforce, struct ff_effect* effec
 		effect->replay.delay,
 		effect->trigger.button,
 		effect->trigger.interval,
-		effect->u.constant.direction);
+		effect->direction);
 
 	return err;
 }
@@ -722,7 +722,7 @@ static int iforce_upload_interactive(struct iforce* iforce, struct ff_effect* ef
 		case 0: /* Only one axis, choose orientation */
 			mod1 = mod_chunk->start;
 			mod2 = 0xffff;
-			direction = effect->u.interactive.direction;
+			direction = effect->direction;
 			axes = 0x20;
 			break;
 
