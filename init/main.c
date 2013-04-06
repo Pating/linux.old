@@ -36,6 +36,9 @@
 #ifdef CONFIG_ROOT_NFS
 #include <linux/nfs_fs.h>
 #endif
+#ifdef CONFIG_MTRR
+#include <asm/mtrr.h>
+#endif
 
 #include <asm/bugs.h>
 
@@ -104,6 +107,7 @@ extern void wd7000_setup(char *str, int *ints);
 extern void ppa_setup(char *str, int *ints);
 extern void scsi_luns_setup(char *str, int *ints);
 extern void sound_setup(char *str, int *ints);
+extern void apm_setup(char *str, int *ints);
 extern void reboot_setup(char *str, int *ints);
 #ifdef CONFIG_CDU31A
 extern void cdu31a_setup(char *str, int *ints);
@@ -169,6 +173,9 @@ extern void atari_scsi_setup (char *str, int *ints);
 extern void wd33c93_setup (char *str, int *ints);
 extern void gvp11_setup (char *str, int *ints);
 
+#ifdef CONFIG_CYCLADES
+extern void cy_setup(char *str, int *ints);
+#endif
 #ifdef CONFIG_DIGI
 extern void pcxx_setup(char *str, int *ints);
 #endif
@@ -446,6 +453,9 @@ struct kernel_param bootsetups[] = {
 #if defined(CONFIG_GVP11_SCSI)
 	{ "gvp11=", gvp11_setup },
 #endif
+#ifdef CONFIG_CYCLADES
+	{ "cyclades=", cy_setup },
+#endif
 #ifdef CONFIG_DIGI
 	{ "digi=", pcxx_setup },
 #endif
@@ -457,6 +467,9 @@ struct kernel_param bootsetups[] = {
 #endif
 #ifdef CONFIG_BAYCOM
 	{ "baycom=", baycom_setup },
+#endif
+#ifdef CONFIG_APM
+	{ "apm=", apm_setup },
 #endif
 	{ 0, 0 }
 };
@@ -939,6 +952,11 @@ asmlinkage void start_kernel(void)
 	arch_syms_export();
 	sti();
 	check_bugs();
+
+#if defined(CONFIG_MTRR) && defined(__SMP__)
+	init_mtrr_config();
+#endif
+
 
 	printk(linux_banner);
 #ifdef __SMP__

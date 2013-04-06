@@ -75,6 +75,7 @@ extern int max_files, nr_files;
 #define S_IMMUTABLE	512	/* Immutable file */
 #define MS_NOATIME	1024	/* Do not update access times. */
 #define S_BAD_INODE	2048	/* Marker for unreadable inodes */
+#define S_ZERO_WR	4096	/* Device accepts 0 length writes */
 
 /*
  * Flags that can be altered by MS_REMOUNT
@@ -106,6 +107,7 @@ extern int max_files, nr_files;
 #define IS_APPEND(inode) ((inode)->i_flags & S_APPEND)
 #define IS_IMMUTABLE(inode) ((inode)->i_flags & S_IMMUTABLE)
 #define IS_NOATIME(inode) ((inode)->i_flags & MS_NOATIME)
+#define        IS_ZERO_WR(inode) ((inode)->i_flags & S_ZERO_WR)
 
 #define UPDATE_ATIME(inode) \
 	if (!IS_NOATIME(inode) && !IS_RDONLY(inode)) { \
@@ -552,6 +554,7 @@ extern int unregister_filesystem(struct file_system_type *);
 
 asmlinkage int sys_open(const char *, int, int);
 asmlinkage int sys_close(unsigned int);		/* yes, it's really unsigned */
+asmlinkage int sys_read(unsigned int, char *, int);
 
 extern void kill_fasync(struct fasync_struct *fa, int sig);
 

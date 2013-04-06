@@ -29,7 +29,7 @@
  * Yves Arrouye      :  remove removal of trailing spaces in get_array.
  *			<Yves.Arrouye@marin.fdn.fr>
  *
- * Alan Cox	     :  security fixes. <Alan.Cox@linux.org>a
+ * Alan Cox	     :  security fixes. <Alan.Cox@linux.org>
  */
 
 #include <linux/types.h>
@@ -1074,7 +1074,7 @@ static int process_unauthorized(int type, int pid)
 		case PROC_PID_CMDLINE:
 			return 0;	
 	}
-	if(current->fsuid == (*p)->euid)
+	if(suser() || current->fsuid == (*p)->euid)
 		return 0;
 	return 1;
 }

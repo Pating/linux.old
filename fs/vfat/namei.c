@@ -10,7 +10,6 @@
  *    the problem, send a script that demonstrates it.
  */
 
-#include <linux/config.h>
 #define __NO_VERSION__
 #include <linux/module.h>
 
@@ -832,6 +831,9 @@ static int vfat_readdir_cb(
 		if ((vf->len != name_len + 1) || (vf->name[name_len] != '.')) {
 			return 0;
 		}
+		if (name_len == 2 && name[0] == '.' && name[1] == '.') {
+			return 0;
+		}
 	}
 
 	s1 = name; s2 = vf->name;
@@ -967,7 +969,6 @@ static int vfat_find(struct inode *dir,const char *name,int len,
 		sinfo_out->shortname_offset = offset - sizeof(struct msdos_dir_slot);
 		sinfo_out->longname_offset = offset - sizeof(struct msdos_dir_slot) * slots;
 		res = 0;
-		return 0;
 	} else {
 		res = -ENOENT;
 	}

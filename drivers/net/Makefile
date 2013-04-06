@@ -3,7 +3,7 @@
 # Makefile for the Linux network (ethercard) device drivers.
 #
 
-# This will go away in some future future: hidden configuration files
+# This will go away in some future: hidden configuration files
 # are difficult for users to deal with.
 include CONFIG
 
@@ -53,6 +53,14 @@ else
   endif
 endif
 
+ifeq ($(CONFIG_SHAPER),y)
+L_OBJS += shaper.o
+else
+  ifeq ($(CONFIG_SHAPER),m)
+  M_OBJS += shaper.o
+  endif
+endif
+
 ifeq ($(CONFIG_SK_G16),y)
 L_OBJS += sk_g16.o
 endif
@@ -70,14 +78,6 @@ L_OBJS += hp100.o
 else
   ifeq ($(CONFIG_HP100),m)
   M_OBJS += hp100.o
-  endif
-endif
-
-ifeq ($(CONFIG_WIC),y)
-L_OBJS += wic.o
-else
-  ifeq ($(CONFIG_WIC),m)
-  M_OBJS += wic.o
   endif
 endif
 
@@ -316,6 +316,14 @@ L_OBJS += 3c59x.o
 else
   ifeq ($(CONFIG_VORTEX),m)
   M_OBJS += 3c59x.o
+  endif
+endif
+
+ifeq ($(CONFIG_VIA_RHINE),y)
+L_OBJS += via-rhine.o
+else
+  ifeq ($(CONFIG_VIA_RHINE),m)
+  M_OBJS += via-rhine.o
   endif
 endif
 
@@ -659,10 +667,23 @@ else
   endif
 endif
 
+
+
+ifeq ($(CONFIG_RCPCI),y)
+L_OBJS += rcpci.o
+else
+  ifeq ($(CONFIG_RCPCI),m)
+  M_OBJS += rcpci.o
+  endif
+endif
+
 include $(TOPDIR)/Rules.make
 
 clean:
 	rm -f core *.o *.a *.s
+
+rcpci.o: rcpci45.o rcmtl.o
+	$(LD) -r -o rcpci.o rcpci45.o rcmtl.o
 
 wd.o:	wd.c CONFIG
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(WD_OPTS) -c $<

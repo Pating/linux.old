@@ -262,6 +262,8 @@ struct pci_dev_info dev_info[] = {
 	DEVICE( WINBOND,	WINBOND_82C105,	"SL82C105"),
 	DEVICE( WINBOND,	WINBOND_83C553,	"W83C553"),
 	DEVICE( DATABOOK,      	DATABOOK_87144,	"DB87144"),
+	DEVICE( PLX,        PLX_SPCOM200, "SPCom 200 PCI serial I/O"),
+	DEVICE( PLX,        PLX_9050,   "PLX9050 PCI <-> IOBus Bridge"),
 	DEVICE( PLX,		PLX_9080,	"PCI9080 I2O"),
 	DEVICE( MADGE,		MADGE_MK2,	"Smart 16/4 BM Mk2 Ringnode"),
 	DEVICE( 3COM,		3COM_3C339,	"3C339 TokenRing"),
@@ -400,6 +402,7 @@ struct pci_dev_info dev_info[] = {
 	DEVICE( LITEON,		LITEON_LNE100TX,"LNE100TX"),
 	DEVICE( NP,		NP_PCI_FDDI,	"NP-PCI"),       
 	DEVICE( ATT,		ATT_L56XMF,	"L56xMF"),
+	DEVICE( SPECIALIX,	SPECIALIX_IO8,	"IO8+/PCI"),
 	DEVICE( SPECIALIX,	SPECIALIX_XIO,	"XIO/SIO host"),
 	DEVICE( SPECIALIX,	SPECIALIX_RIO,	"RIO host"),
 	DEVICE( AURAVISION,	AURAVISION_VXP524,"VXP524"),
@@ -431,6 +434,7 @@ struct pci_dev_info dev_info[] = {
 	DEVICE( OPTIBASE,	OPTIBASE_VPLEX,	"VideoPlex"),
 	DEVICE( OPTIBASE,	OPTIBASE_VPLEXCC,"VideoPlex CC"),
 	DEVICE( OPTIBASE,	OPTIBASE_VQUEST,"VideoQuest"),
+	DEVICE( ASIX,		ASIX_88140, "88140"),
 	DEVICE( SATSAGEM,	SATSAGEM_PCR2101,"PCR2101 DVB receiver"),
 	DEVICE( SATSAGEM,	SATSAGEM_TELSATTURBO,"Telsat Turbo DVB"),
 	DEVICE( ENSONIQ,	ENSONIQ_AUDIOPCI,"AudioPCI"),
@@ -501,6 +505,9 @@ struct pci_dev_info dev_info[] = {
 	DEVICE( INTEL,		INTEL_82443BX_0,"440BX - 82443BX Host"),
 	DEVICE( INTEL,		INTEL_82443BX_1,"440BX - 82443BX AGP"),
 	DEVICE( INTEL,		INTEL_82443BX_2,"440BX - 82443BX Host (no AGP)"),
+	DEVICE( INTEL,		INTEL_82443GX_0,"440GX - 82443GX Host"),
+	DEVICE( INTEL,		INTEL_82443GX_1,"440GX - 82443GX AGP"),
+	DEVICE( INTEL,		INTEL_82443GX_2,"440GX - 82443GX Host (no AGP)"),
 	DEVICE( INTEL,		INTEL_P6,	"Orion P6"),
  	DEVICE( INTEL,		INTEL_82450GX,	"82450GX Orion P6"),
 	DEVICE(	KTI,		KTI_ET32P2,	"ET32P2"),
@@ -522,6 +529,10 @@ struct pci_dev_info dev_info[] = {
 	DEVICE( ADAPTEC,	ADAPTEC_7883,	"AIC-7883U"),
 	DEVICE( ADAPTEC,	ADAPTEC_7884,	"AIC-7884U"),
 	DEVICE( ADAPTEC,	ADAPTEC_1030,	"ABA-1030 DVB receiver"),
+  DEVICE( ADAPTEC2, ADAPTEC2_2940U2, "AHA-2940U2"),
+  DEVICE( ADAPTEC2, ADAPTEC2_7890, "AIC-7890/1"),
+  DEVICE( ADAPTEC2, ADAPTEC2_3940U2, "AHA-3940U2"),
+  DEVICE( ADAPTEC2, ADAPTEC2_7896, "AIC-7896/7"),
   	DEVICE( ATRONICS,	ATRONICS_2015,	"IDE-2015PL"),
 	DEVICE( TIGERJET,	TIGERJET_300,	"Tiger300 ISDN"),
 	DEVICE( ARK,		ARK_STING,	"Stingray"),
@@ -812,6 +823,8 @@ const char *pci_strvendor(unsigned int vendor)
 	      case PCI_VENDOR_ID_3DFX:		return "3Dfx";
 	      case PCI_VENDOR_ID_SIGMADES:	return "Sigma Designs";
 	      case PCI_VENDOR_ID_OPTIBASE:	return "Optibase";
+	      case PCI_VENDOR_ID_NVIDIA_SGS:    return "NVidia/SGS Thomson";
+ 	      case PCI_VENDOR_ID_ENSONIQ:	return "Ensoniq";	
 	      case PCI_VENDOR_ID_SYMPHONY:	return "Symphony";
 	      case PCI_VENDOR_ID_TEKRAM:	return "Tekram";
 	      case PCI_VENDOR_ID_3DLABS:	return "3Dlabs";
@@ -821,8 +834,11 @@ const char *pci_strvendor(unsigned int vendor)
 	      case PCI_VENDOR_ID_INTEL:		return "Intel";
 	      case PCI_VENDOR_ID_KTI:		return "KTI";
 	      case PCI_VENDOR_ID_ADAPTEC:	return "Adaptec";
+	      case PCI_VENDOR_ID_ADAPTEC2:	return "Adaptec";
 	      case PCI_VENDOR_ID_ATRONICS:	return "Atronics";
 	      case PCI_VENDOR_ID_ARK:		return "ARK Logic";
+	      case PCI_VENDOR_ID_ASIX:		return "ASIX";
+	      case PCI_VENDOR_ID_LITEON:	return "Lite-on";
 	      default:				return "Unknown vendor";
 	}
 }

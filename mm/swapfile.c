@@ -5,6 +5,7 @@
  *  Swap reorganised 29.12.95, Stephen Tweedie
  */
 
+#include <linux/config.h>
 #include <linux/mm.h>
 #include <linux/sched.h>
 #include <linux/head.h>
@@ -17,6 +18,7 @@
 #include <linux/fs.h>
 #include <linux/swapctl.h>
 #include <linux/blkdev.h> /* for blk_size */
+#include <linux/shm.h>
 
 #include <asm/dma.h>
 #include <asm/system.h> /* for cli()/sti() */
@@ -313,6 +315,9 @@ static int try_to_unuse(unsigned int type)
 		nr++;
 	}
 	free_page(page);
+#ifdef CONFIG_SYSVIPC	
+	shm_unuse(type);
+#endif
 	return 0;
 }
 

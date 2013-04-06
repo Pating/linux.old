@@ -46,7 +46,6 @@ if [ "$CONFIG_NET_RADIO" != "n" ]; then
   tristate 'Z8530 SCC KISS emulation driver for AX.25' CONFIG_SCC
   tristate 'STRIP (Metricom starmode radio IP)' CONFIG_STRIP
   tristate 'AT&T WaveLAN & DEC RoamAbout DS support' CONFIG_WAVELAN
-  tristate 'WIC Radio IP bridge (EXPERIMENTAL)' CONFIG_WIC
 fi
 #
 #	Ethernet
@@ -83,9 +82,8 @@ if [ "$CONFIG_NET_ETHERNET" = "y" ]; then
     tristate 'Packet Engines Yellowfin Gigabit-NIC support' CONFIG_YELLOWFIN
     tristate 'RealTek 8129/8139 (not 8019/8029!) support' CONFIG_RTL8139
     tristate 'SMC EPIC/100 (EtherPower II) support' CONFIG_EPIC
-    if [ "$CONFIG_EXPERIMENTAL" = "y" ]; then
-      tristate 'TI ThunderLAN support (EXPERIMENTAL)' CONFIG_TLAN
-   fi
+    tristate 'TI ThunderLAN support' CONFIG_TLAN
+    tristate 'VIA Rhine support' CONFIG_VIA_RHINE
   fi
   bool 'Other ISA cards' CONFIG_NET_ISA
   if [ "$CONFIG_NET_ISA" = "y" ]; then
@@ -147,3 +145,7 @@ if [ "$CONFIG_ARCNET" != "n" ]; then
   bool '  Enable arc0s (ARCnet RFC1051 packet format)' CONFIG_ARCNET_1051
 fi
 
+if [ "$CONFIG_EXPERIMENTAL" = "y" ]; then
+  tristate 'Traffic Shaper (EXPERIMENTAL)' CONFIG_SHAPER
+  tristate 'Red Creek Hardware VPN (EXPERIMENTAL)' CONFIG_RCPCI
+fi

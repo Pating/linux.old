@@ -980,7 +980,7 @@ byte ide_dump_status (ide_drive_t *drive, const char *msg, byte stat)
 #if FANCY_STATUS_DUMPS
 		if (drive->media == ide_disk) {
 			printk(" { ");
-			if (err & BBD_ERR)	printk("BadSector ");
+			if (err & ICRC_ERR)	printk((err & ABRT_ERR) ? "BadCRC " : "BadSector ");
 			if (err & ECC_ERR)	printk("UncorrectableError ");
 			if (err & ID_ERR)	printk("SectorIdNotFound ");
 			if (err & ABRT_ERR)	printk("DriveStatusError ");
@@ -1908,9 +1908,9 @@ void ide_init_drive_cmd (struct request *rq)
  * This function issues a special IDE device request
  * onto the request queue.
  *
- * If action is ide_wait, then then rq is queued at the end of
- * the request queue, and the function sleeps until it has been
- * processed.  This is for use when invoked from an ioctl handler.
+ * If action is ide_wait, then the rq is queued at the end of the
+ * request queue, and the function sleeps until it has been processed.
+ * This is for use when invoked from an ioctl handler.
  *
  * If action is ide_preempt, then the rq is queued at the head of
  * the request queue, displacing the currently-being-processed

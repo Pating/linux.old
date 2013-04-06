@@ -44,6 +44,8 @@
  *					then use it for ToS is even more 
  *					broken. 
  *					</RANT>
+ *	George Baeslack		:	SIGIO delivery on accept() bug that
+ *					affected sun jdk.
  */
 
 #include <linux/config.h>
@@ -544,7 +546,10 @@ static void tcp_conn_request(struct sock *sk, struct sk_buff *skb,
 	/* If the socket is dead, don't accept the connection. */
 	if (!sk->dead) 
 	{
-  		sk->data_ready(sk,0);
+		/*
+		 * This must wait for 3 way completion.
+  		 * sk->data_ready(sk,0);
+  		 */
 	}
 	else 
 	{
@@ -772,6 +777,7 @@ static void tcp_conn_request(struct sock *sk, struct sk_buff *skb,
 	newsk->acked_seq = skb->seq + 1;
 	newsk->copied_seq = skb->seq + 1;
 	newsk->socket = NULL;
+	newsk->listening = sk;
 
 	/*
 	 *	Grab the ttl and tos values and use them 
@@ -886,7 +892,7 @@ static int tcp_conn_request_fake(struct sock *sk, struct sk_buff *skb,
 	/* If the socket is dead, don't accept the connection. */
 	if (!sk->dead) 
 	{
-  		sk->data_ready(sk,0);
+  		/*sk->data_ready(sk,0); */
 	}
 	else 
 	{
@@ -1032,6 +1038,7 @@ static int tcp_conn_request_fake(struct sock *sk, struct sk_buff *skb,
 	newsk->acked_seq = skb->seq;
 	newsk->copied_seq = skb->seq;
 	newsk->socket = NULL;
+	newsk->listening = sk;
 
 	/*
 	 *	Grab the ttl and tos values and use them 
@@ -1663,6 +1670,19 @@ static int tcp_ack(struct sock *sk, struct tcphdr *th, u32 ack, int len)
 	if (sk->state==TCP_SYN_RECV)
 	{
 		tcp_set_state(sk, TCP_ESTABLISHED);
+		
+		/*
+		 *	We have a listening socket owning us. Wake it for
+		 *	the accept.
+		 */
+		 
+  		if ( sk->listening ) 
+  		{
+  			/* The listener may be sk->dead. Dont worry 
+  			   data_ready traps this */
+			sk->data_ready(sk->listening,0);
+			sk->listening = NULL;
+		}			
 
 		/* Must check for peer advertising zero sized window
 		 * or else we get a sk->{mtu,mss} of zero and thus bomb out
@@ -2496,10 +2516,14 @@ retry_search:
 		 *	then it's a new connection
 		 */
 		 
-		if (sk->state == TCP_SYN_RECV && th->syn && skb->seq+1 == sk->acked_seq)
+		if (sk->state == TCP_SYN_RECV)
 		{
-			kfree_skb(skb, FREE_READ);
-			return 0;
+			if(th->syn && skb->seq+1 == sk->acked_seq)
+			{
+				kfree_skb(skb, FREE_READ);
+				return 0;
+			}
+			goto rfc_step4;
 		}
 		
 		/*
@@ -2588,6 +2612,7 @@ retry_search:
 				sk->rtt = 0;
 				sk->rto = TCP_TIMEOUT_INIT;
 				sk->mdev = TCP_TIMEOUT_INIT;
+				goto rfc_step6;
 			}
 			else
 			{
@@ -2614,10 +2639,11 @@ retry_search:
 				kfree_skb(skb, FREE_READ);
 				return 0;
 			}
+
 			/*
-			 *	SYN_RECV with data maybe.. drop through
+			 *	Data maybe.. drop through
 			 */
-			goto rfc_step6;
+			 
 		}
 
 	/*
@@ -2676,6 +2702,8 @@ retry_search:
 #endif	
 	}
 
+rfc_step4:		/* I'll clean this up later */
+
 	/*
 	 *	We are now in normal data flow (see the step list in the RFC)
 	 *	Note most of these are inline now. I'll inline the lot when
@@ -2717,8 +2745,13 @@ retry_search:
 	 *	Process the ACK
 	 */
 	 
+	if(!th->ack)
+	{
+		kfree_skb(skb, FREE_WRITE);
+		return 0;
+	}
 
-	if(th->ack && !tcp_ack(sk,th,skb->ack_seq,len))
+	if(!tcp_ack(sk,th,skb->ack_seq,len))
 	{
 		/*
 		 *	Our three way handshake failed.
@@ -2732,8 +2765,7 @@ retry_search:
 		return 0;
 	}
 	
-rfc_step6:		/* I'll clean this up later */
-
+rfc_step6:
 	/*
 	 *	If the accepted buffer put us over our queue size we
 	 *	now drop it (we must process the ack first to avoid

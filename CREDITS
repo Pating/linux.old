@@ -36,10 +36,12 @@ S: San Jose, California 95129
 S: USA
 
 N: Andrea Arcangeli
-E: arcangeli@mbox.queen.it
-W: http://www.cs.unibo.it/~arcangel/
+E: andrea@e-mind.com
+W: http://e-mind.com/~andrea/
 P: 1024/CB4660B9 CC A0 71 81 F4 A0 63 AC  C0 4B 81 1D 8C 15 C8 E5
 D: Fixed a 2.0.33 mm bug that corrupts memory in linux/mm/vmalloc.c
+D: Author of lil (Linux Interrupt Latency benchmark)
+D: Fixed the shm swap deallocation at swapoff time
 S: Via Ciaclini 26
 S: Imola 40026
 S: Italy
@@ -383,8 +385,8 @@ E: bj0rn@blox.se
 W: http://www.pi.se/blox/
 D: Extended support for loadable modules
 D: D-Link pocket adapter drivers
-S: Myrstuguv. 83
-S: S-143 32 VARBY
+S: Grevgatan 11
+S: S-114 53 Stockholm
 S: Sweden
 
 N: Fritz Elfert
@@ -453,15 +455,11 @@ S: Oak Park, Illinois 60302
 S: USA
 
 N: Jim Freeman
-E: jfree@caldera.com
+E: jfree@sovereign.org
 W: http://www.sovereign.org/
 D: Initial GPL'd Frame Relay driver
 D: Dynamic PPP devices
 D: Sundry modularizations (PPP, IPX, ...) and fixes
-S: Caldera, Inc.
-S: 240 West Center St.
-S: Orem, Utah 84059-1920
-S: USA
 
 N: Bob Frey
 E: bobf@advansys.com

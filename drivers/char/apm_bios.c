@@ -40,6 +40,8 @@
  *         is only incorrect by 30-60mS (vs. 1S previously) (Gabor J. Toth
  *         <jtoth@princeton.edu>); improve interaction between
  *         screen-blanking and gpm (Stephen Rothwell); Linux 1.99.4
+ *    1.2a: Fix OOPs on power off with no APM BIOS
+ *         Jan Echternach <echter@informatik.uni-rostock.de>
  *
  * Reference:
  *
@@ -444,15 +446,23 @@ static int apm_get_event(apm_event_t *event)
 	return APM_SUCCESS;
 }
 
-int apm_set_power_state(u_short state)
+static int apm_set_power_state(u_short state)
 {
 	u_short	error;
-
+	
 	APM_SET_POWER_STATE(state, error);
 	if (error & 0xff)
 		return (error >> 8);
 	return APM_SUCCESS;
 }
+
+#ifdef CONFIG_APM_POWER_OFF
+void apm_power_off(void)
+{
+	if (apm_enabled)
+		(void) apm_set_power_state(APM_STATE_OFF);
+}
+#endif
 
 #ifdef CONFIG_APM_DISPLAY_BLANK
 /* Called by apm_display_blank and apm_display_unblank when apm_enabled. */
@@ -1100,6 +1110,16 @@ int apm_get_info(char *buf, char **start, off_t fpos, int length, int dummy)
 }
 #endif
 
+static int apm_disabled = 0;
+
+void apm_setup(char *str, int *ints)
+{
+	if(strcmp(str,"off")==0)
+		apm_disabled=1;
+	if(strcmp(str,"on")==0)
+		apm_disabled=0;
+}
+
 void apm_bios_init(void)
 {
 	unsigned short	bx;
@@ -1108,6 +1128,12 @@ void apm_bios_init(void)
 	unsigned short	error;
 	char *		power_stat;
 	char *		bat_stat;
+	
+	if (apm_disabled == 1)
+	{
+		printk("APM disabled.\n");
+		return;
+	}
 
 	if (apm_bios_info.version == 0) {
 		printk("APM BIOS not found.\n");

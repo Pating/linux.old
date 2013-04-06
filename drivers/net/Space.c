@@ -61,6 +61,7 @@ extern int apricot_probe(struct device *);
 extern int ewrk3_probe(struct device *);
 extern int de4x5_probe(struct device *);
 extern int el1_probe(struct device *);
+extern int via_rhine_probe(struct device *);
 #if	defined(CONFIG_WAVELAN)
 extern int wavelan_probe(struct device *);
 #endif	/* defined(CONFIG_WAVELAN) */
@@ -92,6 +93,10 @@ extern int lance_probe(struct device *);
 extern int atp_init(struct device *);
 extern int de600_probe(struct device *);
 extern int de620_probe(struct device *);
+/* The shaper hook */
+extern int shaper_probe(struct device *);
+/* Red Creek PCI hook */
+extern int rcpci_probe(struct device *);
 
 static int
 ethif_probe(struct device *dev)
@@ -126,6 +131,9 @@ ethif_probe(struct device *dev)
 #endif
 #ifdef CONFIG_RTL8139
 	&& rtl8139_probe(dev)
+#endif
+#if defined(CONFIG_VIA_RHINE)
+	&& via_rhine_probe(dev)
 #endif
 #if defined(CONFIG_VORTEX)
 	&& tc59x_probe(dev)
@@ -359,6 +367,20 @@ static struct device strip_bootstrap = {
 #undef NEXT_DEV
 #define NEXT_DEV (&strip_bootstrap)
 #endif   /* STRIP */
+
+#if defined(CONFIG_SHAPER)
+static struct device shaper_bootstrap = {
+    "shaper", 0x0, 0x0, 0x0, 0x0, 0, 0, 0, 0, 0, NEXT_DEV, shaper_probe, };
+#undef NEXT_DEV
+#define NEXT_DEV (&shaper_bootstrap)
+#endif   /* SHAPER */
+
+#if defined(CONFIG_RCPCI)
+static struct device rcpci_bootstrap = {
+    "rcpci", 0x0, 0x0, 0x0, 0x0, 0, 0, 0, 0, 0, NEXT_DEV, rcpci_probe, };
+#undef NEXT_DEV
+#define NEXT_DEV (&rcpci_bootstrap)
+#endif   /* RCPCI */
 
 #if defined(CONFIG_PPP)
 extern int ppp_init(struct device *);

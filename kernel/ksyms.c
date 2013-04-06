@@ -78,6 +78,9 @@ extern void free_dma(unsigned int dmanr);
 
 extern void hard_reset_now(void);
 
+extern void select_free_wait(select_table * p);
+extern int select_check(int flag, select_table * wait, struct file * file);
+
 struct symbol_table symbol_table = {
 #include <linux/symtab_begin.h>
 #ifdef MODVERSIONS
@@ -160,6 +163,10 @@ struct symbol_table symbol_table = {
 	X(getblk),
 	X(bread),
 	X(breada),
+
+	X(select_check),
+	X(select_free_wait),
+
 	X(__brelse),
 	X(__bforget),
 	X(ll_rw_block),
@@ -298,6 +305,7 @@ struct symbol_table symbol_table = {
 	X(kill_proc),
 	X(kill_pg),
 	X(kill_sl),
+	X(force_sig),
 
 	/* misc */
 	X(panic),
@@ -310,6 +318,7 @@ struct symbol_table symbol_table = {
 	X(sys_call_table),
 	X(hard_reset_now),
 	X(_ctype),
+	X(_ctmp),
 	X(get_random_bytes),
 
 	/* Signal interfaces */
@@ -368,6 +377,13 @@ struct symbol_table symbol_table = {
 	X(get_write_access),
 	X(put_write_access),
 
+#ifdef CONFIG_PROC_FS
+	X(proc_dir_inode_operations),
+#endif
+
+	/* Modular sound */
+	X(sys_open),
+	X(sys_read),
 	/********************************************************
 	 * Do not add anything below this line,
 	 * as the stacked modules depend on this!

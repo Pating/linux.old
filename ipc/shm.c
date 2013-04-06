@@ -3,6 +3,7 @@
  * Copyright (C) 1992, 1993 Krishna Balasubramanian
  *         Many improvements/fixes by Bruno Haible.
  * Replaced `struct shm_desc' by `struct vm_area_struct', July 1994.
+ * Fixed the shm swap deallocation (shm_unuse()), August 1998 Andrea Arcangeli.
  */
 
 #include <linux/errno.h>
@@ -657,6 +658,7 @@ static pte_t shm_swap_in(struct vm_area_struct * shmd, unsigned long offset, uns
 			oom(current);
 			return BAD_PAGE;
 		}
+	repeat:
 		pte_val(pte) = shp->shm_pages[idx];
 		if (pte_present(pte)) {
 			free_page (page); /* doesn't sleep */
@@ -664,11 +666,8 @@ static pte_t shm_swap_in(struct vm_area_struct * shmd, unsigned long offset, uns
 		}
 		if (!pte_none(pte)) {
 			read_swap_page(pte_val(pte), (char *) page);
-			pte_val(pte) = shp->shm_pages[idx];
-			if (pte_present(pte))  {
-				free_page (page); /* doesn't sleep */
-				goto done;
-			}
+			if (pte_val(pte) != shp->shm_pages[idx])
+				goto repeat;
 			swap_free(pte_val(pte));
 			shm_swp--;
 		}
@@ -698,6 +697,7 @@ static unsigned long swap_idx = 0; /* next to swap */
 int shm_swap (int prio, int dma)
 {
 	pte_t page;
+	struct page *page_map;
 	struct shmid_ds *shp;
 	struct vm_area_struct *shmd;
 	unsigned long swap_nr;
@@ -732,7 +732,10 @@ int shm_swap (int prio, int dma)
 	pte_val(page) = shp->shm_pages[idx];
 	if (!pte_present(page))
 		goto check_table;
-	if (dma && !PageDMA(&mem_map[MAP_NR(pte_page(page))]))
+	page_map = &mem_map[MAP_NR(pte_page(page))];
+	if (PageLocked(page_map))
+		goto check_table;
+	if (dma && !PageDMA(page_map))
 		goto check_table;
 	swap_attempts++;
 
@@ -803,4 +806,66 @@ int shm_swap (int prio, int dma)
 	shm_swp++;
 	shm_rss--;
 	return 1;
+}
+
+/*
+ * Free the swap entry and set the new pte for the shm page.
+ */
+static void shm_unuse_page(struct shmid_ds *shp, unsigned long idx,
+			   unsigned long type)
+{
+	pte_t pte = __pte(shp->shm_pages[idx]);
+	unsigned long page, entry = shp->shm_pages[idx];
+
+	if (pte_none(pte))
+		return;
+	if (pte_present(pte))
+	{
+		/*
+		 * Security check. Should be not needed...
+		 */
+		unsigned long page_nr = MAP_NR(pte_page(pte));
+		if (page_nr >= MAP_NR(high_memory))
+		{
+			printk("shm page mapped in virtual memory\n");
+			return;
+		}
+		if (!in_swap_cache(page_nr))
+			return;
+		if (SWP_TYPE(in_swap_cache(page_nr)) != type)
+			return;
+		printk("shm page in swap cache, trying to remove it!\n");
+		delete_from_swap_cache(page_nr);
+		
+		shp->shm_pages[idx] = pte_val(pte_mkdirty(pte));
+		return;
+	}
+
+	if (SWP_TYPE(pte_val(pte)) != type)
+		return;
+
+	/*
+	 * Here we must swapin the pte and free the swap.
+	 */
+	page = get_free_page(GFP_KERNEL);
+	read_swap_page(pte_val(pte), (char *) page);
+	pte = pte_mkdirty(mk_pte(page, PAGE_SHARED));
+	shp->shm_pages[idx] = pte_val(pte);
+	shm_rss++;
+
+	swap_free(entry);
+	shm_swp--;
+}
+
+/*
+ * unuse_shm() search for an eventually swapped out shm page.
+ */
+void shm_unuse(unsigned int type)
+{
+	int i, n;
+
+	for (i = 0; i < SHMMNI; i++)
+		if (shm_segs[i] != IPC_UNUSED && shm_segs[i] != IPC_NOID)
+			for (n = 0; n < shm_segs[i]->shm_npages; n++)
+				shm_unuse_page(shm_segs[i], n, type);
 }

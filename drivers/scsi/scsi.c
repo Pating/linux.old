@@ -284,6 +284,7 @@ static struct dev_info device_list[] =
 {"NRC","MBR-7.4","*", BLIST_FORCELUN | BLIST_SINGLELUN},
 {"REGAL","CDC-4X","*", BLIST_MAX5LUN | BLIST_SINGLELUN},
 {"NAKAMICH","MJ-4.8S","*", BLIST_FORCELUN | BLIST_SINGLELUN},
+{"NAKAMICH","MJ-5.16S","*", BLIST_FORCELUN | BLIST_SINGLELUN},
 {"PIONEER","CD-ROM DRM-600","*", BLIST_FORCELUN | BLIST_SINGLELUN},
 {"PIONEER","CD-ROM DRM-602X","*", BLIST_FORCELUN | BLIST_SINGLELUN},
 {"PIONEER","CD-ROM DRM-604X","*", BLIST_FORCELUN | BLIST_SINGLELUN},
@@ -687,6 +688,7 @@ int scan_scsis_single (int channel, int dev, int lun, int *max_dev_lun,
   case TYPE_MOD:
   case TYPE_PROCESSOR:
   case TYPE_SCANNER:
+  case TYPE_MEDIUM_CHANGER:
     SDpnt->writeable = 1;
     break;
   case TYPE_WORM:
@@ -750,6 +752,13 @@ int scan_scsis_single (int channel, int dev, int lun, int *max_dev_lun,
     SDpnt->borken = 0;
 
   /*
+   * If we want to only allow I/O to one of the luns attached to this device
+   * at a time, then we set this flag.
+   */
+  if (bflags & BLIST_SINGLELUN)
+    SDpnt->single_lun = 1;
+
+  /*
    * These devices need this "key" to unlock the devices so we can use it
    */
   if ((bflags & BLIST_KEY) != 0) {
@@ -790,13 +799,6 @@ int scan_scsis_single (int channel, int dev, int lun, int *max_dev_lun,
    */
   if (bflags & BLIST_NOLUN)
     return 0;                   /* break; */
-
-  /*
-   * If we want to only allow I/O to one of the luns attached to this device
-   * at a time, then we set this flag.
-   */
-  if (bflags & BLIST_SINGLELUN)
-    SDpnt->single_lun = 1;
 
   /*
    * If this device is known to support sparse multiple units, override the

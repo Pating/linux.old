@@ -27,7 +27,6 @@ static int max_interrupt_work = 20;
 #define PCNET_LOG_TX_BUFFERS 4
 #define PCNET_LOG_RX_BUFFERS 4
 
-#include <linux/config.h>
 #ifdef MODULE
 #ifdef MODVERSIONS
 #include <linux/modversions.h>
@@ -179,7 +178,8 @@ static struct pcnet_chip_type {
 	{0x2420, "PCnet/PCI 79C970", 0},
 	{0x2430, "PCnet32", 0},
 	{0x2621, "PCnet/PCI II 79C970A", 0},
-	{0x2623, "PCnet/PCI II 79C971A", 0},
+	{0x2623, "PCnet/FAST 79C971", 0},
+	{0x2624, "PCnet/FAST+ 79C972", 0},
 	{0x0, 	 "PCnet32 (unknown)", 0},
 };
 
@@ -242,11 +242,6 @@ int pcnet32_probe (struct device *dev)
 									  PCI_COMMAND, new_command);
 		}
 
-#ifdef __powerpc__
-		/* This is bogus! -djb */
-		irq_line = 15;
-#endif
-
 		if (pcnet32_probe1(dev, pci_ioaddr, irq_line) != 0) {
 			/* Should never happen. */
 			printk(KERN_ERR "pcnet32.c: Probe of PCI card at %#x failed.\n",
@@ -305,6 +300,8 @@ static int pcnet32_probe1(struct device *dev, unsigned int ioaddr, unsigned char
 	   The first six bytes are the station address. */
 	for (i = 0; i < 6; i++)
 		printk(" %2.2x", dev->dev_addr[i] = inb(ioaddr + i));
+		
+	printk("\n");
 
 	dev->base_addr = ioaddr;
 	request_region(ioaddr, PCNET32_TOTAL_SIZE, dev->name);
@@ -344,15 +341,7 @@ static int pcnet32_probe1(struct device *dev, unsigned int ioaddr, unsigned char
     outw(0x0000, ioaddr+PCNET32_ADDR);
     inw(ioaddr+PCNET32_ADDR);
 
-	dev->irq = irq_line;
-#ifdef __powerpc__
-		/* This is sooo bogus! -djb */
-	    irq_line = 15;
-#endif
-
-    outw(0x0002, ioaddr+PCNET32_ADDR);
-    /* only touch autoselect bit */
-    outw(inw(ioaddr+PCNET32_BUS_IF) | 0x0002, ioaddr+PCNET32_BUS_IF);
+    dev->irq = irq_line;
 
     if (pcnet32_debug > 0)
       printk(version);
@@ -403,7 +392,17 @@ pcnet32_open(struct device *dev)
 		           (u32) virt_to_bus(lp->rx_ring),
 			   (u32) virt_to_bus(&lp->init_block));
 
-	lp->init_block.mode = 0x0000;
+	/* check for ATLAS T1/E1 LAW card */
+	if (dev->dev_addr[0] == 0x00 && dev->dev_addr[1] == 0xe0 && dev->dev_addr[2] == 0x75) {
+		/* select GPSI mode */
+		lp->init_block.mode = 0x0100;
+		outw(0x0002, ioaddr+PCNET32_ADDR);
+		outw(inw(ioaddr+PCNET32_BUS_IF) & ~2, ioaddr+PCNET32_BUS_IF);
+		/* switch full duplex on */
+		outw(0x0009, ioaddr+PCNET32_ADDR);
+		outw(inw(ioaddr+PCNET32_BUS_IF) | 1, ioaddr+PCNET32_BUS_IF);
+	} else
+		lp->init_block.mode = 0x0000;
 	lp->init_block.filter[0] = 0x00000000;
 	lp->init_block.filter[1] = 0x00000000;
 	pcnet32_init_ring(dev);
@@ -718,7 +717,22 @@ pcnet32_interrupt(int irq, void *dev_id, struct pt_regs * regs)
 
 		/* Log misc errors. */
 		if (csr0 & 0x4000) lp->stats.tx_errors++; /* Tx babble. */
-		if (csr0 & 0x1000) lp->stats.rx_errors++; /* Missed a Rx frame. */
+		if (csr0 & 0x1000) {
+			/*
+			 * this happens when our receive ring is full. This 
+			 * shouldn't be a problem as we will see normal rx 
+			 * interrupts for the frames in the receive ring. But 
+			 * there are some PCI chipsets (I can reproduce this 
+			 * on SP3G with Intel saturn chipset) which have some-
+			 * times problems and will fill up the receive ring 
+			 * with error descriptors. In this situation we don't 
+			 * get a rx interrupt, but a missed frame interrupt 
+			 * sooner or later. So we try to clean up our receive 
+			 * ring here.
+			 */
+			pcnet32_rx(dev);
+			lp->stats.rx_errors++; /* Missed a Rx frame. */
+		}
 		if (csr0 & 0x0800) {
 			printk("%s: Bus master arbitration failure, status %4.4x.\n",
 				   dev->name, csr0);
@@ -878,14 +892,14 @@ static void pcnet32_set_multicast_list(struct device *dev)
 	if (dev->flags&IFF_PROMISC) {
 		/* Log any net taps. */
 		printk("%s: Promiscuous mode enabled.\n", dev->name);
-		lp->init_block.mode = 0x8000;
+		lp->init_block.mode |= 0x8000;
 	} else {
 		int num_addrs=dev->mc_count;
 		if(dev->flags&IFF_ALLMULTI)
 			num_addrs=1;
 		/* FIXIT: We don't use the multicast table, but rely on upper-layer filtering. */
 		memset(lp->init_block.filter , (num_addrs == 0) ? 0 : -1, sizeof(lp->init_block.filter));
-		lp->init_block.mode = 0x0000;
+		lp->init_block.mode &= ~0x8000;
 	}
 
 	outw(0, ioaddr+PCNET32_ADDR);

@@ -6,6 +6,7 @@
  *  by James Banks
  *
  *  (C) 1997-1998 Caldera, Inc.
+ *  (C) 1998 James Banks
  *
  *  This software may be used and distributed according to the terms
  *  of the GNU Public License, incorporated herein by reference.
@@ -58,8 +59,8 @@ static	int		duplex = 0;
 static	int		speed = 0;
 static	u8		*TLanPadBuffer;
 static	char		TLanSignature[] = "TLAN";
-static	int		TLanVersionMajor = 0;
-static	int		TLanVersionMinor = 43;
+static	int		TLanVersionMajor = 1;
+static	int		TLanVersionMinor = 0;
 
 
 static	TLanAdapterEntry TLanAdapterList[] = {
@@ -582,10 +583,7 @@ int TLan_PciProbe( u8 *pci_bus, u8 *pci_dfn, u8 *pci_irq, u8 *pci_rev, u32 *pci_
 
 			if ( ! ( pci_command & PCI_COMMAND_MASTER ) ) {
 				pcibios_write_config_word ( *pci_bus,  *pci_dfn, PCI_COMMAND, pci_command | PCI_COMMAND_MASTER );
-				printk( "TLAN:  Attempting to activate busmastering.\n" );
-				printk( "TLAN:    You may need to set busmastering to on in the CMOS\n" );
-				printk( "TLAN:    before this card will work.\n" );
-				*pci_io_base = 0;
+				printk( "TLAN:  Activating PCI bus mastering for this device.\n" );
 			}
 
 			pci_index++;
@@ -1222,7 +1220,7 @@ u32 TLan_HandleStatOverflow( struct device *dev, u16 host_int )
 	 *	of the list.  If the frame was the last in the Rx
 	 *	channel (EOC), the function restarts the receive channel
 	 *	by sending an Rx Go command to the adapter.  Then it
-	 *	activates/continues the the activity LED.
+	 *	activates/continues the activity LED.
 	 *
 	 **************************************************************/
 
@@ -1723,7 +1721,7 @@ void TLan_FreeLists( struct device *dev )
 	 *		io_base		Base IO port of the device of
 	 *				which to print DIO registers.
 	 *
-	 *	This function prints out all the the internal (DIO)
+	 *	This function prints out all the internal (DIO)
 	 *	registers of a TLAN chip.
 	 *
 	 **************************************************************/

@@ -7,6 +7,7 @@
  *	All comments to David.
  */
 
+#include <linux/config.h> /* CONFIG_SCSI_PPA_HAVE_PEDANTIC */
 #ifndef _PPA_H
 #define _PPA_H
 
@@ -54,12 +55,12 @@
  *
  * Fixed all problems in the parport sharing scheme. Now ppa can be safe
  * used with lp or other parport devices on the same parallel port.
- *		1997 by Andrea Arcangeli <arcangeli@mbox.queen.it>
+ *		1997 by Andrea Arcangeli
  *							[1.39]
  *
  * Little fix in ppa engine to ensure that ppa don' t release parport
  * or disconnect in wrong cases.
- *		1997 by Andrea Arcangeli <arcangeli@mbox.queen.it>
+ *		1997 by Andrea Arcangeli
  *							[1.40]
  *
  * Corrected ppa.h for 2.1.x kernels (>=2.1.85)

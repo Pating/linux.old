@@ -1,6 +1,6 @@
 VERSION = 2
 PATCHLEVEL = 0
-SUBLEVEL = 35
+SUBLEVEL = 36
 
 ARCH = i386
 
@@ -367,6 +367,9 @@ MODVERFILE := $(TOPDIR)/include/linux/modversions.h
 endif
 
 depend dep: dep-files $(MODVERFILE)
+
+checkconfig:
+	perl -w scripts/checkconfig.pl `find * -name '*.[hcS]' -print | sort`
 
 ifdef CONFIGURATION
 ..$(CONFIGURATION):

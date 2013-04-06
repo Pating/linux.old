@@ -297,7 +297,7 @@ static unsigned char lance_need_isa_bounce_buffers = 1;
 
 static int lance_open(struct device *dev);
 static int lance_open_fail(struct device *dev);
-static void lance_init_ring(struct device *dev);
+static void lance_init_ring(struct device *dev, int mode);
 static int lance_start_xmit(struct sk_buff *skb, struct device *dev);
 static int lance_rx(struct device *dev);
 static void lance_interrupt(int irq, void *dev_id, struct pt_regs *regs);
@@ -360,7 +360,7 @@ cleanup_module(void)
 		if (dev->priv != NULL) {
 			kfree(dev->priv);
 			dev->priv = NULL;
-			free_irq(dev->irq, NULL);
+			free_dma(dev->dma);
 			release_region(dev->base_addr, LANCE_TOTAL_SIZE);
 			unregister_netdev(dev);
 		}
@@ -512,14 +512,6 @@ int lance_probe1(struct device *dev, int ioaddr, int irq, int options)
 	dev->base_addr = ioaddr;
 	request_region(ioaddr, LANCE_TOTAL_SIZE, chip_table[lance_version].name);
 
-#ifdef CONFIG_LANCE32
-	/* look if it's a PCI or VLB chip */
-	if (lance_version == PCNET_PCI || lance_version == PCNET_VLB || lance_version == PCNET_PCI_II) {
-	    extern int lance32_probe1 (struct device *dev, const char *chipname, int pci_irq_line);
-	    
-	    return lance32_probe1 (dev, chipname, pci_irq_line);
-	}
-#endif    
 	/* Make certain the data structures used by the LANCE are aligned and DMAble. */
 		
 	lp = (struct lance_private *)(((unsigned long)kmalloc(sizeof(*lp)+7,
@@ -746,7 +738,7 @@ lance_open(struct device *dev)
 		           (u32) virt_to_bus(lp->rx_ring),
 			   (u32) virt_to_bus(&lp->init_block));
 
-	lance_init_ring(dev);
+	lance_init_ring(dev, GFP_KERNEL);
 	/* Re-initialize the LANCE, and start it when done. */
 	outw(0x0001, ioaddr+LANCE_ADDR);
 	outw((short) (u32) virt_to_bus(&lp->init_block), ioaddr+LANCE_DATA);
@@ -808,7 +800,7 @@ lance_purge_tx_ring(struct device *dev)
 
 /* Initialize the LANCE Rx and Tx rings. */
 static void
-lance_init_ring(struct device *dev)
+lance_init_ring(struct device *dev, int gfp)
 {
 	struct lance_private *lp = (struct lance_private *)dev->priv;
 	int i;
@@ -821,13 +813,13 @@ lance_init_ring(struct device *dev)
 		struct sk_buff *skb;
 		void *rx_buff;
 
-		skb = alloc_skb(PKT_BUF_SZ, GFP_DMA | GFP_KERNEL);
+		skb = alloc_skb(PKT_BUF_SZ, GFP_DMA | gfp);
 		lp->rx_skbuff[i] = skb;
 		if (skb) {
 			skb->dev = dev;
 			rx_buff = skb->tail;
 		} else
-			rx_buff = kmalloc(PKT_BUF_SZ, GFP_DMA | GFP_KERNEL);
+			rx_buff = kmalloc(PKT_BUF_SZ, GFP_DMA | gfp);
 		if (rx_buff == NULL)
 			lp->rx_ring[i].base = 0;
 		else
@@ -858,7 +850,7 @@ lance_restart(struct device *dev, unsigned int csr0_bits, int must_reinit)
 	if (must_reinit ||
 		(chip_table[lp->chip_version].flags & LANCE_MUST_REINIT_RING)) {
 		lance_purge_tx_ring(dev);
-		lance_init_ring(dev);
+		lance_init_ring(dev, GFP_ATOMIC);
 	}
 	outw(0x0000,    dev->base_addr + LANCE_ADDR);
 	outw(csr0_bits, dev->base_addr + LANCE_DATA);
