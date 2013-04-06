@@ -344,11 +344,11 @@ struct pci_dev_info dev_info[] = {
 	DEVICE( VIA,		VIA_82C585,	"VT 82C585 Apollo VP1/VPX"),
 	DEVICE( VIA,		VIA_82C586_0,	"VT 82C586 Apollo ISA"),
 	DEVICE( VIA,		VIA_82C595,	"VT 82C595 Apollo VP2"),
-	DEVICE( VIA,		VIA_82C596_0,	"VT 82C596 Apollo Pro"),
+	DEVICE( VIA,		VIA_82C596,	"VT 82C596 Apollo Pro"),
 	DEVICE( VIA,		VIA_82C597_0,	"VT 82C597 Apollo VP3"),
 	DEVICE( VIA,		VIA_82C598_0,	"VT 82C598 Apollo MVP3"),
 	DEVICE( VIA,		VIA_82C926,	"VT 82C926 Amazon"),
-	DEVICE( VIA,		VIA_82C416,	"VT 82C416MV"),
+	DEVICE( VIA,		VIA_82C576_1,	"VT 82C416MV"),
 	DEVICE( VIA,		VIA_82C595_97,	"VT 82C595 Apollo VP2/97"),
 	DEVICE( VIA,		VIA_82C586_2,	"VT 82C586 Apollo USB"),
 	DEVICE( VIA,		VIA_82C586_3,	"VT 82C586B Apollo ACPI"),
@@ -491,6 +491,8 @@ struct pci_dev_info dev_info[] = {
 	DEVICE( CBOARDS,	CBOARDS_DAS1602_16,"DAS1602/16"),
 	DEVICE( MOTOROLA_OOPS,	MOTOROLA_FALCON,"Falcon"),
 	DEVICE( TIMEDIA,	TIMEDIA_4008A, "Noname 4008A"),
+	DEVICE( FARSITE,	FARSYNC_T2P,	"FarSync T2P"),
+	DEVICE( FARSITE,	FARSYNC_T4P,	"FarSync T4P"),
 	DEVICE( SYMPHONY,	SYMPHONY_101,	"82C101"),
 	DEVICE( TEKRAM,		TEKRAM_DC290,	"DC-290"),
 	DEVICE( 3DLABS,		3DLABS_300SX,	"GLINT 300SX"),
@@ -857,6 +859,7 @@ static const char *pci_strvendor(unsigned int vendor)
 	      case PCI_VENDOR_ID_NVIDIA_SGS:	return "NVidia/SGS Thomson";
 	      case PCI_VENDOR_ID_CBOARDS:	return "ComputerBoards";
 	      case PCI_VENDOR_ID_TIMEDIA:	return "Timedia Technology";
+	      case PCI_VENDOR_ID_FARSITE:	return "FarSite Communications";
 	      case PCI_VENDOR_ID_SYMPHONY:	return "Symphony";
 	      case PCI_VENDOR_ID_COMPUTONE:	return "Computone Corporation";
 	      case PCI_VENDOR_ID_TEKRAM:	return "Tekram";
