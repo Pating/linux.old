@@ -127,22 +127,12 @@ extern inline void cpuid(int op, int *eax, int *ebx, int *ecx, int *edx)
  *      Cyrix CPU indexed register access macros
  */
 
-extern inline unsigned char getCx86(unsigned char reg)
-{
-	unsigned char data;
+#define getCx86(reg) ({ outb((reg), 0x22); inb(0x23); })
 
-	__asm__ __volatile__("movb %1,%%al\n\t"
-		      "outb %%al,$0x22\n\t"
-		      "inb $0x23,%%al" : "=a" (data) : "q" (reg));
-	return data;
-}
-
-extern inline void setCx86(unsigned char reg, unsigned char data)
-{
-	__asm__ __volatile__("outb %%al,$0x22\n\t"
-	     "movb %1,%%al\n\t"
-	     "outb %%al,$0x23" : : "a" (reg), "q" (data));
-}
+#define setCx86(reg, data) do { \
+	outb((reg), 0x22); \
+	outb((data), 0x23); \
+} while (0)
 
 /*
  * Bus types (default is ISA, but people can check others with these..)

@@ -1054,14 +1054,16 @@ static int elf_core_dump(long signr, struct pt_regs * regs)
 	struct vm_area_struct *vma;
 	struct elfhdr elf;
 	off_t offset = 0, dataoff;
-	long limit = current->rlim[RLIMIT_CORE].rlim_cur;
+	unsigned long limit = current->rlim[RLIMIT_CORE].rlim_cur;
 	int numnote = 4;
 	struct memelfnote notes[4];
 	struct elf_prstatus prstatus;	/* NT_PRSTATUS */
 	elf_fpregset_t fpu;		/* NT_PRFPREG */
 	struct elf_prpsinfo psinfo;	/* NT_PRPSINFO */
 
-	if (!current->dumpable || limit < ELF_EXEC_PAGESIZE || current->mm->count != 1)
+	if (!current->dumpable ||
+	    limit < ELF_EXEC_PAGESIZE ||
+	    atomic_read(&current->mm->count) != 1)
 		return 0;
 	current->dumpable = 0;
 
@@ -1075,7 +1077,7 @@ static int elf_core_dump(long signr, struct pt_regs * regs)
 	for(vma = current->mm->mmap; vma != NULL; vma = vma->vm_next) {
 		if (maydump(vma))
 		{
-			int sz = vma->vm_end-vma->vm_start;
+			unsigned long sz = vma->vm_end-vma->vm_start;
 
 			if (size+sz >= limit)
 				break;

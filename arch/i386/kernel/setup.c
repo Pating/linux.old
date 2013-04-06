@@ -36,6 +36,7 @@
 #include <linux/console.h>
 #include <asm/uaccess.h>
 #include <asm/system.h>
+#include <asm/io.h>
 #include <asm/smp.h>
 
 /*
@@ -81,12 +82,10 @@ extern int rd_image_start;	/* starting block # of image */
 extern int root_mountflags;
 extern int _etext, _edata, _end;
 
-extern char empty_zero_page[PAGE_SIZE];
-
 /*
  * This is set up by the setup-routine at boot-time
  */
-#define PARAM	empty_zero_page
+#define PARAM	((unsigned char *)empty_zero_page)
 #define EXT_MEM_K (*(unsigned short *) (PARAM+2))
 #define ALT_MEM_K (*(unsigned long *) (PARAM+0x1e0))
 #ifdef CONFIG_APM

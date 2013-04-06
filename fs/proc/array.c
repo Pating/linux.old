@@ -35,6 +35,8 @@
  *			- Incorporation and non-SMP safe operation
  *			of forissier patch in 2.1.78 by 
  *			Hans Marcus <crowbar@concepts.nl>
+ *
+ * aeb@cwi.nl        :  /proc/partitions
  */
 
 #include <linux/types.h>
@@ -1059,7 +1061,7 @@ static ssize_t read_maps (int pid, struct file * file, char * buf,
 		goto getlen_out;
 
 	/* Check whether the mmaps could change if we sleep */
-	volatile_task = (p != current || p->mm->count > 1);
+	volatile_task = (p != current || atomic_read(&p->mm->count) > 1);
 
 	/* decode f_pos */
 	lineno = *ppos >> MAPS_LINE_SHIFT;
@@ -1191,6 +1193,7 @@ extern int get_module_list(char *);
 extern int get_ksyms_list(char *, char **, off_t, int);
 #endif
 extern int get_device_list(char *);
+extern int get_partition_list(char *);
 extern int get_filesystem_list(char *);
 extern int get_filesystem_info( char * );
 extern int get_irq_list(char *);
@@ -1249,6 +1252,9 @@ static long get_root_array(char * page, int type, char **start,
 
 		case PROC_DEVICES:
 			return get_device_list(page);
+
+		case PROC_PARTITIONS:
+			return get_partition_list(page);
 
 		case PROC_INTERRUPTS:
 			return get_irq_list(page);
