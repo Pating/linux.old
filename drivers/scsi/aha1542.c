@@ -155,7 +155,7 @@ static void do_aha1542_intr_handle(int irq, void *dev_id, struct pt_regs *regs);
      WAITbits = inb(port) & (mask);					\
      if ((WAITbits & (allof)) == (allof) && ((WAITbits & (noneof)) == 0)) \
        break;                                                         	\
-     udelay(1000);							\
+     mdelay(1);							\
      if (--WAITtimeout == 0) goto fail;					\
    }									\
  }
@@ -223,7 +223,7 @@ static int aha1542_in(unsigned int base, unchar *cmdp, int len)
 
 /* Similar to aha1542_in, except that we wait a very short period of time.
    We use this if we know the board is alive and awake, but we are not sure
-   if the board will respond the the command we are about to send or not */
+   if the board will respond to the command we are about to send or not */
 static int aha1542_in1(unsigned int base, unchar *cmdp, int len)
 {
     unsigned long flags;
@@ -319,8 +319,7 @@ static int aha1542_test_port(int bse, struct Scsi_Host * shpnt)
 
     outb(SRST|IRST/*|SCRST*/, CONTROL(bse));
 
-    i = jiffies + 2;
-    while (i>jiffies); /* Wait a little bit for things to settle down. */
+    mdelay(20);	/* Wait a little bit for things to settle down. */
     
     debug = 1;
     /* Expect INIT and IDLE, any of the others are bad */

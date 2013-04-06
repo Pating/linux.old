@@ -107,8 +107,8 @@ L:	linux-scsi@vger.rutgers.edu
 S:	Maintained
 
 APM DRIVER
-P:	Rik Faith & Stephen Rothwell
-M:	faith@cs.unc.edu, Stephen.Rothwell@canb.auug.org.au
+P:	Stephen Rothwell
+M:	Stephen.Rothwell@canb.auug.org.au
 L:	linux-laptop@vger.rutgers.edu
 S:	Maintained
 
@@ -304,11 +304,11 @@ M:	Gadi Oxman <gadio@netvision.net.il>
 L:	linux-kernel@vger.rutgers.edu
 S:	Maintained
 
-IPX NETWORK LAYER
-P:	
-M:
-L:	
-S:	Orphan
+IPX/SPX NETWORK LAYER
+P:	Jay Schulist
+M:	Jay Schulist <Jay.Schulist@spacs.k12.wi.us>
+L:	linux-net@vger.rutgers.edu
+S:	Maintained
 
 ISDN SUBSYSTEM
 P:	Fritz Elfert

@@ -57,8 +57,6 @@
 
 #include "irq.h"
 
-spinlock_t semaphore_wake_lock = SPIN_LOCK_UNLOCKED;
-
 extern unsigned long start_kernel, _etext;
 extern void update_one_process( struct task_struct *p,
 				unsigned long ticks, unsigned long user,
@@ -867,7 +865,7 @@ __initfunc(static void do_boot_cpu(int i))
 		SMP_PRINTK(("Startup point 1.\n"));
 		timeout = 0;
 		do {
-			SMP_PRINTK(("Sleeping.\n")); udelay(1000000);
+			SMP_PRINTK(("Sleeping.\n")); mdelay(1000);
 			udelay(10);
 		} while ( (send_status = (apic_read(APIC_ICR) & 0x1000))
 			  && (timeout++ < 1000));
@@ -1118,7 +1116,7 @@ __initfunc(void smp_boot_cpus(void))
 	SMP_PRINTK(("Boot done.\n"));
 
 	/*
-	 * Here we can be sure that there is an IO-APIC in the system, lets
+	 * Here we can be sure that there is an IO-APIC in the system. Let's
 	 * go and set it up:
 	 */
 	setup_IO_APIC();
@@ -1654,7 +1652,7 @@ __initfunc(int calibrate_APIC_clock (void))
 	setup_APIC_timer(1000000000);
 
 	/*
-	 * The timer chip counts down to zero. Lets wait
+	 * The timer chip counts down to zero. Let's wait
 	 * for a wraparound to start exact measurement:
 	 * (the current tick might have been already half done)
 	 */
@@ -1662,14 +1660,14 @@ __initfunc(int calibrate_APIC_clock (void))
 	wait_8254_wraparound ();
 
 	/*
-	 * We wrapped around just now, lets start:
+	 * We wrapped around just now. Let's start:
 	 */
 	RDTSC(t1);
 	tt1=apic_read(APIC_TMCCT);
 
 #define LOOPS (HZ/10)
 	/*
-	 * lets wait LOOPS wraprounds:
+	 * let's wait LOOPS wraprounds:
 	 */
 	for (i=0; i<LOOPS; i++)
 		wait_8254_wraparound ();
