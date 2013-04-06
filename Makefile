@@ -1,6 +1,6 @@
 VERSION = 2
 PATCHLEVEL = 1
-SUBLEVEL = 111
+SUBLEVEL = 112
 
 ARCH := $(shell uname -m | sed -e s/i.86/i386/ -e s/sun4u/sparc64/ -e s/arm.*/arm/ -e s/sa110/arm/)
 
@@ -298,7 +298,7 @@ modules_install:
 	cd modules; \
 	MODULES=""; \
 	inst_mod() { These="`cat $$1`"; MODULES="$$MODULES $$These"; \
-		mkdir -p $$MODLIB/$$2; cp -p $$These $$MODLIB/$$2; \
+		mkdir -p $$MODLIB/$$2; cp $$These $$MODLIB/$$2; \
 		echo Installing modules under $$MODLIB/$$2; \
 	}; \
 	\
@@ -340,7 +340,8 @@ clean:	archclean
 	rm -f core `find . -name '.*.flags' -print`
 	rm -f vmlinux System.map
 	rm -f .tmp*
-	rm -f drivers/char/consolemap_deftbl.c drivers/char/conmakehash
+	rm -f drivers/char/consolemap_deftbl.c drivers/video/promcon_tbl.c
+	rm -f drivers/char/conmakehash
 	rm -f drivers/sound/bin2hex drivers/sound/hex2hex
 	if [ -d modules ]; then \
 		rm -f core `find modules/ -type f -print`; \

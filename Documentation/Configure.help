@@ -1488,6 +1488,76 @@ CONFIG_FB
   If you want to play with it, say Y here and to the driver for your
   graphics board, below. If unsure, say N.
 
+Acorn VIDC support
+CONFIG_FB_ACORN
+  This is the frame buffer device driver for the Acorn VIDC graphics
+  chipset.
+
+Apollo frame buffer device
+CONFIG_FB_APOLLO
+  This is the frame buffer device driver for the monochrome graphics
+  hardware found in some Apollo workstations.
+
+Amiga native chipset support
+CONFIG_FB_AMIGA
+  This is the frame buffer device driver for the builtin graphics
+  chipset found in Amigas.
+
+Amiga OCS chipset support
+CONFIG_FB_AMIGA_OCS
+  This enables support for the original Agnus and Denise video chips,
+  found in the Amiga 1000 and most A500's and A2000's.  If you intend
+  to run Linux on any of these systems, say Y; otherwise say N.
+
+Amiga ECS chipset support
+CONFIG_FB_AMIGA_ECS
+  This enables support for the Enhanced Chip Set, found in later
+  A500's, later A2000's, the A600, the A3000, the A3000T and CDTV.  If
+  you intend to run Linux on any of these systems, say Y; otherwise
+  say N.
+
+Amiga AGA chipset support
+CONFIG_FB_AMIGA_AGA
+  This enables support for the Advanced Graphics Architecture (also
+  known as the AGA or AA) Chip Set, found in the A1200, A4000, A4000T
+  and CD32.  If you intend to run Linux on any of these systems, say Y;
+  otherwise say N.
+
+Amiga CyberVision support
+CONFIG_FB_CYBER
+  This enables support for the Cybervision 64 graphics card from Phase5.
+  Please note that its use is not all that intuitive (i.e. if you have
+  any questions, be sure to ask!).  Say N unless you have a Cybervision
+  64 or plan to get one before you next recompile the kernel.         
+  Please note that this driver DOES NOT support the Cybervision 64 3D
+  card, as they use incompatible video chips.           
+
+Amiga CyberVision3D support (EXPERIMENTAL)
+CONFIG_FB_VIRGE
+  This enables support for the Cybervision 64/3D graphics card from Phase5.
+  Please note that its use is not all that intuitive (i.e. if you have
+  any questions, be sure to ask!).  Say N unless you have a Cybervision
+  64/3D or plan to get one before you next recompile the kernel.         
+  Please note that this driver DOES NOT support the older Cybervision 64
+  card, as they use incompatible video chips.           
+
+Amiga RetinaZ3 support (EXPERIMENTAL)
+CONFIG_FB_RETINAZ3
+  This enables support for the Retina Z3 graphics card. Say N unless you
+  have a Retina Z3 or plan to get one before you next recompile the kernel.
+
+Amiga CLgen driver (EXPERIMENTAL)
+CONFIG_FB_CLGEN
+  This enables support for Cirrus Logic GD542x/543x based boards on Amiga:
+  SD64, Piccolo, Picasso II/II+, Picasso IV, or EGS Spectrum.  Say N
+  unless you have such a graphics board or plan to get one before you next
+  recompile the kernel.
+
+Atari native chipset support
+CONFIG_FB_ATARI
+  This is the frame buffer device driver for the builtin graphics
+  chipset found in Ataris.
+
 Open Firmware frame buffer device support 
 CONFIG_FB_OF
   Say Y if you want support with Open Firmware for your graphics board.
@@ -1499,6 +1569,31 @@ CONFIG_FB_S3TRIO
 ATI Mach64 display support
 CONFIG_FB_ATY
   This driver supports graphics boards with the ATI Mach64 chips.
+
+PowerMac "control" frame buffer device support
+CONFIG_FB_CONTROL
+  This driver supports a frame buffer for the graphics adapter in the
+  Power Macintosh 7300 and others.
+
+PowerMac "platinum" frame buffer device support
+CONFIG_FB_PLATINUM
+  This driver supports a frame buffer for the "platinum" graphics adapter
+  in some Power Macintoshes.
+
+Chips 65550 display support
+CONFIG_FB_CT65550
+  This is the frame buffer device driver for the Chips & Technologies
+  65550 graphics chip in PowerBooks.
+
+Mac frame buffer device
+CONFIG_FB_MAC
+  This is the frame buffer device driver for the graphics hardware in
+  m68k Macintoshes.
+
+HP300 frame buffer device
+CONFIG_FB_HP300
+  This is the frame buffer device driver for the Topcat graphics
+  hardware found in HP300 workstations.
 
 VGA chipset support (text only)
 CONFIG_FB_VGA
@@ -1530,38 +1625,143 @@ CONFIG_FB_MDA
   
   If unsure, say N.
 
-###
-### Somebody please explain the following options
-###
-# Virtual Frame Buffer support (ONLY FOR TESTING!)
-# CONFIG_FB_VIRTUAL
-#
-# Advanced low level driver options
-# CONFIG_FBCON_ADVANCED
-#
-# Monochrome support
-# CONFIG_FBCON_MFB
-#
-# 2 bpp packed pixels support
-# CONFIG_FBCON_CFB2
-#
-# 4 bpp packed pixels support
-# CONFIG_FBCON_CFB4
-#
-# 8 bpp packed pixels support
-# CONFIG_FBCON_CFB8
-#
-# 16 bpp packed pixels support
-# CONFIG_FBCON_CFB16
-#
-# 24 bpp packed pixels support
-# CONFIG_FBCON_CFB24
-#
-# 32 bpp packed pixels support
-# CONFIG_FBCON_CFB32
-#
-# VGA characters/attributes support
-# CONFIG_FBCON_VGA
+SBUS and UPA framebuffers
+CONFIG_FB_SBUS
+  Say Y if you want support for SBUS or UPA based frame buffer device.
+
+Creator/Creator3D support
+CONFIG_FB_CREATOR
+  This is the frame buffer device driver for the Creator and Creator3D
+  graphics boards.
+
+CGsix (GX,TurboGX) support
+CONFIG_FB_CGSIX
+  This is the frame buffer device driver for the CGsix (GX, TurboGX)
+  frame buffer.
+
+BWtwo support
+CONFIG_FB_BWTWO
+  This is the frame buffer device driver for the BWtwo frame buffer.
+
+CGthree support
+CONFIG_FB_CGTHREE
+  This is the frame buffer device driver for the CGthree frame buffer.
+
+TCX (SS4/SS5 only) support
+CONFIG_FB_TCX
+  This is the frame buffer device driver for the TCX 24/8bit frame buffer.
+
+Virtual Frame Buffer support (ONLY FOR TESTING!)
+CONFIG_FB_VIRTUAL
+  This is a `virtual' frame buffer device.  It operates on a chunk of
+  unswapable kernel memory instead of on the memory of a graphics board.
+  This means you cannot see any output sent to this frame buffer device,
+  while it does consume precious memory.  The main use of this frame
+  buffer device is testing and debugging the frame buffer subsystem. Do
+  NOT enable it for normal systems! To protect the innocent, it has to
+  be enabled explicitly on boot time using the kernel option `video=vfb:'.
+
+  This driver is also available as a module ( = code which can be
+  inserted and removed from the running kernel whenever you want).
+  The module will be called vfb.o.  If you want to compile it as
+  a module, say M here and read Documentation/modules.txt.
+ 
+  If unsure, say N.
+
+Advanced low level driver options
+CONFIG_FBCON_ADVANCED
+  The frame buffer console uses character drawing routines that are
+  tailored to the specific organization of pixels in the memory of your
+  graphics hardware.  These are called the low level frame buffer console
+  drivers. Note that they are used for text console output only; they are
+  NOT needed for graphical applications.
+
+  If you do not enable this option, the needed low level drivers are
+  automatically enabled, depending on what frame buffer devices you
+  selected. This is recommended for most users.
+
+  If you enable this option, you have more fine-grained control over which
+  low level drivers are enabled. You can e.g. leave out low level drivers
+  for color depths you do not intend to use for text consoles.
+
+  Low level frame buffer console drivers can be modules ( = code which
+  can be inserted and removed from the running kernel whenever you want).
+  The modules will be called fbcon-*.o.  If you want to compile (some of)
+  them as modules, read Documentation/modules.txt.
+  
+  If unsure, say N.
+
+Monochrome support
+CONFIG_FBCON_MFB
+  This is the low level frame buffer console driver for monochrome
+  (2 colors) packed pixels.
+
+2 bpp packed pixels support
+CONFIG_FBCON_CFB2
+  This is the low level frame buffer console driver for 2 bits per pixel
+  (4 colors) packed pixels.
+
+4 bpp packed pixels support
+CONFIG_FBCON_CFB4
+  This is the low level frame buffer console driver for 4 bits per pixel
+  (16 colors) packed pixels.
+
+8 bpp packed pixels support
+CONFIG_FBCON_CFB8
+  This is the low level frame buffer console driver for 8 bits per pixel
+  (256 colors) packed pixels.
+
+16 bpp packed pixels support
+CONFIG_FBCON_CFB16
+  This is the low level frame buffer console driver for 15 or 16 bits
+  per pixel (32K or 64K colors, also known as `hicolor') packed pixels.
+
+24 bpp packed pixels support
+CONFIG_FBCON_CFB24
+  This is the low level frame buffer console driver for 24 bits per
+  pixel (16M colors, also known as `truecolor') packed pixels. It is
+  NOT for `sparse' 32 bits per pixel mode.
+
+32 bpp packed pixels support
+CONFIG_FBCON_CFB32
+  This is the low level frame buffer console driver for 32 bits per pixel
+  (16M colors, also known as `truecolor') sparse packed pixels.
+
+Amiga bitplanes support
+CONFIG_FBCON_AFB
+  This is the low level frame buffer console driver for 1 to 8 bitplanes
+  (2 to 256 colors) on Amiga.
+
+Amiga interleaved bitplanes support
+CONFIG_FBCON_ILBM
+  This is the low level frame buffer console driver for 1 to 8
+  interleaved bitplanes (2 to 256 colors) on Amiga.
+
+Atari interleaved bitplanes (2 planes) support
+CONFIG_FBCON_IPLAN2P2
+  This is the low level frame buffer console driver for 2 interleaved
+  bitplanes (4 colors) on Atari.
+
+Atari interleaved bitplanes (4 planes) support
+CONFIG_FBCON_IPLAN2P4
+  This is the low level frame buffer console driver for 4 interleaved
+  bitplanes (16 colors) on Atari.
+
+Atari interleaved bitplanes (8 planes) support
+CONFIG_FBCON_IPLAN2P8
+  This is the low level frame buffer console driver for 8 interleaved
+  bitplanes (256 colors) on Atari.
+
+Mac variable bpp packed pixels support
+CONFIG_FBCON_MAC
+  This is the low level frame buffer console driver for 1/2/4/8/16/32
+  bits per pixel packed pixels on Mac. It supports variable fontwidths
+  for low resolution screens.
+  
+VGA characters/attributes support
+CONFIG_FBCON_VGA
+  This is the low level frame buffer console driver for VGA text mode, as
+  used by vgafb.
 
 Parallel-port support
 CONFIG_PARPORT
@@ -5783,18 +5983,6 @@ CONFIG_ISP16_CDI
   The module will be called isp16.o. If you want to compile it as a
   module, say M here and read Documentation/modules.txt.
 
-Preload dcache
-CONFIG_DCACHE_PRELOAD
-  Preloading will create dcache entries when a directory is scanned
-  (e.g. because the ls command was used) for the *first* time. This
-  should speed up successive lookups of information about files in
-  that directory, but can also consume large amounts of memory.
-
-  Please report speedups (or slowdowns due to the memory usage if they
-  occur) to schoebel@informatik.uni-stuttgart.de .
-
-  If unsure, say N.
-
 Quota support
 CONFIG_QUOTA
   If you say Y here, you will be able to set per user limits for disk
@@ -5804,173 +5992,6 @@ CONFIG_QUOTA
   (user: anonymous) in
   ftp://sunsite.unc.edu/pub/Linux/docs/HOWTO/mini. Probably the quota
   support is only useful for multi user systems. If unsure, say N.
-
-Online mirror support
-CONFIG_OMIRR
-  omirr is a package for _symmetric_ mirroring of files over the
-  Internet. In contrast to rdist, the online mirror daemon (omirrd) is
-  running all the time and transfers any changes on the file system as
-  soon as possible to all other servers. Symmetric means that all
-  servers have equal rights in changing a file: the last changer of a
-  file will win. This is the same behaviour as multiple processes
-  operating on a global file system. In effect, omirr can do the same
-  as NFS mounts, but will have better performance since the data is
-  stored on local disks. In contrast to a cache filesystem which has a
-  dedicated master copy, broken connections and/or servers are no
-  problem for continuing work on the remaining ones, because there is
-  no master copy. Every computer that wants to participate in the
-  mirroring needs to run the daemon omirrd, contained in the omirr
-  package which is available via FTP (user: anonymous) from
-  ftp://ftp.isa.de/pub/home/luik. You must say Y if you want to use
-  in.omirrd, but you should (but need not) say N if you don't (for
-  performance reasons).
-
-  Note that this is experimental code; use at your own risk.
-
-Filename translation support
-CONFIG_TRANS_NAMES
-  This is a useful feature if you have a pool of diskless Linux
-  clients which mount their root filesystems from a central
-  server. Depending on their hostnames, the clients can then see
-  different versions of certain files, which keeps maintenance at a
-  minimum when used for configuration files. The kernel running on the
-  clients should have this option enabled. If you don't administer a
-  pool of Linux clients, say N here, otherwise read on:
-
-  When you say Y here, filenames, directory names etc become
-  context-sensitive.  If you have a file named
-  "/etc/config#host=banana#", it will appear (by default) as
-  hardlinked to "/etc/config" on host "banana", while on host "mango"
-  another file "/etc/config#host=mango#" will appear as having been
-  hardlinked to "/etc/config".
-  This default behaviour can be changed by setting the _first_
-  environment variable NAMETRANS to a colon-separated list of suffixes
-  which are tried in the specified order. For example, in 
- 
-  'env - NAMETRANS=#host=mango#:#ktype=diskless# "`env`" command ...'
-   
-  the command will see the same files as if it had been executed on
-  host "mango" with a diskless kernel.
-
-  Using NAMETRANS supersedes _all_ default translations. Thus
-  translations can be completely switched off with an empty list,
-  e.g. 
-
-  'env - NAMETRANS= "`env`" command ...'  
-
-  Note that some system utilities like tar, dump, restore should be
-  used with translation switched off, in order to avoid doubled space
-  in archive files and when extracting from them. Also, make sure that
-  nfsd, mountd (and similar ones like samba daemons) run without
-  translation, in order to avoid doubled (or even wrong) translation
-  at the server and at the client.
-
-  You can automatically force the creation of context-dependent
-  filenames if there exists a template filename like
-  "/etc/mtab#host=CREATE#". As soon as a process running on "mango"
-  tries to create a file "/etc/mtab", the version
-  "/etc/mtab#host=mango#" is created instead (which appears in turn as
-  hardlinked to "/etc/mtab").  Note that if you want to make
-  "/etc/fstab" context-dependent, you should execute "touch
-  /etc/mtab#host=CREATE#" and "touch /etc/mtab.tmp#host=CREATE#",
-  because mount, umount and others running on different hosts would
-  otherwise try to create one shared /etc/mtab which would result in a
-  clash. Also one should execute "touch /etc/nologin#host=CREATE#" to
-  prevent global side effects from shutdown resp. runlevel.
-
-  Please read Documentation/transname.txt if you intend to say Y here.
-
-Restrict translation to gid
-CONFIG_TRANS_RESTRICT
-  If you say Y here, default filename translations are carried out
-  only if the parent directory of the context-sensitive file belongs
-  to a specific group id (gid). Trying to translate names everywhere
-  will decrease performance of file openings. Normally translations
-  are used only in system configuration files but not in ordinary user
-  file space. So you should change the gid of directories containing
-  context-dependent files to some special group like "adm" (group id
-  4) and enable this option. As a result, users will not notice any
-  performance degradation resulting from filename translation.
-
-  Note that translations resulting from the first environment variable
-  "NAMETRANS=..." are always carried out regardless of the gid of
-  directories.
-
-  Beware: before turning on this option make sure that all directories
-  containing context-dependent files belong to the special group, or
-  system initialization may fail. If unsure, select N.
-
-Group id (gid) for translation restriction
-CONFIG_TRANS_GID
-  Default name translations will be carried out only inside directories
-  belonging to the group id (gid) that you specify here.
-  Default is 4 (group "adm").
-
-Nodename (hostname) translation
-CONFIG_TR_NODENAME
-  Enables translation of name suffixes like in
-  "/etc/config#host=banana#".  The syntax is
-  <filename>#host=<hostname>#. The hostname can be queried with the
-  command "uname -n". Normally this option is used heavily when
-  translation is enabled. If unsure, say Y.
-
-Kernelname translation
-CONFIG_TR_KERNNAME
-  Enables translation of name suffixes like in
-  "/etc/config#kname=default#".  The string is hard compiled into the
-  kernel by the following option.  Useful if your kernel does not know
-  the hostname at boot time, and there is no way to tell the hostname
-  by lilo or bootp. Please avoid using this option and prefer
-  "Nodename (hostname) translation" (CONFIG_TR_NODENAME) wherever
-  possible. When mounting the root over NFS, the own hostname must be
-  known at boot time anyway; this option is just for special use.
-  Note that the default translations are tried in the order as
-  occurring in the configuration, that is 1) host 2) kname 3) ktype 4)
-  machine 5) system. If unsure, say Y.
-
-String for kernelname translation
-CONFIG_KERNNAME
-  Enter the string you want to compile into the kernel. The string
-  will be used as context in context-dependent files like
-  "/etc/config#kname=<string>#".
-
-Kerneltype translation
-CONFIG_TR_KERNTYPE
-  Enables translation of name suffixes like in
-  "/etc/config#ktype=default#".  The syntax is
-  <filename>#ktype=<string>#. The string is hard compiled in the
-  kernel by the following option. Use if you want to create different
-  kernels with different behaviour. For example, use the string
-  "default" on your server, and use "diskless" on all your diskless
-  clients (and perhaps "dataless" on dataless clients). This way you
-  can avoid dozens of "config#host=<something># with same contents and
-  you have no effort when new machines are added. If unsure, say Y.
-
-String for kerneltype translation
-CONFIG_KERNTYPE
-  Enter the string you want to compile into the kernel. The string
-  will be used as context in context-dependent files like
-  "/etc/config#ktype=default#". If your kernel is to be used on a
-  server, you probably can use "default" here. If your kernel is
-  intended for a diskless client, you probably should enter "diskless"
-  here.
-
-Machine type translation
-CONFIG_TR_MACHINE
-  Enables translation of name suffixes like in
-  "/etc/config#machine=i486#".  The syntax is
-  <filename>#machine=<id>#. The machine types can be queried with the
-  command "uname -m". Normally used only on multi-architecture
-  installations. If unsure, say Y.
-
-System name translation
-CONFIG_TR_SYSNAME
-  Enables translation of name suffixes like in
-  "/etc/config#system=Linux#".  The syntax is
-  <filename>#system=<id>#. The system name can be queried with the
-  command "uname -s". Currently only supported by Linux, but hopefully
-  other operating systems will pick up the idea of context-dependent
-  translations. If unsure, say Y.
 
 Minix fs support
 CONFIG_MINIX_FS
