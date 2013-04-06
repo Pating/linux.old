@@ -5,7 +5,7 @@
  *
  *		Implementation of the Transmission Control Protocol(TCP).
  *
- * Version:	$Id: tcp.c,v 1.140 1999/04/22 10:34:31 davem Exp $
+ * Version:	$Id: tcp.c,v 1.140.2.1 1999/05/29 04:16:48 davem Exp $
  *
  * Authors:	Ross Biro, <bir7@leland.Stanford.Edu>
  *		Fred N. van Kempen, <waltje@uWalt.NL.Mugnet.ORG>
@@ -896,6 +896,7 @@ int tcp_do_sendmsg(struct sock *sk, struct msghdr *msg)
 					err = -ERESTARTSYS;
 					goto do_interrupted;
 				}
+				tcp_push_pending_frames(sk, tp);
 				wait_for_tcp_memory(sk);
 
 				/* If SACK's were formed or PMTU events happened,

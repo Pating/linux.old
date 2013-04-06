@@ -109,6 +109,7 @@ static const char RCSid[] = "$Header: /vger/u4/cvs/linux/drivers/scsi/scsi.c,v 1
 #define BLIST_SINGLELUN 0x10
 #define BLIST_NOTQ	0x20
 #define BLIST_SPARSELUN 0x40
+#define BLIST_MAX5LUN	0x80
 
 /*
  * Data declarations.
@@ -262,6 +263,7 @@ static struct dev_info device_list[] =
 {"HP", "C1790A", "", BLIST_NOLUN},              /* scanjet iip */
 {"HP", "C2500A", "", BLIST_NOLUN},              /* scanjet iicx */
 {"YAMAHA", "CDR102", "1.00", BLIST_NOLUN},	/* extra reset */
+{"RELISYS", "Scorpio", "*", BLIST_NOLUN},	/* responds to all LUN */
 
 /*
  * Other types of devices that have special flags.
@@ -273,6 +275,7 @@ static struct dev_info device_list[] =
 {"INSITE","I325VM","*", BLIST_KEY},
 {"NRC","MBR-7","*", BLIST_FORCELUN | BLIST_SINGLELUN},
 {"NRC","MBR-7.4","*", BLIST_FORCELUN | BLIST_SINGLELUN},
+{"REGAL","CDC-4X","*", BLIST_MAX5LUN | BLIST_SINGLELUN},
 {"NAKAMICH","MJ-4.8S","*", BLIST_FORCELUN | BLIST_SINGLELUN},
 {"NAKAMICH","MJ-5.16S","*", BLIST_FORCELUN | BLIST_SINGLELUN},
 {"PIONEER","CD-ROM DRM-600","*", BLIST_FORCELUN | BLIST_SINGLELUN},
@@ -932,6 +935,15 @@ int scan_scsis_single (int channel, int dev, int lun, int *max_dev_lun,
     *max_dev_lun = 8;
     return 1;
   }
+
+  /*
+   * REGAL CDC-4X: avoid hang after LUN 4
+   */
+  if (bflags & BLIST_MAX5LUN) {
+    *max_dev_lun = 5;
+    return 1;
+  }
+
   /*
    * We assume the device can't handle lun!=0 if: - it reports scsi-0 (ANSI
    * SCSI Revision 0) (old drives like MAXTOR XT-3280) or - it reports scsi-1

@@ -611,6 +611,13 @@ S: 1123 North Oak Park Avenue
 S: Oak Park, Illinois 60302
 S: USA
 
+N: Daniel J. Frasnelli
+E: dfrasnel@alphalinux.org   
+W: http://www.alphalinux.org/
+P: 1024/3EF87611 B9 F1 44 50 D3 E8 C2 80  DA E5 55 AA 56 7C 42 DA
+D: DEC Alpha hacker
+D: Miscellaneous bug squisher
+
 N: Jim Freeman
 E: jfree@sovereign.org
 W: http://www.sovereign.org/
@@ -656,7 +663,7 @@ N: Richard E. Gooch
 E: rgooch@atnf.csiro.au
 D: parent process death signal to children
 D: prctl() syscall
-D: /proc/mtrr support to manipulate MTRRs on Pentium Pro's
+D: /proc/mtrr support to manipulate MTRRs on Intel P6 family
 S: CSIRO Australia Telescope National Facility
 S: P.O. Box 76, Epping
 S: New South Wales, 2121
@@ -754,6 +761,13 @@ S: 77 Clarence Mews
 S: London SE16 1GD
 S: United Kingdom
 
+N: Bart Hartgers
+E: bart@etpmod.phys.tue.nl
+D: MTRR emulation with Centaur MCRs
+S: Gen Stedmanstraat 212
+S: 5623 HZ Eindhoven
+S: The Netherlands
+
 N: Kai Harrekilde-Petersen
 E: khp@dolphinics.no
 D: Original author of the ftape-HOWTO, i82078 fdc detection code.
@@ -801,7 +815,7 @@ S: 14059 Berlin
 S: Germany
 
 N: Michael Hipp
-E: mhipp@student.uni-tuebingen.de
+E: hippm@informatik.uni-tuebingen.de
 D: drivers for the racal ni5210 & ni6510 Ethernet-boards
 S: Talstr. 1
 S: D - 72072 Tuebingen
