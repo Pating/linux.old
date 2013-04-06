@@ -1,6 +1,6 @@
 VERSION = 2
 PATCHLEVEL = 0
-SUBLEVEL = 34
+SUBLEVEL = 35
 
 ARCH = i386
 
@@ -144,6 +144,10 @@ endif
 
 ifdef CONFIG_SBUS
 DRIVERS := $(DRIVERS) drivers/sbus/sbus.a
+endif
+
+ifeq ($(CONFIG_PARIDE),y)
+DRIVERS := $(DRIVERS) drivers/block/paride/paride.a
 endif
 
 include arch/$(ARCH)/Makefile
@@ -323,6 +327,10 @@ mrproper: clean
 	rm -f include/linux/autoconf.h include/linux/version.h
 	rm -f drivers/sound/local.h drivers/sound/.defines
 	rm -f drivers/char/uni_hash.tbl drivers/char/conmakehash
+	rm -f drivers/net/soundmodem/sm_tbl_{afsk1200,afsk2666,fsk9600}.h
+	rm -f drivers/net/soundmodem/sm_tbl_{hapn4800,psk4800}.h
+	rm -f drivers/net/soundmodem/sm_tbl_{afsk2400_7,afsk2400_8}.h
+	rm -f drivers/net/soundmodem/gentbl
 	rm -f .version .config* config.in config.old
 	rm -f scripts/tkparse scripts/kconfig.tk scripts/kconfig.tmp
 	rm -f scripts/lxdialog/*.o scripts/lxdialog/lxdialog

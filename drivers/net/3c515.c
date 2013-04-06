@@ -18,9 +18,9 @@ static char *version = "3c515.c:v0.99 4/7/98 becker@cesdis.gsfc.nasa.gov\n";
 /* "Knobs" that adjust features and parameters. */
 /* Set the copy breakpoint for the copy-only-tiny-frames scheme.
    Setting to > 1512 effectively disables this feature. */
-static const rx_copybreak = 200;
+static const int rx_copybreak = 200;
 /* Allow setting MTU to a larger size, bypassing the normal ethernet setup. */
-static const mtu = 1500;
+static const int mtu = 1500;
 /* Maximum events (Rx packets, etc.) to handle at each interrupt. */
 static int max_interrupt_work = 20;
 
@@ -149,7 +149,7 @@ The 3c515 series use an interface that's very similar to the 3c900 "Boomerang"
 PCI cards, with the bus master interface extensively modified to work with
 the ISA bus.
 
-The card is capable of full-bus-master transfers with seperate
+The card is capable of full-bus-master transfers with separate
 lists of transmit and receive descriptors, similar to the AMD LANCE/PCnet,
 DEC Tulip and Intel Speedo3.
 

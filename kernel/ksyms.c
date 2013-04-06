@@ -203,6 +203,9 @@ struct symbol_table symbol_table = {
 	X(blkdev_release),
 	X(gendisk_head),
 	X(resetup_one_dev),
+	X(unplug_device),
+	X(make_request),
+	X(tq_disk),
 
 #ifdef CONFIG_SERIAL	
 	/* Module creation of serial units */
@@ -236,6 +239,11 @@ struct symbol_table symbol_table = {
 	/* sysctl table registration */
 	X(register_sysctl_table),
 	X(unregister_sysctl_table),
+	X(sysctl_string),
+	X(sysctl_intvec),
+	X(proc_dostring),
+	X(proc_dointvec),
+	X(proc_dointvec_minmax),
 
 	/* interrupt handling */
 	X(request_irq),

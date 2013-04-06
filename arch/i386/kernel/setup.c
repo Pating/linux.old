@@ -32,6 +32,7 @@
 #include <asm/segment.h>
 #include <asm/system.h>
 #include <asm/smp.h>
+#include <asm/io.h>
 
 /*
  * Tell us the machine setup..
@@ -49,7 +50,7 @@ char x86_vendor_id[13] = "unknown";
 
 unsigned char Cx86_step = 0;
 static const char *Cx86_type[] = {
-	"unknown", "1.3", "1.4", "2.4", "2.5", "2.6", "2.7 or 3.7", "4.2"
+	"unknown", "1.3", "1.4", "1.5", "1.6", "2.4", "2.5", "2.6", "2.7 or 3.7", "4.2"
 	};
 
 char ignore_irq13 = 0;		/* set if exception 16 works */
@@ -224,7 +225,9 @@ static const char * i486model(unsigned int nr)
 static const char * i586model(unsigned int nr)
 {
 	static const char *model[] = {
-		"0", "Pentium 60/66","Pentium 75+","OverDrive PODP5V83"
+		"0", "Pentium 60/66","Pentium 75+","OverDrive PODP5V83",
+		"Pentium MMX", NULL, NULL, "Mobile Pentium 75+",
+		"Mobile Pentium MMX"
 	};
 	if (nr < sizeof(model)/sizeof(char *))
 		return model[nr];
@@ -235,7 +238,7 @@ static const char * Cx86model(void)
 {
 	unsigned char nr6x86 = 0;
 	static const char *model[] = {
-		"unknown", "6x86", "6x86L", "6x86MX", "6x86MXi"
+		"unknown", "6x86", "6x86L", "6x86MX", "MII"
 	};
 	switch (x86) {
 		case 5:
@@ -247,6 +250,10 @@ static const char * Cx86model(void)
 		default:
 			nr6x86 = 0;
 	}
+
+	/* We must get the stepping number by reading DIR1 */
+	outb(0xff, 0x22); x86_mask=inb(0x23);
+
 	switch (x86_mask) {
 		case 0x03:
 			Cx86_step =  1;	/* 6x86MX Rev 1.3 */
@@ -254,20 +261,26 @@ static const char * Cx86model(void)
 		case 0x04:
 			Cx86_step =  2;	/* 6x86MX Rev 1.4 */
 			break;
+		case 0x05:
+			Cx86_step =  3;	/* 6x86MX Rev 1.5 */
+			break;
+		case 0x06:
+			Cx86_step =  4;	/* 6x86MX Rev 1.6 */
+			break;
 		case 0x14:
-			Cx86_step =  3;	/* 6x86 Rev 2.4 */
+			Cx86_step =  5;	/* 6x86 Rev 2.4 */
 			break;
 		case 0x15:
-			Cx86_step =  4;	/* 6x86 Rev 2.5 */
+			Cx86_step =  6;	/* 6x86 Rev 2.5 */
 			break;
 		case 0x16:
-			Cx86_step =  5;	/* 6x86 Rev 2.6 */
+			Cx86_step =  7;	/* 6x86 Rev 2.6 */
 			break;
 		case 0x17:
-			Cx86_step =  6;	/* 6x86 Rev 2.7 or 3.7 */
+			Cx86_step =  8;	/* 6x86 Rev 2.7 or 3.7 */
 			break;
 		case 0x22:
-			Cx86_step =  7;	/* 6x86L Rev 4.2 */
+			Cx86_step =  9;	/* 6x86L Rev 4.2 */
 			break;
 		default:
 			Cx86_step = 0;
@@ -285,12 +298,44 @@ static const char * i686model(unsigned int nr)
 	return NULL;
 }
 
+struct cpu_model_info {
+	int x86;
+	char *model_names[16];
+};
+
+static struct cpu_model_info amd_models[] = {
+	{ 4,
+	  { NULL, NULL, NULL, "DX/2", NULL, NULL, NULL, "DX/2-WB", "DX/4",
+	    "DX/4-WB", NULL, NULL, NULL, NULL, "Am5x86-WT", "Am5x86-WB" }},
+	{ 5,
+	  { "K5/SSA5 (PR-75, PR-90, PR-100)", "K5 (PR-120, PR-133)",
+	    "K5 (PR-166)", "K5 (PR-200)", NULL, NULL,
+	    "K6 (166 - 266)", "K6 (166 - 300)", "K6-2 (200 - 450)",
+	    "K6-3D-Plus (200 - 450)", NULL, NULL, NULL, NULL, NULL, NULL }},
+};
+
+static const char * AMDmodel(void)
+{
+	const char *p=NULL;
+	int i;
+	
+	if (x86_model < 16)
+		for (i=0; i<sizeof(amd_models)/sizeof(struct cpu_model_info); i++)
+			if (amd_models[i].x86 == x86) {
+				p = amd_models[i].model_names[(int)x86_model];
+				break;
+			}
+	return p;
+}
+
 static const char * getmodel(int x86, int model)
 {
         const char *p = NULL;
         static char nbuf[12];
 	if (strncmp(x86_vendor_id, "Cyrix", 5) == 0)
 		p = Cx86model();
+	else if(strcmp(x86_vendor_id, "AuthenticAMD")==0)
+		p = AMDmodel();
 	else {
 		switch (x86) {
 			case 4:

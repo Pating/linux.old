@@ -20,9 +20,9 @@ static char *version =
 /* "Knobs" that adjust features and parameters. */
 /* Set the copy breakpoint for the copy-only-tiny-frames scheme.
    Setting to > 1512 effectively disables this feature. */
-static const rx_copybreak = 200;
+static const int rx_copybreak = 200;
 /* Allow setting MTU to a larger size, bypassing the normal ethernet setup. */
-static const mtu = 1500;
+static const int mtu = 1500;
 /* Maximum events (Rx packets, etc.) to handle at each interrupt. */
 static int max_interrupt_work = 20;
 
@@ -194,7 +194,7 @@ XL, 3Com's PCI to 10/100baseT adapters.  It also works with the 10Mbs
 versions of the FastEtherLink cards.  The supported product IDs are
   3c590, 3c592, 3c595, 3c597, 3c900, 3c905
 
-The ISA 3c515 is supported with a seperate driver, 3c515.c, included with
+The ISA 3c515 is supported with a separate driver, 3c515.c, included with
 the kernel source or available from
     cesdis.gsfc.nasa.gov:/pub/linux/drivers/3c515.html
 
@@ -212,7 +212,7 @@ The 3c59x series use an interface that's very similar to the previous 3c5x9
 series.  The primary interface is two programmed-I/O FIFOs, with an
 alternate single-contiguous-region bus-master transfer (see next).
 
-The 3c900 "Boomerang" series uses a full-bus-master interface with seperate
+The 3c900 "Boomerang" series uses a full-bus-master interface with separate
 lists of transmit and receive descriptors, similar to the AMD LANCE/PCnet,
 DEC Tulip and Intel Speedo3.  The first chip version retains a compatible
 programmed-I/O interface that will be removed in the 'B' and subsequent
@@ -1342,7 +1342,7 @@ static void vortex_tx_timeout(struct device *dev)
 }
 
 /*
- * Handle uncommon interrupt sources.  This is a seperate routine to minimize
+ * Handle uncommon interrupt sources.  This is a separate routine to minimize
  * the cache impact.
  */
 static void
