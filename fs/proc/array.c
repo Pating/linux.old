@@ -223,7 +223,7 @@ static int get_loadavg(char * buffer)
 		LOAD_INT(a), LOAD_FRAC(a),
 		LOAD_INT(b), LOAD_FRAC(b),
 		LOAD_INT(c), LOAD_FRAC(c),
-		nr_running, nr_tasks, last_pid);
+		nr_running, nr_threads, last_pid);
 }
 
 static int get_kstat(char * buffer)
@@ -312,7 +312,7 @@ static int get_uptime(char * buffer)
 	unsigned long idle;
 
 	uptime = jiffies;
-	idle = task[0]->times.tms_utime + task[0]->times.tms_stime;
+	idle = init_tasks[0]->times.tms_utime + init_tasks[0]->times.tms_stime;
 
 	/* The formula for the fraction parts really is ((t * 100) / HZ) % 100, but
 	   that would overflow about every five days at HZ == 100.
@@ -495,7 +495,7 @@ static unsigned long get_wchan(struct task_struct *p)
 		int count = 0;
 
 		stack_page = (unsigned long)p;
-		esp = p->tss.esp;
+		esp = p->thread.esp;
 		if (!stack_page || esp < stack_page || esp >= 8188+stack_page)
 			return 0;
 		/* include/asm-i386/system.h:switch_to() pushes ebp last. */
@@ -742,7 +742,7 @@ static inline char * task_mem(struct task_struct *p, char *buffer)
 {
 	struct mm_struct * mm = p->mm;
 
-	if (mm && mm != &init_mm) {
+	if (mm) {
 		struct vm_area_struct * vma = mm->mmap;
 		unsigned long data = 0, stack = 0;
 		unsigned long exec = 0, lib = 0;
@@ -868,7 +868,7 @@ static int get_stat(int pid, char * buffer)
 		return 0;
 	state = *get_task_state(tsk);
 	vsize = eip = esp = 0;
-	if (tsk->mm && tsk->mm != &init_mm) {
+	if (tsk->mm) {
 		struct vm_area_struct *vma = tsk->mm->mmap;
 		while (vma) {
 			vsize += vma->vm_end - vma->vm_start;
@@ -1025,7 +1025,7 @@ static int get_statm(int pid, char * buffer)
 	read_unlock(&tasklist_lock);	/* FIXME!! This should be done after the last use */
 	if (!tsk)
 		return 0;
-	if (tsk->mm && tsk->mm != &init_mm) {
+	if (tsk->mm) {
 		struct vm_area_struct * vma = tsk->mm->mmap;
 
 		while (vma) {
@@ -1111,11 +1111,11 @@ static ssize_t read_maps (int pid, struct file * file, char * buf,
 	if (!p)
 		goto freepage_out;
 
-	if (!p->mm || p->mm == &init_mm || count == 0)
+	if (!p->mm || count == 0)
 		goto getlen_out;
 
 	/* Check whether the mmaps could change if we sleep */
-	volatile_task = (p != current || atomic_read(&p->mm->count) > 1);
+	volatile_task = (p != current || atomic_read(&p->mm->mm_users) > 1);
 
 	/* decode f_pos */
 	lineno = *ppos >> MAPS_LINE_SHIFT;
@@ -1378,8 +1378,6 @@ static int process_unauthorized(int type, int pid)
 		ok = p->dumpable;
 		if(!cap_issubset(p->cap_permitted, current->cap_permitted))
 			ok=0;			
-		if(!p->mm)	/* Scooby scooby doo where are you ? */
-			p=NULL;
 	}
 		
 	read_unlock(&tasklist_lock);

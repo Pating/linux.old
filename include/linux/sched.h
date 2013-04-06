@@ -7,7 +7,7 @@ extern unsigned long event;
 
 #include <linux/binfmts.h>
 #include <linux/personality.h>
-#include <linux/tasks.h>
+#include <linux/threads.h>
 #include <linux/kernel.h>
 #include <linux/types.h>
 #include <linux/times.h>
@@ -63,7 +63,7 @@ extern unsigned long avenrun[];		/* Load averages */
 #define CT_TO_SECS(x)	((x) / HZ)
 #define CT_TO_USECS(x)	(((x) % HZ) * 1000000/HZ)
 
-extern int nr_running, nr_tasks;
+extern int nr_running, nr_threads;
 extern int last_pid;
 
 #include <linux/fs.h>
@@ -119,6 +119,7 @@ extern spinlock_t runqueue_lock;
 extern void sched_init(void);
 extern void init_idle(void);
 extern void show_state(void);
+extern void cpu_init (void);
 extern void trap_init(void);
 
 #define	MAX_SCHEDULE_TIMEOUT	LONG_MAX
@@ -169,7 +170,8 @@ struct mm_struct {
 	struct vm_area_struct * mmap_avl;	/* tree of VMAs */
 	struct vm_area_struct * mmap_cache;	/* last find_vma result */
 	pgd_t * pgd;
-	atomic_t count;
+	atomic_t mm_users;			/* How many users with user space? */
+	atomic_t mm_count;			/* How many references to "struct mm_struct" (users count as 1) */
 	int map_count;				/* number of VMAs */
 	struct semaphore mmap_sem;
 	spinlock_t page_table_lock;
@@ -192,7 +194,7 @@ struct mm_struct {
 #define INIT_MM(name) {					\
 		&init_mmap, NULL, NULL,			\
 		swapper_pg_dir, 			\
-		ATOMIC_INIT(1), 1,			\
+		ATOMIC_INIT(2), ATOMIC_INIT(1), 1,	\
 		__MUTEX_INITIALIZER(name.mmap_sem),	\
 		SPIN_LOCK_UNLOCKED,			\
 		0,					\
@@ -243,7 +245,7 @@ struct task_struct {
 	int last_processor;
 	int lock_depth;		/* Lock depth. We can context switch in and out of holding a syscall kernel lock... */	
 	struct task_struct *next_task, *prev_task;
-	struct task_struct *next_run,  *prev_run;
+	struct list_head run_list;
 
 /* task state */
 	struct linux_binfmt *binfmt;
@@ -269,9 +271,6 @@ struct task_struct {
 	/* PID hash table linkage. */
 	struct task_struct *pidhash_next;
 	struct task_struct **pidhash_pprev;
-
-	/* Pointer to task[] array linkage. */
-	struct task_struct **tarray_ptr;
 
 	wait_queue_head_t wait_chldexit;	/* for wait4() */
 	struct semaphore *vfork_sem;		/* for vfork() */
@@ -302,14 +301,15 @@ struct task_struct {
 /* ipc stuff */
 	struct sem_undo *semundo;
 	struct sem_queue *semsleeping;
-/* tss for this task */
-	struct thread_struct tss;
+/* CPU-specific state of this task */
+	struct thread_struct thread;
 /* filesystem information */
 	struct fs_struct *fs;
 /* open file information */
 	struct files_struct *files;
+
 /* memory management info */
-	struct mm_struct *mm;
+	struct mm_struct *mm, *active_mm;
 
 /* signal handlers */
 	spinlock_t sigmask_lock;	/* Protects signal and blocked */
@@ -355,13 +355,12 @@ struct task_struct {
 /* state etc */	{ 0,0,0,KERNEL_DS,&default_exec_domain,0, \
 /* counter */	DEF_PRIORITY,DEF_PRIORITY,0, \
 /* SMP */	0,0,0,-1, \
-/* schedlink */	&init_task,&init_task, &init_task, &init_task, \
+/* schedlink */	&init_task,&init_task, LIST_HEAD_INIT(init_task.run_list), \
 /* binfmt */	NULL, \
 /* ec,brk... */	0,0,0,0,0,0, \
 /* pid etc.. */	0,0,0,0,0, \
 /* proc links*/ &init_task,&init_task,NULL,NULL,NULL, \
 /* pidhash */	NULL, NULL, \
-/* tarray */	&task[0], \
 /* chld wait */	__WAIT_QUEUE_HEAD_INITIALIZER(name.wait_chldexit), NULL, \
 /* timeout */	SCHED_OTHER,0,0,0,0,0,0,0, \
 /* timer */	{ NULL, NULL, 0, 0, it_real_fn }, \
@@ -379,10 +378,10 @@ struct task_struct {
 /* comm */	"swapper", \
 /* fs info */	0,NULL, \
 /* ipc */	NULL, NULL, \
-/* tss */	INIT_TSS, \
+/* thread */	INIT_THREAD, \
 /* fs */	&init_fs, \
 /* files */	&init_files, \
-/* mm */	&init_mm, \
+/* mm */	NULL, &init_mm, \
 /* signals */	SPIN_LOCK_UNLOCKED, &init_signals, {{0}}, {{0}}, NULL, &init_task.sigqueue, 0, 0, \
 }
 
@@ -398,33 +397,10 @@ union task_union {
 extern union task_union init_task_union;
 
 extern struct   mm_struct init_mm;
-extern struct task_struct *task[NR_TASKS];
+extern struct task_struct *init_tasks[NR_CPUS];
 
-extern struct task_struct **tarray_freelist;
-extern spinlock_t taskslot_lock;
-
-extern __inline__ void add_free_taskslot(struct task_struct **t)
-{
-	spin_lock(&taskslot_lock);
-	*t = (struct task_struct *) tarray_freelist;
-	tarray_freelist = t;
-	spin_unlock(&taskslot_lock);
-}
-
-extern __inline__ struct task_struct **get_free_taskslot(void)
-{
-	struct task_struct **tslot;
-
-	spin_lock(&taskslot_lock);
-	if((tslot = tarray_freelist) != NULL)
-		tarray_freelist = (struct task_struct **) *tslot;
-	spin_unlock(&taskslot_lock);
-
-	return tslot;
-}
-
-/* PID hashing. */
-#define PIDHASH_SZ (NR_TASKS >> 2)
+/* PID hashing. (shouldnt this be dynamic?) */
+#define PIDHASH_SZ (4096 >> 2)
 extern struct task_struct *pidhash[PIDHASH_SZ];
 
 #define pid_hashfn(x)	((((x) >> 8) ^ (x)) & (PIDHASH_SZ - 1))
@@ -616,10 +592,16 @@ extern inline int capable(int cap)
  * Routines for handling mm_structs
  */
 extern struct mm_struct * mm_alloc(void);
-static inline void mmget(struct mm_struct * mm)
+
+/* mmdrop drops the mm and the page tables */
+extern inline void FASTCALL(__mmdrop(struct mm_struct *));
+static inline void mmdrop(struct mm_struct * mm)
 {
-	atomic_inc(&mm->count);
+	if (atomic_dec_and_test(&mm->mm_count))
+		__mmdrop(mm);
 }
+
+/* mmput gets rid of the mappings and all user-space */
 extern void mmput(struct mm_struct *);
 /* Remove the current tasks stale references to the old mm_struct */
 extern void mm_release(void);
@@ -740,6 +722,29 @@ do {									\
 
 #define for_each_task(p) \
 	for (p = &init_task ; (p = p->next_task) != &init_task ; )
+
+
+static inline void del_from_runqueue(struct task_struct * p)
+{
+	nr_running--;
+	list_del(&p->run_list);
+	p->run_list.next = NULL;
+}
+
+extern inline int task_on_runqueue(struct task_struct *p)
+{
+	return (p->run_list.next != NULL);
+}
+
+extern inline void unhash_process(struct task_struct *p)
+{
+	if (task_on_runqueue(p)) BUG();
+	nr_threads--;
+	write_lock_irq(&tasklist_lock);
+	unhash_pid(p);
+	REMOVE_LINKS(p);
+	write_unlock_irq(&tasklist_lock);
+}
 
 #endif /* __KERNEL__ */
 

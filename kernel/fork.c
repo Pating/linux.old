@@ -22,11 +22,12 @@
 #include <asm/mmu_context.h>
 #include <asm/uaccess.h>
 
-/* The idle tasks do not count.. */
-int nr_tasks=0;
+/* The idle threads do not count.. */
+int nr_threads=0;
 int nr_running=0;
 
-unsigned long int total_forks=0;	/* Handle normal Linux uptimes. */
+int max_threads;
+unsigned long total_forks = 0;	/* Handle normal Linux uptimes. */
 int last_pid=0;
 
 /* SLAB cache for mm_struct's. */
@@ -36,9 +37,6 @@ kmem_cache_t *mm_cachep;
 kmem_cache_t *files_cachep; 
 
 struct task_struct *pidhash[PIDHASH_SZ];
-
-struct task_struct **tarray_freelist = NULL;
-spinlock_t taskslot_lock = SPIN_LOCK_UNLOCKED;
 
 /* UID task count cache, to prevent walking entire process list every
  * single fork() operation.
@@ -159,7 +157,7 @@ int alloc_uid(struct task_struct *p)
 	return 0;
 }
 
-void __init uidcache_init(void)
+void __init fork_init(unsigned long memsize)
 {
 	int i;
 
@@ -171,15 +169,16 @@ void __init uidcache_init(void)
 
 	for(i = 0; i < UIDHASH_SZ; i++)
 		uidhash[i] = 0;
-}
 
-static inline struct task_struct ** find_empty_process(void)
-{
-	struct task_struct **tslot = NULL;
+	/*
+	 * The default maximum number of threads is set to a safe
+	 * value: the thread structures can take up at most half
+	 * of memory.
+	 */
+	max_threads = memsize / THREAD_SIZE / 2;
 
-	if ((nr_tasks < NR_TASKS - MIN_TASKS_LEFT_FOR_ROOT) || !current->uid)
-		tslot = get_free_taskslot();
-	return tslot;
+	init_task.rlim[RLIMIT_NPROC].rlim_cur = max_threads/2;
+	init_task.rlim[RLIMIT_NPROC].rlim_max = max_threads/2;
 }
 
 /* Protects next_safe and last_pid. */
@@ -232,6 +231,9 @@ static inline int dup_mmap(struct mm_struct * mm)
 {
 	struct vm_area_struct * mpnt, *tmp, **pprev;
 	int retval;
+
+	/* Kill me slowly. UGLY! FIXME! */
+	memcpy(&mm->start_code, &current->mm->start_code, 15*sizeof(unsigned long));
 
 	flush_cache_mm(current->mm);
 	pprev = &mm->mmap;
@@ -290,9 +292,6 @@ fail_nomem:
 
 /*
  * Allocate and initialize an mm_struct.
- *
- * NOTE! The mm mutex will be locked until the
- * caller decides that all systems are go..
  */
 struct mm_struct * mm_alloc(void)
 {
@@ -300,23 +299,12 @@ struct mm_struct * mm_alloc(void)
 
 	mm = kmem_cache_alloc(mm_cachep, SLAB_KERNEL);
 	if (mm) {
-		*mm = *current->mm;
+		memset(mm, 0, sizeof(*mm));
 		init_new_context(mm);
-		atomic_set(&mm->count, 1);
-		mm->map_count = 0;
-		mm->def_flags = 0;
-		init_MUTEX_LOCKED(&mm->mmap_sem);
+		atomic_set(&mm->mm_users, 1);
+		atomic_set(&mm->mm_count, 1);
+		init_MUTEX(&mm->mmap_sem);
 		mm->page_table_lock = SPIN_LOCK_UNLOCKED;
-		/*
-		 * Leave mm->pgd set to the parent's pgd
-		 * so that pgd_offset() is always valid.
-		 */
-		mm->mmap = mm->mmap_avl = mm->mmap_cache = NULL;
-
-		/* It has not run yet, so cannot be present in anyone's
-		 * cache or tlb.
-		 */
-		mm->cpu_vm_mask = 0;
 	}
 	return mm;
 }
@@ -346,19 +334,30 @@ void mm_release(void)
 }
 
 /*
+ * Called when the last reference to the mm
+ * is dropped: either by a lazy thread or by
+ * mmput
+ */
+inline void __mmdrop(struct mm_struct *mm)
+{
+	if (mm == &init_mm) BUG();
+	free_page_tables(mm);
+	kmem_cache_free(mm_cachep, mm);
+}
+
+/*
  * Decrement the use count and release all resources for an mm.
  */
 void mmput(struct mm_struct *mm)
 {
-	if (atomic_dec_and_test(&mm->count)) {
+	if (atomic_dec_and_test(&mm->mm_users)) {
 		release_segments(mm);
 		exit_mmap(mm);
-		free_page_tables(mm);
-		kmem_cache_free(mm_cachep, mm);
+		mmdrop(mm);
 	}
 }
 
-static inline int copy_mm(int nr, unsigned long clone_flags, struct task_struct * tsk)
+static inline int copy_mm(unsigned long clone_flags, struct task_struct * tsk)
 {
 	struct mm_struct * mm;
 	int retval;
@@ -367,14 +366,21 @@ static inline int copy_mm(int nr, unsigned long clone_flags, struct task_struct 
 	tsk->cmin_flt = tsk->cmaj_flt = 0;
 	tsk->nswap = tsk->cnswap = 0;
 
-	if (clone_flags & CLONE_VM) {
-		mmget(current->mm);
-		/*
-		 * Set up the LDT descriptor for the clone task.
-		 */
-		copy_segments(nr, tsk, NULL);
-		SET_PAGE_DIR(tsk, current->mm->pgd);
+	tsk->mm = NULL;
+	tsk->active_mm = NULL;
+
+	/*
+	 * Are we cloning a kernel thread?
+	 *
+	 * We need to steal a active VM for that..
+	 */
+	mm = current->mm;
+	if (!mm)
 		return 0;
+
+	if (clone_flags & CLONE_VM) {
+		atomic_inc(&mm->mm_users);
+		goto good_mm;
 	}
 
 	retval = -ENOMEM;
@@ -383,23 +389,33 @@ static inline int copy_mm(int nr, unsigned long clone_flags, struct task_struct 
 		goto fail_nomem;
 
 	tsk->mm = mm;
-	copy_segments(nr, tsk, mm);
-	retval = new_page_tables(tsk);
-	if (retval)
+	tsk->active_mm = mm;
+
+	mm->pgd = pgd_alloc();
+	if (!mm->pgd)
 		goto free_mm;
+
+	/*
+	 * child gets a private LDT (if there was an LDT in the parent)
+	 */
+	copy_segments(tsk, mm);
+
+	down(&current->mm->mmap_sem);
 	retval = dup_mmap(mm);
+	up(&current->mm->mmap_sem);
 	if (retval)
 		goto free_pt;
-	up(&mm->mmap_sem);
+
+good_mm:
+	tsk->mm = mm;
+	tsk->active_mm = mm;
+	SET_PAGE_DIR(tsk, mm->pgd);
 	return 0;
 
 free_mm:
-	tsk->mm = NULL;
-	release_segments(mm);
 	kmem_cache_free(mm_cachep, mm);
 	return retval;
 free_pt:
-	tsk->mm = NULL;
 	mmput(mm);
 fail_nomem:
 	return retval;
@@ -542,7 +558,6 @@ static inline void copy_flags(unsigned long clone_flags, struct task_struct *p)
  */
 int do_fork(unsigned long clone_flags, unsigned long usp, struct pt_regs *regs)
 {
-	int nr;
 	int retval = -ENOMEM;
 	struct task_struct *p;
 	DECLARE_MUTEX_LOCKED(sem);
@@ -555,7 +570,6 @@ int do_fork(unsigned long clone_flags, unsigned long usp, struct pt_regs *regs)
 
 	*p = *current;
 
-	down(&current->mm->mmap_sem);
 	lock_kernel();
 
 	retval = -EAGAIN;
@@ -565,15 +579,12 @@ int do_fork(unsigned long clone_flags, unsigned long usp, struct pt_regs *regs)
 		atomic_inc(&p->user->count);
 	}
 
-	{
-		struct task_struct **tslot;
-		tslot = find_empty_process();
-		if (!tslot)
-			goto bad_fork_cleanup_count;
-		p->tarray_ptr = tslot;
-		*tslot = p;
-		nr = tslot - &task[0];
-	}
+	/*
+	 * Counter atomicity is protected by
+	 * the kernel lock
+	 */
+	if (nr_threads >= max_threads)
+		goto bad_fork_cleanup_count;
 
 	if (p->exec_domain && p->exec_domain->module)
 		__MOD_INC_USE_COUNT(p->exec_domain->module);
@@ -594,8 +605,8 @@ int do_fork(unsigned long clone_flags, unsigned long usp, struct pt_regs *regs)
 	 * very end).
 	 */
 	p->state = TASK_RUNNING;
-	p->next_run = p;
-	p->prev_run = p;
+	p->run_list.next = NULL;
+	p->run_list.prev = NULL;
 
 	p->p_pptr = p->p_opptr = current;
 	p->p_cptr = NULL;
@@ -638,9 +649,9 @@ int do_fork(unsigned long clone_flags, unsigned long usp, struct pt_regs *regs)
 		goto bad_fork_cleanup_files;
 	if (copy_sighand(clone_flags, p))
 		goto bad_fork_cleanup_fs;
-	if (copy_mm(nr, clone_flags, p))
+	if (copy_mm(clone_flags, p))
 		goto bad_fork_cleanup_sighand;
-	retval = copy_thread(nr, clone_flags, usp, p, regs);
+	retval = copy_thread(0, clone_flags, usp, p, regs);
 	if (retval)
 		goto bad_fork_cleanup_sighand;
 	p->semundo = NULL;
@@ -666,22 +677,17 @@ int do_fork(unsigned long clone_flags, unsigned long usp, struct pt_regs *regs)
 	 * Let it rip!
 	 */
 	retval = p->pid;
-	if (retval) {
-		write_lock_irq(&tasklist_lock);
-		SET_LINKS(p);
-		hash_pid(p);
-		write_unlock_irq(&tasklist_lock);
+	write_lock_irq(&tasklist_lock);
+	SET_LINKS(p);
+	hash_pid(p);
+	write_unlock_irq(&tasklist_lock);
 
-		nr_tasks++;
-
-		p->next_run = NULL;
-		p->prev_run = NULL;
-		wake_up_process(p);		/* do this last */
-	}
+	nr_threads++;
+	wake_up_process(p);		/* do this last */
 	++total_forks;
+
 bad_fork:
 	unlock_kernel();
-	up(&current->mm->mmap_sem);
 fork_out:
 	if ((clone_flags & CLONE_VFORK) && (retval > 0)) 
 		down(&sem);
@@ -699,7 +705,7 @@ bad_fork_cleanup:
 	if (p->binfmt && p->binfmt->module)
 		__MOD_DEC_USE_COUNT(p->binfmt->module);
 
-	add_free_taskslot(p->tarray_ptr);
+	nr_threads--;
 bad_fork_cleanup_count:
 	if (p->user)
 		free_uid(p);

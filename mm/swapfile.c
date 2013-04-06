@@ -266,7 +266,7 @@ static void unuse_process(struct mm_struct * mm, unsigned long entry,
 	/*
 	 * Go through process' page directory.
 	 */
-	if (!mm || mm == &init_mm)
+	if (!mm)
 		return;
 	for (vma = mm->mmap; vma; vma = vma->vm_next) {
 		pgd_t * pgd = pgd_offset(mm, vma->vm_start);
@@ -661,7 +661,9 @@ asmlinkage int sys_swapon(const char * specialfile, int swap_flags)
 			else
 				p->swap_map[page] = SWAP_MAP_BAD;
 		}
-		nr_good_pages = swap_header->info.last_page - i;
+		nr_good_pages = swap_header->info.last_page -
+				swap_header->info.nr_badpages -
+				1 /* header page */;
 		lock_map_size = (p->max + 7) / 8;
 		if (error) 
 			goto bad_swap;

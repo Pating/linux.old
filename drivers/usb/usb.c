@@ -1,5 +1,5 @@
 /*
- * driver/usb/usb.c
+ * drivers/usb/usb.c
  *
  * (C) Copyright Linus Torvalds 1999
  *
@@ -476,10 +476,18 @@ void usb_destroy_configuration(struct usb_device *dev)
 	}
 	kfree(dev->config);
 
+	for (i = 1; i < USB_MAXSTRINGS; ++i) {
+		if (dev->stringindex[i]) {
+			kfree(dev->stringindex[i]);
+			dev->stringindex[i] = 0;
+		}
+	}
+#if 0
 	if (dev->stringindex)
 		kfree(dev->stringindex);
 	if (dev->stringtable)
 		kfree(dev->stringtable);
+#endif
 }
 			
 void usb_init_root_hub(struct usb_device *dev)
@@ -567,7 +575,8 @@ int usb_get_descriptor(struct usb_device *dev, unsigned char type, unsigned char
 	dr.length = size;
 
 	while (i--) {
-		if (!(result = dev->bus->op->control_msg(dev, usb_rcvctrlpipe(dev,0), &dr, buf, size)))
+		if (!(result = dev->bus->op->control_msg(dev, usb_rcvctrlpipe(dev,0), &dr, buf, size))
+		    || result == USB_ST_STALL)
 			break;
 	}
 	return result;
@@ -588,11 +597,15 @@ int usb_get_string(struct usb_device *dev, unsigned short langid, unsigned char 
 
 int usb_get_device_descriptor(struct usb_device *dev)
 {
-	return usb_get_descriptor(dev, USB_DT_DEVICE, 0, &dev->descriptor, sizeof(dev->descriptor));
-	le16_to_cpus(&dev->descriptor.bcdUSB);
-	le16_to_cpus(&dev->descriptor.idVendor);
-	le16_to_cpus(&dev->descriptor.idProduct);
-	le16_to_cpus(&dev->descriptor.bcdDevice);
+	int ret = usb_get_descriptor(dev, USB_DT_DEVICE, 0, &dev->descriptor,
+				     sizeof(dev->descriptor));
+	if (ret == 0) {
+		le16_to_cpus(&dev->descriptor.bcdUSB);
+		le16_to_cpus(&dev->descriptor.idVendor);
+		le16_to_cpus(&dev->descriptor.idProduct);
+		le16_to_cpus(&dev->descriptor.bcdDevice);
+	}
+	return ret;
 }
 
 int usb_get_hub_descriptor(struct usb_device *dev, void *data, int size)
@@ -632,6 +645,19 @@ int usb_set_port_feature(struct usb_device *dev, int port, int feature)
 	dr.length = 0;
 
 	return dev->bus->op->control_msg(dev, usb_sndctrlpipe(dev,0), &dr, NULL, 0);
+}
+
+int usb_get_status (struct usb_device *dev, int type, int target, void *data)
+{
+	devrequest dr;
+
+	dr.requesttype = USB_DIR_IN | type;	/* USB_RECIP_DEVICE, _INTERFACE, or _ENDPOINT */
+	dr.request = USB_REQ_GET_STATUS;
+	dr.value = 0;
+	dr.index = target;
+	dr.length = 2;
+
+	return dev->bus->op->control_msg (dev, usb_rcvctrlpipe (dev,0), &dr, data, 2);
 }
 
 int usb_get_hub_status(struct usb_device *dev, void *data)
@@ -884,6 +910,7 @@ int usb_get_configuration(struct usb_device *dev)
 	return parse;
 }
 
+#if 0
 int usb_get_stringtable(struct usb_device *dev)
 {
 	int i;
@@ -914,7 +941,7 @@ int usb_get_stringtable(struct usb_device *dev)
 		return -1;
 
 	/* get space for strings and index */
-	dev->stringindex = kmalloc(sizeof(char *)*maxindex, GFP_KERNEL);
+	dev->stringindex = kmalloc(sizeof(char *) * (maxindex+1), GFP_KERNEL);
 	if (!dev->stringindex)
 		return -1;
 	dev->stringtable = kmalloc(totalchars, GFP_KERNEL);
@@ -925,7 +952,7 @@ int usb_get_stringtable(struct usb_device *dev)
 	}
 
 	/* fill them in */
-	memset(dev->stringindex, 0, sizeof(char *)*maxindex);
+	memset(dev->stringindex, 0, sizeof(char *) * (maxindex+1));
 	for (i=1, string = dev->stringtable; i <= maxindex; i++) {
 		if (usb_get_string(dev, langid, i, buffer, bLengths[i]))
 			continue;
@@ -937,6 +964,48 @@ int usb_get_stringtable(struct usb_device *dev)
 	}
 	dev->maxstring = maxindex;
 	return 0;
+}
+#endif
+
+char *usb_string(struct usb_device *dev, int index)
+{
+	int len, i;
+	char *ptr;
+	union {
+		unsigned char buffer[256];
+		struct usb_string_descriptor desc;
+	} u;
+
+	if (index <= 0 || index >= USB_MAXSTRINGS)
+		return 0;
+	if (dev->stringindex[index] != 0)
+		return dev->stringindex[index];
+
+	if (dev->string_langid == 0) {
+		/* read string descriptor 0 */
+		if (usb_get_string(dev, 0, 0, u.buffer, 2) == 0
+		    && u.desc.bLength >= 4
+		    && usb_get_string(dev, 0, 0, u.buffer, 4) == 0)
+			dev->string_langid = le16_to_cpup(&u.desc.wData[0]);
+		dev->string_langid |= 0x10000;	/* so it's non-zero */
+	}
+
+	if (usb_get_string(dev, dev->string_langid, index, u.buffer, 2)
+	    || usb_get_string(dev, dev->string_langid, index, u.buffer,
+			      u.desc.bLength))
+		return 0;
+
+	len = u.desc.bLength / 2;	/* includes terminating null */
+	ptr = kmalloc(len, GFP_KERNEL);
+	if (ptr == 0)
+		return 0;
+
+	for (i = 0; i < len - 1; ++i)
+		ptr[i] = le16_to_cpup(&u.desc.wData[i]);
+	ptr[i] = 0;
+
+	dev->stringindex[index] = ptr;
+	return ptr;
 }
 
 /*
@@ -1010,7 +1079,7 @@ void usb_new_device(struct usb_device *dev)
 		return;
 	}
 
-	usb_get_stringtable(dev);
+	/* usb_get_stringtable(dev); */
 
 	dev->actconfig = dev->config;
 	dev->ifnum = 0;
@@ -1036,7 +1105,38 @@ void usb_new_device(struct usb_device *dev)
 	}
 }
 
-int usb_request_irq(struct usb_device *dev, unsigned int pipe, usb_device_irq handler, int period, void *dev_id)
+void* usb_request_irq(struct usb_device *dev, unsigned int pipe, usb_device_irq handler, int period, void *dev_id)
 {
 	return dev->bus->op->request_irq(dev, pipe, handler, period, dev_id);
+}
+
+
+void *usb_allocate_isochronous (struct usb_device *usb_dev, unsigned int pipe, void *data, int len, int maxsze, usb_device_irq completed, void *dev_id)
+{
+	return usb_dev->bus->op->alloc_isoc (usb_dev, pipe, data, len, maxsze, completed, dev_id);
+}
+
+void usb_delete_isochronous (struct usb_device *dev, void *_isodesc)
+{
+	return dev->bus->op->delete_isoc (dev, _isodesc);
+}
+
+int usb_schedule_isochronous (struct usb_device *usb_dev, void *_isodesc, void *_pisodesc)
+{
+	return usb_dev->bus->op->sched_isoc (usb_dev, _isodesc, _pisodesc);
+}
+
+int usb_unschedule_isochronous (struct usb_device *usb_dev, void *_isodesc)
+{
+	return usb_dev->bus->op->unsched_isoc (usb_dev, _isodesc);
+}
+
+int usb_compress_isochronous (struct usb_device *usb_dev, void *_isodesc)
+{
+	return usb_dev->bus->op->compress_isoc (usb_dev, _isodesc);
+}
+
+int usb_release_irq(struct usb_device *dev, void* handle)
+{
+	return dev->bus->op->release_irq(handle);
 }

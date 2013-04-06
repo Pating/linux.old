@@ -94,7 +94,23 @@ unsigned long volatile jiffies=0;
  *	via the SMP irq return path.
  */
  
-struct task_struct * task[NR_TASKS] = {&init_task, };
+struct task_struct * init_tasks[NR_CPUS] = {&init_task, };
+
+/*
+ * The tasklist_lock protects the linked list of processes.
+ *
+ * The scheduler lock is protecting against multiple entry
+ * into the scheduling code, and doesn't need to worry
+ * about interrupts (because interrupts cannot call the
+ * scheduler).
+ *
+ * The run-queue lock locks the parts that actually access
+ * and change the run-queues, and have to be interrupt-safe.
+ */
+spinlock_t runqueue_lock = SPIN_LOCK_UNLOCKED;  /* second */
+rwlock_t tasklist_lock = RW_LOCK_UNLOCKED;	/* third */
+
+static LIST_HEAD(runqueue_head);
 
 /*
  * We align per-CPU scheduling data on cacheline boundaries,
@@ -114,7 +130,7 @@ struct kernel_stat kstat = { 0 };
 
 #ifdef __SMP__
 
-#define idle_task(cpu) (task[cpu_number_map[(cpu)]])
+#define idle_task(cpu) (init_tasks[cpu_number_map[(cpu)]])
 #define can_schedule(p)	(!(p)->has_cpu)
 
 #else
@@ -140,8 +156,7 @@ void scheduling_functions_start_here(void) { }
  *	 +1000: realtime process, select this.
  */
 
-static inline int goodness (struct task_struct * prev,
-				 struct task_struct * p, int this_cpu)
+static inline int goodness(struct task_struct * p, int this_cpu, struct mm_struct *this_mm)
 {
 	int weight;
 
@@ -174,7 +189,7 @@ static inline int goodness (struct task_struct * prev,
 #endif
 
 	/* .. and a slight advantage to the current MM */
-	if (p->mm == prev->mm)
+	if (p->mm == this_mm)
 		weight += 1;
 	weight += p->priority;
 
@@ -191,24 +206,22 @@ out:
  * to care about SCHED_YIELD is when we calculate the previous process'
  * goodness ...
  */
-static inline int prev_goodness (struct task_struct * prev,
-					struct task_struct * p, int this_cpu)
+static inline int prev_goodness(struct task_struct * p, int this_cpu, struct mm_struct *this_mm)
 {
 	if (p->policy & SCHED_YIELD) {
 		p->policy &= ~SCHED_YIELD;
 		return 0;
 	}
-	return goodness(prev, p, this_cpu);
+	return goodness(p, this_cpu, this_mm);
 }
 
 /*
  * the 'goodness value' of replacing a process on a given CPU.
  * positive value means 'replace', zero or negative means 'dont'.
  */
-static inline int preemption_goodness (struct task_struct * prev,
-				struct task_struct * p, int cpu)
+static inline int preemption_goodness(struct task_struct * prev, struct task_struct * p, int cpu)
 {
-	return goodness(prev, p, cpu) - goodness(prev, prev, cpu);
+	return goodness(p, cpu, prev->mm) - goodness(prev, cpu, prev->mm);
 }
 
 /*
@@ -366,72 +379,21 @@ static void reschedule_idle(struct task_struct * p)
  */
 static inline void add_to_runqueue(struct task_struct * p)
 {
-	struct task_struct *next = init_task.next_run;
-
-	p->prev_run = &init_task;
-	init_task.next_run = p;
-	p->next_run = next;
-	next->prev_run = p;
+	list_add(&p->run_list, &runqueue_head);
 	nr_running++;
-}
-
-static inline void del_from_runqueue(struct task_struct * p)
-{
-	struct task_struct *next = p->next_run;
-	struct task_struct *prev = p->prev_run;
-
-	nr_running--;
-	next->prev_run = prev;
-	prev->next_run = next;
-	p->next_run = NULL;
-	p->prev_run = NULL;
 }
 
 static inline void move_last_runqueue(struct task_struct * p)
 {
-	struct task_struct *next = p->next_run;
-	struct task_struct *prev = p->prev_run;
-
-	/* remove from list */
-	next->prev_run = prev;
-	prev->next_run = next;
-	/* add back to list */
-	p->next_run = &init_task;
-	prev = init_task.prev_run;
-	init_task.prev_run = p;
-	p->prev_run = prev;
-	prev->next_run = p;
+	list_del(&p->run_list);
+	list_add_tail(&p->run_list, &runqueue_head);
 }
 
 static inline void move_first_runqueue(struct task_struct * p)
 {
-	struct task_struct *next = p->next_run;
-	struct task_struct *prev = p->prev_run;
-
-	/* remove from list */
-	next->prev_run = prev;
-	prev->next_run = next;
-	/* add back to list */
-	p->prev_run = &init_task;
-	next = init_task.next_run;
-	init_task.next_run = p;
-	p->next_run = next;
-	next->prev_run = p;
+	list_del(&p->run_list);
+	list_add(&p->run_list, &runqueue_head);
 }
-
-/*
- * The tasklist_lock protects the linked list of processes.
- *
- * The scheduler lock is protecting against multiple entry
- * into the scheduling code, and doesn't need to worry
- * about interrupts (because interrupts cannot call the
- * scheduler).
- *
- * The run-queue lock locks the parts that actually access
- * and change the run-queues, and have to be interrupt-safe.
- */
-spinlock_t runqueue_lock = SPIN_LOCK_UNLOCKED;  /* second */
-rwlock_t tasklist_lock = RW_LOCK_UNLOCKED;	/* third */
 
 /*
  * Wake up a process. Put it on the run-queue if it's not
@@ -450,7 +412,7 @@ void wake_up_process(struct task_struct * p)
 	 */
 	spin_lock_irqsave(&runqueue_lock, flags);
 	p->state = TASK_RUNNING;
-	if (p->next_run)
+	if (task_on_runqueue(p))
 		goto out;
 	add_to_runqueue(p);
 	spin_unlock_irqrestore(&runqueue_lock, flags);
@@ -657,8 +619,17 @@ signed long schedule_timeout(signed long timeout)
  * cleans up all remaining scheduler things, without impacting the
  * common case.
  */
-static inline void __schedule_tail (struct task_struct *prev)
+static inline void __schedule_tail(struct task_struct *prev)
 {
+	if (!current->active_mm) BUG();
+
+	if (!prev->mm) {
+		struct mm_struct *mm = prev->active_mm;
+		if (mm) {
+			prev->active_mm = NULL;
+			mmdrop(mm);
+		}
+	}
 #ifdef __SMP__
 	if ((prev->state == TASK_RUNNING) &&
 			(prev != idle_task(smp_processor_id())))
@@ -668,7 +639,7 @@ static inline void __schedule_tail (struct task_struct *prev)
 #endif /* __SMP__ */
 }
 
-void schedule_tail (struct task_struct *prev)
+void schedule_tail(struct task_struct *prev)
 {
 	__schedule_tail(prev);
 }
@@ -687,8 +658,10 @@ asmlinkage void schedule(void)
 {
 	struct schedule_data * sched_data;
 	struct task_struct *prev, *next, *p;
+	struct list_head *tmp;
 	int this_cpu, c;
 
+	if (!current->active_mm) BUG();
 	if (tq_scheduler)
 		goto handle_tq_scheduler;
 tq_scheduler_back:
@@ -731,42 +704,29 @@ move_rr_back:
 	}
 	prev->need_resched = 0;
 
-repeat_schedule:
-
 	/*
 	 * this is the scheduler proper:
 	 */
 
-	p = init_task.next_run;
-	/* Default process to select.. */
+repeat_schedule:
+	/*
+	 * Default process to select..
+	 */
 	next = idle_task(this_cpu);
 	c = -1000;
 	if (prev->state == TASK_RUNNING)
 		goto still_running;
 still_running_back:
 
-	/*
-	 * This is subtle.
-	 * Note how we can enable interrupts here, even
-	 * though interrupts can add processes to the run-
-	 * queue. This is because any new processes will
-	 * be added to the front of the queue, so "p" above
-	 * is a safe starting point.
-	 * run-queue deletion and re-ordering is protected by
-	 * the scheduler lock
-	 */
-/*
- * Note! there may appear new tasks on the run-queue during this, as
- * interrupts are enabled. However, they will be put on front of the
- * list, so our list starting at "p" is essentially fixed.
- */
-	while (p != &init_task) {
+	tmp = runqueue_head.next;
+	while (tmp != &runqueue_head) {
+		p = list_entry(tmp, struct task_struct, run_list);
 		if (can_schedule(p)) {
-			int weight = goodness(prev, p, this_cpu);
+			int weight = goodness(p, this_cpu, prev->active_mm);
 			if (weight > c)
 				c = weight, next = p;
 		}
-		p = p->next_run;
+		tmp = tmp->next;
 	}
 
 	/* Do we need to re-calculate counters? */
@@ -819,12 +779,31 @@ still_running_back:
 #endif /* __SMP__ */
 
 	kstat.context_swtch++;
+	/*
+	 * there are 3 processes which are affected by a context switch:
+	 *
+	 * prev == .... ==> (last => next)
+	 *
+	 * It's the 'much more previous' 'prev' that is on next's stack,
+	 * but prev is set to (the just run) 'last' process by switch_to().
+	 * This might sound slightly confusing but makes tons of sense.
+	 */
+	{
+		struct mm_struct *mm = next->mm;
+		if (!mm) {
+			mm = prev->active_mm;
+			set_mmu_context(prev,next);
+			if (next->active_mm) BUG();
+			next->active_mm = mm;
+			atomic_inc(&mm->mm_count);
+		}
+	}
+
 	get_mmu_context(next);
 	switch_to(prev, next, prev);
 	__schedule_tail(prev);
 
 same_process:
-  
 	reacquire_kernel_lock(current);
 	return;
 
@@ -837,11 +816,11 @@ recalculate:
 			p->counter = (p->counter >> 1) + p->priority;
 		read_unlock(&tasklist_lock);
 		spin_lock_irq(&runqueue_lock);
-		goto repeat_schedule;
 	}
+	goto repeat_schedule;
 
 still_running:
-	c = prev_goodness(prev, prev, this_cpu);
+	c = prev_goodness(prev, this_cpu, prev->active_mm);
 	next = prev;
 	goto still_running_back;
 
@@ -1760,7 +1739,7 @@ static int setscheduler(pid_t pid, int policy,
 	retval = 0;
 	p->policy = policy;
 	p->rt_priority = lp.sched_priority;
-	if (p->next_run)
+	if (task_on_runqueue(p))
 		move_first_runqueue(p);
 
 	current->need_resched = 1;
@@ -1934,13 +1913,13 @@ asmlinkage int sys_nanosleep(struct timespec *rqtp, struct timespec *rmtp)
 	return 0;
 }
 
-static void show_task(int nr,struct task_struct * p)
+static void show_task(struct task_struct * p)
 {
 	unsigned long free = 0;
 	int state;
 	static const char * stat_nam[] = { "R", "S", "D", "Z", "T", "W" };
 
-	printk("%-8s %3d ", p->comm, (p == current) ? -nr : nr);
+	printk("%-8s  ", p->comm);
 	state = p->state ? ffz(~p->state) + 1 : 0;
 	if (((unsigned) state) < sizeof(stat_nam)/sizeof(char *))
 		printk(stat_nam[state]);
@@ -1950,12 +1929,12 @@ static void show_task(int nr,struct task_struct * p)
 	if (p == current)
 		printk(" current  ");
 	else
-		printk(" %08lX ", thread_saved_pc(&p->tss));
+		printk(" %08lX ", thread_saved_pc(&p->thread));
 #else
 	if (p == current)
 		printk("   current task   ");
 	else
-		printk(" %016lx ", thread_saved_pc(&p->tss));
+		printk(" %016lx ", thread_saved_pc(&p->thread));
 #endif
 	{
 		unsigned long * n = (unsigned long *) (p+1);
@@ -1968,6 +1947,10 @@ static void show_task(int nr,struct task_struct * p)
 		printk("%5d ", p->p_cptr->pid);
 	else
 		printk("      ");
+	if (!p->mm)
+		printk(" (L-TLB) ");
+	else
+		printk(" (NOTLB) ");
 	if (p->p_ysptr)
 		printk("%7d", p->p_ysptr->pid);
 	else
@@ -2020,7 +2003,7 @@ void show_state(void)
 #endif
 	read_lock(&tasklist_lock);
 	for_each_task(p)
-		show_task((p->tarray_ptr - &task[0]),p);
+		show_task(p);
 	read_unlock(&tasklist_lock);
 }
 
@@ -2030,6 +2013,11 @@ void __init init_idle(void)
 	struct schedule_data * sched_data;
 	sched_data = &aligned_data[smp_processor_id()].schedule_data;
 
+	if (current != &init_task && task_on_runqueue(current)) {
+		printk("UGH! (%d:%d) was on the runqueue, removing.\n",
+			smp_processor_id(), current->pid);
+		del_from_runqueue(current);
+	}
 	t = get_cycles();
 	sched_data->curr = current;
 	sched_data->last_schedule = t;
@@ -2042,13 +2030,9 @@ void __init sched_init(void)
 	 * process right in SMP mode.
 	 */
 	int cpu=hard_smp_processor_id();
-	int nr = NR_TASKS;
+	int nr;
 
 	init_task.processor=cpu;
-
-	/* Init task array free list and pidhash table. */
-	while(--nr > 0)
-		add_free_taskslot(&task[nr]);
 
 	for(nr = 0; nr < PIDHASH_SZ; nr++)
 		pidhash[nr] = NULL;
@@ -2056,4 +2040,10 @@ void __init sched_init(void)
 	init_bh(TIMER_BH, timer_bh);
 	init_bh(TQUEUE_BH, tqueue_bh);
 	init_bh(IMMEDIATE_BH, immediate_bh);
+
+	/*
+	 * The boot idle thread does lazy MMU switching as well:
+	 */
+	atomic_inc(&init_mm.mm_count);
 }
+

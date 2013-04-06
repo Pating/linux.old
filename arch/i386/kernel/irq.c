@@ -27,7 +27,6 @@
 #include <linux/malloc.h>
 #include <linux/random.h>
 #include <linux/smp.h>
-#include <linux/tasks.h>
 #include <linux/smp_lock.h>
 #include <linux/init.h>
 
@@ -931,17 +930,21 @@ void free_irq(unsigned int irq, void *dev_id)
 		if (action->dev_id != dev_id)
 			continue;
 
-		/* Found it - now free it */
+		/* Found it - now remove it from the list of entries */
 		*p = action->next;
-		kfree(action);
 		if (!irq_desc[irq].action) {
 			irq_desc[irq].status |= IRQ_DISABLED;
 			irq_desc[irq].handler->shutdown(irq);
 		}
-		goto out;
+		spin_unlock_irqrestore(&irq_controller_lock,flags);
+
+		/* Wait to make sure it's not being used on another CPU */
+		while (irq_desc[irq].status & IRQ_INPROGRESS)
+			barrier();
+		kfree(action);
+		return;
 	}
 	printk("Trying to free free IRQ%d\n",irq);
-out:
 	spin_unlock_irqrestore(&irq_controller_lock,flags);
 }
 
@@ -1099,9 +1102,7 @@ __initfunc(void init_IRQ(void))
 
 	/* IPI vector for APIC spurious interrupts */
 	set_intr_gate(SPURIOUS_APIC_VECTOR, spurious_interrupt);
-#endif	
-	request_region(0x20,0x20,"pic1");
-	request_region(0xa0,0x20,"pic2");
+#endif
 
 	/*
 	 * Set the clock to 100 Hz, we already have a valid

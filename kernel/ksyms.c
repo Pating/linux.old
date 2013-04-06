@@ -116,7 +116,6 @@ EXPORT_SYMBOL(update_atime);
 EXPORT_SYMBOL(get_super);
 EXPORT_SYMBOL(get_fs_type);
 EXPORT_SYMBOL(getname);
-EXPORT_SYMBOL(__fput);	/* goner? */
 EXPORT_SYMBOL(_fput);
 EXPORT_SYMBOL(igrab);
 EXPORT_SYMBOL(iunique);
@@ -193,7 +192,10 @@ EXPORT_SYMBOL(vfs_unlink);
 EXPORT_SYMBOL(vfs_rename);
 EXPORT_SYMBOL(__pollwait);
 EXPORT_SYMBOL(ROOT_DEV);
-
+EXPORT_SYMBOL(add_to_page_cache_unique);
+EXPORT_SYMBOL(__find_get_page);
+EXPORT_SYMBOL(__find_lock_page);
+                        
 #if !defined(CONFIG_NFSD) && defined(CONFIG_NFSD_MODULE)
 EXPORT_SYMBOL(do_nfsservctl);
 #endif
@@ -308,11 +310,13 @@ EXPORT_SYMBOL(enable_hlt);
 #endif
 
 /* resource handling */
-EXPORT_SYMBOL(check_resource);
 EXPORT_SYMBOL(request_resource);
 EXPORT_SYMBOL(release_resource);
-EXPORT_SYMBOL(occupy_resource);
-EXPORT_SYMBOL(vacate_resource);
+EXPORT_SYMBOL(__request_region);
+EXPORT_SYMBOL(__check_region);
+EXPORT_SYMBOL(__release_region);
+EXPORT_SYMBOL(ioport_resource);
+EXPORT_SYMBOL(iomem_resource);
 
 /* process management */
 EXPORT_SYMBOL(__wake_up);

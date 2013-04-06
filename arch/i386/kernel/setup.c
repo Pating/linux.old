@@ -49,6 +49,7 @@
 #include <asm/smp.h>
 #include <asm/cobalt.h>
 #include <asm/msr.h>
+#include <asm/desc.h>
 
 /*
  * Machine setup..
@@ -56,6 +57,8 @@
 
 char ignore_irq13 = 0;		/* set if exception 16 works */
 struct cpuinfo_x86 boot_cpu_data = { 0, 0, 0, 0, -1, 1, 0, 0, -1 };
+
+unsigned long mmu_cr4_features __initdata = 0;
 
 /*
  * Bus types ..
@@ -249,12 +252,30 @@ visws_get_board_type_and_rev(void)
 static char command_line[COMMAND_LINE_SIZE] = { 0, };
        char saved_command_line[COMMAND_LINE_SIZE];
 
+struct resource standard_resources[] = {
+	{ "dma1", 0x00, 0x1f },
+	{ "pic1", 0x20, 0x3f },
+	{ "timer", 0x40, 0x5f },
+	{ "keyboard", 0x60, 0x6f },
+	{ "dma page reg", 0x80, 0x8f },
+	{ "pic2", 0xa0, 0xbf },
+	{ "dma2", 0xc0, 0xdf },
+	{ "fpu", 0xf0, 0xff }
+};
+
+/* For demonstration purposes only.. */
+#define keyboard_resources (standard_resources+3)
+struct resource kbd_status_resource = { "status", 0x60, 0x60 };
+
+#define STANDARD_RESOURCES (sizeof(standard_resources)/sizeof(struct resource))
+
 __initfunc(void setup_arch(char **cmdline_p,
 	unsigned long * memory_start_p, unsigned long * memory_end_p))
 {
 	unsigned long memory_start, memory_end;
 	char c = ' ', *to = command_line, *from = COMMAND_LINE;
 	int len = 0;
+	int i;
 
 #ifdef CONFIG_VISWS
 	visws_get_board_type_and_rev();
@@ -368,11 +389,9 @@ __initfunc(void setup_arch(char **cmdline_p,
 #endif
 
 	/* request I/O space for devices used on all i[345]86 PCs */
-	request_region(0x00,0x20,"dma1");
-	request_region(0x40,0x20,"timer");
-	request_region(0x80,0x10,"dma page reg");
-	request_region(0xc0,0x20,"dma2");
-	request_region(0xf0,0x10,"fpu");
+	for (i = 0; i < STANDARD_RESOURCES; i++)
+		request_resource(&ioport_resource, standard_resources+i);
+	request_resource(keyboard_resources, &kbd_status_resource);
 
 #ifdef CONFIG_VT
 #if defined(CONFIG_VGA_CONSOLE)
@@ -381,10 +400,6 @@ __initfunc(void setup_arch(char **cmdline_p,
 	conswitchp = &dummy_con;
 #endif
 #endif
-	/*
-	 *	Check the bugs that will bite us before we get booting
-	 */
-
 }
 
 __initfunc(static int get_model_name(struct cpuinfo_x86 *c))
@@ -977,4 +992,65 @@ int get_cpuinfo(char * buffer)
 			     ((c->loops_per_sec+2500)/5000) % 100);
 	}
 	return p - buffer;
+}
+
+int cpus_initialized = 0;
+unsigned long cpu_initialized = 0;
+
+/*
+ * cpu_init() initializes state that is per-CPU. Some data is already
+ * initialized (naturally) in the bootstrap process, such as the GDT
+ * and IDT. We reload them nevertheless, this function acts as a
+ * 'CPU state barrier', nothing should get across.
+ */
+void cpu_init (void)
+{
+	int nr = smp_processor_id();
+	struct tss_struct * t = &init_tss[nr];
+
+	if (test_and_set_bit(nr,&cpu_initialized)) {
+		printk("CPU#%d ALREADY INITIALIZED!!!!!!!!!\n", nr);
+		for (;;) __sti();
+	}
+	cpus_initialized++;
+	printk("INITIALIZING CPU#%d\n", nr);
+
+	if (boot_cpu_data.x86_capability & X86_FEATURE_PSE)
+		clear_in_cr4(X86_CR4_VME|X86_CR4_PVI|X86_CR4_TSD|X86_CR4_DE);
+
+	__asm__ __volatile__("lgdt %0": "=m" (gdt_descr));
+	__asm__ __volatile__("lidt %0": "=m" (idt_descr));
+
+	/*
+	 * Delete NT
+	 */
+	__asm__("pushfl ; andl $0xffffbfff,(%esp) ; popfl");
+
+	/*
+	 * set up and load the per-CPU TSS and LDT
+	 */
+	atomic_inc(&init_mm.mm_count);
+	current->active_mm = &init_mm;
+	t->esp0 = current->thread.esp0;
+	set_tss_desc(nr,t);
+	gdt_table[__TSS(nr)].b &= 0xfffffdff;
+	load_TR(nr);
+	load_LDT(&init_mm);
+
+	/*
+	 * Clear all 6 debug registers:
+	 */
+
+#define CD(register) __asm__("movl %0,%%db" #register ::"r"(0) );
+
+	CD(0); CD(1); CD(2); CD(3); /* no db4 and db5 */; CD(6); CD(7);
+
+#undef CD
+
+	/*
+	 * Force FPU initialization:
+	 */
+	current->flags &= ~PF_USEDFPU;
+	current->used_math = 0;
+	stts();
 }

@@ -318,7 +318,7 @@ static int printer_probe(struct usb_device *dev)
 	}
 
         if (usb_set_configuration(dev, dev->config[0].bConfigurationValue)) {
-		printk(KERN_INFO "  Failed to set configuration\n");
+		printk(KERN_INFO "  Failed usb_set_configuration: printer\n");
 		return -1;
 	}
 #if 0
@@ -414,8 +414,6 @@ int init_module(void)
 
 void cleanup_module(void)
 {
-	unsigned int offset;
-
 	usb_deregister(&printer_driver);
 	unregister_chrdev(mymajor, "usblp");
 }
