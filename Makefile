@@ -1,6 +1,6 @@
 VERSION = 2
 PATCHLEVEL = 5
-SUBLEVEL = 67
+SUBLEVEL = 68
 EXTRAVERSION =
 
 # *DOCUMENTATION*
@@ -33,7 +33,9 @@ KERNELRELEASE=$(VERSION).$(PATCHLEVEL).$(SUBLEVEL)$(EXTRAVERSION)
 # then ARCH is assigned, getting whatever value it gets normally, and 
 # SUBARCH is subsequently ignored.
 
-SUBARCH := $(shell uname -m | sed -e s/i.86/i386/ -e s/sun4u/sparc64/ -e s/arm.*/arm/ -e s/sa110/arm/)
+SUBARCH := $(shell uname -m | sed -e s/i.86/i386/ -e s/sun4u/sparc64/ \
+				  -e s/arm.*/arm/ -e s/sa110/arm/ \
+				  -e s/s390x/s390/ )
 ARCH := $(SUBARCH)
 
 # Remove hyphens since they have special meaning in RPM filenames
@@ -342,17 +344,9 @@ define rule_vmlinux__
 	echo 'cmd_$@ := $(cmd_vmlinux__)' > $(@D)/.$(@F).cmd
 endef
 
-ifdef CONFIG_SMP
-#	Final awk script makes sure per-cpu vars are in per-cpu section, as
-#	old gcc (eg egcs 2.92.11) ignores section attribute if uninitialized.
-
-check_per_cpu =	$(AWK) -f $(srctree)/scripts/per-cpu-check.awk < System.map
-endif
-
 define rule_vmlinux
 	$(rule_vmlinux__)
 	$(NM) $@ | grep -v '\(compiled\)\|\(\.o$$\)\|\( [aUw] \)\|\(\.\.ng$$\)\|\(LASH[RL]DI\)' | sort > System.map
-	$(check_per_cpu)
 endef
 
 LDFLAGS_vmlinux += -T arch/$(ARCH)/vmlinux.lds.s
