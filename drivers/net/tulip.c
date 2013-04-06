@@ -296,7 +296,7 @@ static struct pci_id_info pci_tbl[] = {
 	0x125B, 0x1400, 0xffff, PCI_ADDR0_IO, 128, 32, tulip_probe1 },
   {0},
 };
-#endif CARD_BUS
+#endif /* CARD_BUS */
 
 /* This table use during operation for capabilities and media timer. */
 
@@ -585,7 +585,11 @@ static struct device *tulip_probe1(int pci_bus, int pci_devfn,
 	if (tulip_debug > 0  &&  did_version++ == 0)
 		printk(KERN_INFO "%s", version);
 
-	dev = init_etherdev(dev, 0);
+	if (!(dev = init_etherdev(dev, 0))) {
+		printk(KERN_ERR "tulip: Unable to allocate net_device "
+				"structure!\n");
+		return NULL;
+	}
 
 	/* Bring the 21143 out of sleep mode.
 	   Caution: Snooze mode does not work with some boards! */

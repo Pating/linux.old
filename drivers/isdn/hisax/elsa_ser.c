@@ -1,3 +1,4 @@
+#include <linux/config.h>
 #include <linux/serial.h>
 #include <linux/serial_reg.h>
 
@@ -453,7 +454,7 @@ static inline void check_modem_status(struct IsdnCardState *cs)
 			}
 		}
 	}
-#endif 0
+#endif /* 0 */
 }
 #endif
 

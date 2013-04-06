@@ -4,7 +4,7 @@
  * Authors:	Alan Cox, <alan@cymru.net>
  *
  *		Currently this contains all but the file descriptor passing code.
- *		Before that goes in the odd bugs in the iovec handlers need 
+ *		Before that goes in the odd bugs in the iovec handlers need
  *		fixing, and this bit testing. BSD fd passing is not a trivial part
  *		of the exercise it turns out. Anyone like writing garbage collectors.
  *
@@ -31,6 +31,11 @@
  *		Alan Cox	:	Shutdown() bug
  *	Michael Deutschmann	:	release was writing to the socket
  *					structure after freeing it.
+ *		Jon Nelson,
+ *		Alan Cox,
+ *		David Weinehall	:	Fix possible memory-leaks
+ *	Michael Deutschmann	:	Fix fd-passing semantics to
+ *					match what OpenSSH expects.
  *
  * Known differences from reference BSD that was tested:
  *
@@ -63,7 +68,6 @@
 #include <linux/errno.h>
 #include <linux/string.h>
 #include <linux/stat.h>
-#include <linux/socket.h>
 #include <linux/un.h>
 #include <linux/fcntl.h>
 #include <linux/termios.h>
@@ -794,7 +798,10 @@ static void unix_detach_fds(struct sk_buff *skb, struct cmsghdr *cmsg)
 	fp = (struct file **)(skb->h.filp+sizeof(long));
 
 	if (cmnum > fdnum)
+	{
 		cmnum = fdnum;
+		cmsg->cmsg_len = sizeof(struct cmsghdr) + sizeof(int) * fdnum;
+	}
 
 	/*
 	 *	Copy those that fit
@@ -861,7 +868,7 @@ static int unix_sendmsg(struct socket *sock, struct msghdr *msg, int len, int no
 	int sent=0;
 	struct file *fp[UNIX_MAX_FD];
 	/* number of fds waiting to be passed, 0 means either
-	 * no fds to pass or they've already been passed 
+	 * no fds to pass or they've already been passed
 	 */
 	int fpnum=0;
 
@@ -974,7 +981,11 @@ static int unix_sendmsg(struct socket *sock, struct msghdr *msg, int len, int no
 		{
 			int err=unix_attach_fds(fpnum,fp,skb);
 			if(err)
+			{
+				unix_fd_free(sk, fp, fpnum);
+				kfree(skb);
 				return err;
+			}
 			fpnum=0;
 		}
 		else
@@ -1080,20 +1091,15 @@ static int unix_recvmsg(struct socket *sock, struct msghdr *msg, int size, int n
 	{
 		cm=unix_copyrights(msg->msg_control,
 			msg->msg_controllen);
-		if(cm==NULL || msg->msg_controllen<sizeof(struct cmsghdr)
-#if 0
-/*		investigate this further -- Stevens example doesn't seem to care */
-		||
-		   cm->cmsg_type!=SCM_RIGHTS ||
-		   cm->cmsg_level!=SOL_SOCKET ||
-		   msg->msg_controllen!=cm->cmsg_len
-#endif
-		)
+		if(cm==NULL || msg->msg_controllen<sizeof(struct cmsghdr))
 		{
 			kfree(cm);
 /*			printk("recvmsg: Bad msg_control\n");*/
 			return -EINVAL;
 		}
+		cm->cmsg_type = SCM_RIGHTS;
+		cm->cmsg_level = SOL_SOCKET;
+		cm->cmsg_len = msg->msg_controllen;
 	}
 
 	down(&sk->protinfo.af_unix.readsem);		/* Lock the socket */

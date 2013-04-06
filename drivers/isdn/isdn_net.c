@@ -376,8 +376,9 @@ isdn_net_unreachable(struct device *dev, struct sk_buff *skb, char *reason)
 
 			icmp_send(skb, ICMP_DEST_UNREACH, ICMP_NET_UNKNOWN, 0
 #if (LINUX_VERSION_CODE < 0x02010f)	/* 2.1.15 */
-				,dev
+				, dev
 #endif
+				, 1
 				);
 		}
 	}
@@ -396,6 +397,7 @@ isdn_net_unreachable(struct device *dev, struct sk_buff *skb, char *reason)
 #if (LINUX_VERSION_CODE < 0x02010f)	/* 2.1.15 */
 					, dev
 #endif
+					, 1
 					);
 				}
 				dev_kfree_skb(skb, FREE_WRITE);
@@ -777,7 +779,7 @@ isdn_net_dial(void)
 	isdn_net_dev *p = dev->netdev;
 	int anymore = 0;
 	int i;
-	int flags;
+	unsigned long flags;
 	isdn_ctrl cmd;
 
 	while (p) {
@@ -2521,7 +2523,7 @@ isdn_net_setcfg(isdn_net_ioctl_cfg * cfg)
 			chidx = p->local.pre_channel;
 		}
 		if (cfg->exclusive > 0) {
-			int flags;
+			unsigned long flags;
 
 			/* If binding is exclusive, try to grab the channel */
 			save_flags(flags);
@@ -2733,7 +2735,7 @@ isdn_net_getphones(isdn_net_ioctl_phone * phone, char *phones)
 	int more = 0;
 	int count = 0;
 	isdn_net_phone *n;
-	int flags;
+	unsigned long flags;
 	int ret;
 
 	if (!p)
@@ -2771,7 +2773,7 @@ isdn_net_delphone(isdn_net_ioctl_phone * phone)
 	int inout = phone->outgoing & 1;
 	isdn_net_phone *n;
 	isdn_net_phone *m;
-	int flags;
+	unsigned long flags;
 
 	if (p) {
 		save_flags(flags);
@@ -2807,7 +2809,7 @@ isdn_net_rmallphone(isdn_net_dev * p)
 {
 	isdn_net_phone *n;
 	isdn_net_phone *m;
-	int flags;
+	unsigned long flags;
 	int i;
 
 	save_flags(flags);
@@ -2856,7 +2858,7 @@ isdn_net_force_hangup(char *name)
 static int
 isdn_net_realrm(isdn_net_dev * p, isdn_net_dev * q)
 {
-	int flags;
+	unsigned long flags;
 
 	save_flags(flags);
 	cli();
@@ -2942,7 +2944,7 @@ isdn_net_rm(char *name)
 int
 isdn_net_rmall(void)
 {
-	int flags;
+	unsigned long flags;
 	int ret;
 
 	/* Walk through netdev-chain */
