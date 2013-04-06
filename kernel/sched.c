@@ -36,7 +36,6 @@
 #include <asm/uaccess.h>
 #include <asm/pgtable.h>
 #include <asm/mmu_context.h>
-#include <asm/semaphore-helper.h>
 
 #include <linux/timex.h>
 
@@ -224,68 +223,13 @@ static inline int preemption_goodness(struct task_struct * prev, struct task_str
 	return goodness(p, cpu, prev->mm) - goodness(prev, cpu, prev->mm);
 }
 
-/*
- * If there is a dependency between p1 and p2,
- * don't be too eager to go into the slow schedule.
- * In particular, if p1 and p2 both want the kernel
- * lock, there is no point in trying to make them
- * extremely parallel..
- *
- * (No lock - lock_depth < 0)
- *
- * There are two additional metrics here:
- *
- * first, a 'cutoff' interval, currently 0-200 usecs on
- * x86 CPUs, depending on the size of the 'SMP-local cache'.
- * If the current process has longer average timeslices than
- * this, then we utilize the idle CPU.
- *
- * second, if the wakeup comes from a process context,
- * then the two processes are 'related'. (they form a
- * 'gang')
- *
- * An idle CPU is almost always a bad thing, thus we skip
- * the idle-CPU utilization only if both these conditions
- * are true. (ie. a 'process-gang' rescheduling with rather
- * high frequency should stay on the same CPU).
- *
- * [We can switch to something more finegrained in 2.3.]
- *
- * do not 'guess' if the to-be-scheduled task is RT.
- */
-#define related(p1,p2) (((p1)->lock_depth >= 0) && (p2)->lock_depth >= 0) && \
-	(((p2)->policy == SCHED_OTHER) && ((p1)->avg_slice < cacheflush_time))
-
-static inline void reschedule_idle_slow(struct task_struct * p)
+static void reschedule_idle(struct task_struct * p)
 {
 #ifdef __SMP__
-/*
- * (see reschedule_idle() for an explanation first ...)
- *
- * Pass #2
- *
- * We try to find another (idle) CPU for this woken-up process.
- *
- * On SMP, we mostly try to see if the CPU the task used
- * to run on is idle.. but we will use another idle CPU too,
- * at this point we already know that this CPU is not
- * willing to reschedule in the near future.
- *
- * An idle CPU is definitely wasted, especially if this CPU is
- * running long-timeslice processes. The following algorithm is
- * pretty good at finding the best idle CPU to send this process
- * to.
- *
- * [We can try to preempt low-priority processes on other CPUs in
- * 2.3. Also we can try to use the avg_slice value to predict
- * 'likely reschedule' events even on other CPUs.]
- */
 	int this_cpu = smp_processor_id(), target_cpu;
 	struct task_struct *tsk, *target_tsk;
-	int cpu, best_cpu, weight, best_weight, i;
+	int cpu, best_cpu, i;
 	unsigned long flags;
-
-	best_weight = 0; /* prevents negative weight */
 
 	spin_lock_irqsave(&runqueue_lock, flags);
 
@@ -302,14 +246,16 @@ static inline void reschedule_idle_slow(struct task_struct * p)
 	for (i = 0; i < smp_num_cpus; i++) {
 		cpu = cpu_logical_map(i);
 		tsk = cpu_curr(cpu);
-		if (related(tsk, p))
-			goto out_no_target;
-		weight = preemption_goodness(tsk, p, cpu);
-		if (weight > best_weight) {
-			best_weight = weight;
+		if (tsk == idle_task(cpu))
 			target_tsk = tsk;
-		}
 	}
+
+	if (target_tsk && p->avg_slice > cacheflush_time)
+		goto send_now;
+
+	tsk = cpu_curr(best_cpu);
+	if (preemption_goodness(tsk, p, best_cpu) > 0)
+		target_tsk = tsk;
 
 	/*
 	 * found any suitable CPU?
@@ -339,35 +285,6 @@ out_no_target:
 	if (preemption_goodness(tsk, p, this_cpu) > 0)
 		tsk->need_resched = 1;
 #endif
-}
-
-static void reschedule_idle(struct task_struct * p)
-{
-#ifdef __SMP__
-	int cpu = smp_processor_id();
-	/*
-	 * ("wakeup()" should not be called before we've initialized
-	 * SMP completely.
-	 * Basically a not-yet initialized SMP subsystem can be
-	 * considered as a not-yet working scheduler, simply dont use
-	 * it before it's up and running ...)
-	 *
-	 * SMP rescheduling is done in 2 passes:
-	 *  - pass #1: faster: 'quick decisions'
-	 *  - pass #2: slower: 'lets try and find a suitable CPU'
-	 */
-
-	/*
-	 * Pass #1. (subtle. We might be in the middle of __switch_to, so
-	 * to preserve scheduling atomicity we have to use cpu_curr)
-	 */
-	if ((p->processor == cpu) && related(cpu_curr(cpu), p))
-		return;
-#endif /* __SMP__ */
-	/*
-	 * Pass #2
-	 */
-	reschedule_idle_slow(p);
 }
 
 /*
@@ -893,128 +810,6 @@ out:
 	return;
 }
 
-/*
- * Semaphores are implemented using a two-way counter:
- * The "count" variable is decremented for each process
- * that tries to sleep, while the "waking" variable is
- * incremented when the "up()" code goes to wake up waiting
- * processes.
- *
- * Notably, the inline "up()" and "down()" functions can
- * efficiently test if they need to do any extra work (up
- * needs to do something only if count was negative before
- * the increment operation.
- *
- * waking_non_zero() (from asm/semaphore.h) must execute
- * atomically.
- *
- * When __up() is called, the count was negative before
- * incrementing it, and we need to wake up somebody.
- *
- * This routine adds one to the count of processes that need to
- * wake up and exit.  ALL waiting processes actually wake up but
- * only the one that gets to the "waking" field first will gate
- * through and acquire the semaphore.  The others will go back
- * to sleep.
- *
- * Note that these functions are only called when there is
- * contention on the lock, and as such all this is the
- * "non-critical" part of the whole semaphore business. The
- * critical part is the inline stuff in <asm/semaphore.h>
- * where we want to avoid any extra jumps and calls.
- */
-void __up(struct semaphore *sem)
-{
-	wake_one_more(sem);
-	wake_up(&sem->wait);
-}
-
-/*
- * Perform the "down" function.  Return zero for semaphore acquired,
- * return negative for signalled out of the function.
- *
- * If called from __down, the return is ignored and the wait loop is
- * not interruptible.  This means that a task waiting on a semaphore
- * using "down()" cannot be killed until someone does an "up()" on
- * the semaphore.
- *
- * If called from __down_interruptible, the return value gets checked
- * upon return.  If the return value is negative then the task continues
- * with the negative value in the return register (it can be tested by
- * the caller).
- *
- * Either form may be used in conjunction with "up()".
- *
- */
-
-#define DOWN_VAR				\
-	struct task_struct *tsk = current;	\
-	wait_queue_t wait;			\
-	init_waitqueue_entry(&wait, tsk);
-
-#define DOWN_HEAD(task_state)						\
-									\
-									\
-	tsk->state = (task_state);					\
-	add_wait_queue(&sem->wait, &wait);				\
-									\
-	/*								\
-	 * Ok, we're set up.  sem->count is known to be less than zero	\
-	 * so we must wait.						\
-	 *								\
-	 * We can let go the lock for purposes of waiting.		\
-	 * We re-acquire it after awaking so as to protect		\
-	 * all semaphore operations.					\
-	 *								\
-	 * If "up()" is called before we call waking_non_zero() then	\
-	 * we will catch it right away.  If it is called later then	\
-	 * we will have to go through a wakeup cycle to catch it.	\
-	 *								\
-	 * Multiple waiters contend for the semaphore lock to see	\
-	 * who gets to gate through and who has to wait some more.	\
-	 */								\
-	for (;;) {
-
-#define DOWN_TAIL(task_state)			\
-		tsk->state = (task_state);	\
-	}					\
-	tsk->state = TASK_RUNNING;		\
-	remove_wait_queue(&sem->wait, &wait);
-
-void __down(struct semaphore * sem)
-{
-	DOWN_VAR
-	DOWN_HEAD(TASK_UNINTERRUPTIBLE)
-	if (waking_non_zero(sem))
-		break;
-	schedule();
-	DOWN_TAIL(TASK_UNINTERRUPTIBLE)
-}
-
-int __down_interruptible(struct semaphore * sem)
-{
-	int ret = 0;
-	DOWN_VAR
-	DOWN_HEAD(TASK_INTERRUPTIBLE)
-
-	ret = waking_non_zero_interruptible(sem, tsk);
-	if (ret)
-	{
-		if (ret == 1)
-			/* ret != 0 only if we get interrupted -arca */
-			ret = 0;
-		break;
-	}
-	schedule();
-	DOWN_TAIL(TASK_INTERRUPTIBLE)
-	return ret;
-}
-
-int __down_trylock(struct semaphore * sem)
-{
-	return waking_non_zero_trylock(sem);
-}
-
 #define	SLEEP_ON_VAR				\
 	unsigned long flags;			\
 	wait_queue_t wait;			\
@@ -1514,13 +1309,13 @@ void do_timer(struct pt_regs * regs)
 		mark_bh(TQUEUE_BH);
 }
 
-#ifndef __alpha__
+#if !defined(__alpha__) && !defined(__ia64__)
 
 /*
  * For backwards compatibility?  This can be done in libc so Alpha
  * and all newer ports shouldn't need it.
  */
-asmlinkage unsigned int sys_alarm(unsigned int seconds)
+asmlinkage unsigned long sys_alarm(unsigned int seconds)
 {
 	struct itimerval it_new, it_old;
 	unsigned int oldalarm;
@@ -1537,12 +1332,16 @@ asmlinkage unsigned int sys_alarm(unsigned int seconds)
 	return oldalarm;
 }
 
+#endif
+
+#ifndef __alpha__
+
 /*
  * The Alpha uses getxpid, getxuid, and getxgid instead.  Maybe this
  * should be moved into arch/i386 instead?
  */
  
-asmlinkage int sys_getpid(void)
+asmlinkage long sys_getpid(void)
 {
 	/* This is SMP safe - current->pid doesn't change */
 	return current->pid;
@@ -1571,7 +1370,7 @@ asmlinkage int sys_getpid(void)
  * a small window for a race, using the old pointer is
  * harmless for a while).
  */
-asmlinkage int sys_getppid(void)
+asmlinkage long sys_getppid(void)
 {
 	int pid;
 	struct task_struct * me = current;
@@ -1594,25 +1393,25 @@ asmlinkage int sys_getppid(void)
 	return pid;
 }
 
-asmlinkage int sys_getuid(void)
+asmlinkage long sys_getuid(void)
 {
 	/* Only we change this so SMP safe */
 	return current->uid;
 }
 
-asmlinkage int sys_geteuid(void)
+asmlinkage long sys_geteuid(void)
 {
 	/* Only we change this so SMP safe */
 	return current->euid;
 }
 
-asmlinkage int sys_getgid(void)
+asmlinkage long sys_getgid(void)
 {
 	/* Only we change this so SMP safe */
 	return current->gid;
 }
 
-asmlinkage int sys_getegid(void)
+asmlinkage long sys_getegid(void)
 {
 	/* Only we change this so SMP safe */
 	return  current->egid;
@@ -1624,7 +1423,7 @@ asmlinkage int sys_getegid(void)
  * it for backward compatibility?
  */
 
-asmlinkage int sys_nice(int increment)
+asmlinkage long sys_nice(int increment)
 {
 	unsigned long newprio;
 	int increase = 0;
@@ -1754,18 +1553,18 @@ out_nounlock:
 	return retval;
 }
 
-asmlinkage int sys_sched_setscheduler(pid_t pid, int policy, 
+asmlinkage long sys_sched_setscheduler(pid_t pid, int policy, 
 				      struct sched_param *param)
 {
 	return setscheduler(pid, policy, param);
 }
 
-asmlinkage int sys_sched_setparam(pid_t pid, struct sched_param *param)
+asmlinkage long sys_sched_setparam(pid_t pid, struct sched_param *param)
 {
 	return setscheduler(pid, -1, param);
 }
 
-asmlinkage int sys_sched_getscheduler(pid_t pid)
+asmlinkage long sys_sched_getscheduler(pid_t pid)
 {
 	struct task_struct *p;
 	int retval;
@@ -1790,7 +1589,7 @@ out_nounlock:
 	return retval;
 }
 
-asmlinkage int sys_sched_getparam(pid_t pid, struct sched_param *param)
+asmlinkage long sys_sched_getparam(pid_t pid, struct sched_param *param)
 {
 	struct task_struct *p;
 	struct sched_param lp;
@@ -1821,7 +1620,7 @@ out_unlock:
 	return retval;
 }
 
-asmlinkage int sys_sched_yield(void)
+asmlinkage long sys_sched_yield(void)
 {
 	spin_lock_irq(&runqueue_lock);
 	if (current->policy == SCHED_OTHER)
@@ -1832,7 +1631,7 @@ asmlinkage int sys_sched_yield(void)
 	return 0;
 }
 
-asmlinkage int sys_sched_get_priority_max(int policy)
+asmlinkage long sys_sched_get_priority_max(int policy)
 {
 	int ret = -EINVAL;
 
@@ -1848,7 +1647,7 @@ asmlinkage int sys_sched_get_priority_max(int policy)
 	return ret;
 }
 
-asmlinkage int sys_sched_get_priority_min(int policy)
+asmlinkage long sys_sched_get_priority_min(int policy)
 {
 	int ret = -EINVAL;
 
@@ -1863,7 +1662,7 @@ asmlinkage int sys_sched_get_priority_min(int policy)
 	return ret;
 }
 
-asmlinkage int sys_sched_rr_get_interval(pid_t pid, struct timespec *interval)
+asmlinkage long sys_sched_rr_get_interval(pid_t pid, struct timespec *interval)
 {
 	struct timespec t;
 
@@ -1874,7 +1673,7 @@ asmlinkage int sys_sched_rr_get_interval(pid_t pid, struct timespec *interval)
 	return 0;
 }
 
-asmlinkage int sys_nanosleep(struct timespec *rqtp, struct timespec *rmtp)
+asmlinkage long sys_nanosleep(struct timespec *rqtp, struct timespec *rmtp)
 {
 	struct timespec t;
 	unsigned long expire;

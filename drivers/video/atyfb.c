@@ -390,7 +390,9 @@ int atyfb_init(void);
 #ifdef CONFIG_FB_OF
 void atyfb_of_init(struct device_node *dp);
 #endif
+#ifndef MODULE
 int atyfb_setup(char*);
+#endif
 
 static int currcon = 0;
 
@@ -411,7 +413,10 @@ static char noaccel __initdata = 0;
 static u32 default_vram __initdata = 0;
 static int default_pll __initdata = 0;
 static int default_mclk __initdata = 0;
+
+#ifndef MODULE
 static const char *mode_option __initdata = NULL;
+#endif
 
 #if defined(CONFIG_PPC)
 static int default_vmode __initdata = VMODE_NVRAM;
@@ -1926,7 +1931,7 @@ static int encode_fix(struct fb_fix_screeninfo *fix,
     memset(fix, 0, sizeof(struct fb_fix_screeninfo));
 
     strcpy(fix->id, atyfb_name);
-    fix->smem_start = (char *)info->frame_buffer_phys;
+    fix->smem_start = info->frame_buffer_phys;
     fix->smem_len = (u32)info->total_vram;
 
 #ifdef __LITTLE_ENDIAN
@@ -1943,19 +1948,19 @@ static int encode_fix(struct fb_fix_screeninfo *fix,
      *  Reg Block 1 (multimedia extensions) is at ati_regbase_phys-0x400
      */
     if (Gx == GX_CHIP_ID || Gx == CX_CHIP_ID) {
-	fix->mmio_start = (char *)info->ati_regbase_phys;
+	fix->mmio_start = info->ati_regbase_phys;
 	fix->mmio_len = 0x400;
 	fix->accel = FB_ACCEL_ATI_MACH64GX;
     } else if (Gx == CT_CHIP_ID || Gx == ET_CHIP_ID) {
-	fix->mmio_start = (char *)info->ati_regbase_phys;
+	fix->mmio_start = info->ati_regbase_phys;
 	fix->mmio_len = 0x400;
 	fix->accel = FB_ACCEL_ATI_MACH64CT;
     } else if (Gx == VT_CHIP_ID || Gx == VU_CHIP_ID || Gx == VV_CHIP_ID) {
-	fix->mmio_start = (char *)(info->ati_regbase_phys-0x400);
+	fix->mmio_start = info->ati_regbase_phys-0x400;
 	fix->mmio_len = 0x800;
 	fix->accel = FB_ACCEL_ATI_MACH64VT;
     } else {
-	fix->mmio_start = (char *)(info->ati_regbase_phys-0x400);
+	fix->mmio_start = info->ati_regbase_phys-0x400;
 	fix->mmio_len = 0x800;
 	fix->accel = FB_ACCEL_ATI_MACH64GT;
     }
@@ -2869,7 +2874,7 @@ int __init atyfb_init(void)
 	    memset(info, 0, sizeof(struct fb_info_aty));
 
 	    rp = &pdev->resource[0];
-	    if (rp->flags & IORESOURCE_IOPORT)
+	    if (rp->flags & IORESOURCE_IO)
 		    rp = &pdev->resource[1];
 	    addr = rp->start;
 	    if (!addr)
@@ -2912,7 +2917,7 @@ int __init atyfb_init(void)
 
 		base = rp->start;
 
-		io = (rp->flags & IORESOURCE_IOPORT);
+		io = (rp->flags & IORESOURCE_IO);
 
 		size = rp->end - base + 1;
 		
@@ -3261,6 +3266,7 @@ void __init atyfb_of_init(struct device_node *dp)
 #endif /* CONFIG_FB_OF */
 
 
+#ifndef MODULE
 int __init atyfb_setup(char *options)
 {
     char *this_opt;
@@ -3328,9 +3334,12 @@ int __init atyfb_setup(char *options)
 	    }
 	}
 #endif
+       else
+           mode_option = this_opt;
     }
     return 0;
 }
+#endif /* !MODULE */
 
 #ifdef CONFIG_ATARI
 static int __init store_video_par(char *video_str, unsigned char m64_num)

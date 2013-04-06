@@ -126,10 +126,8 @@ done:
 	len-=(offset-begin);
 	if(len>length)
 		len=length;
-	if (len < 0) {
+	if (len < 0)
 		len = 0;
-		printk(KERN_CRIT "Yep, guys... our template for proc_*_read is crappy :-)\n");
-	}
 	if (offset == 0) {
 		cli();
 		net_prof_total.active = 0;
@@ -212,7 +210,7 @@ static struct net_device_stats *whitehole_get_stats(struct net_device *dev)
 	return stats;
 }
 
-__initfunc(int whitehole_init(struct net_device *dev))
+int __init whitehole_init(struct net_device *dev)
 {
 	dev->priv = kmalloc(sizeof(struct net_device_stats), GFP_KERNEL);
 	if (dev->priv == NULL)
@@ -262,7 +260,7 @@ int net_profile_unregister(struct net_profile_slot *slot)
 }
 
 
-__initfunc(int net_profile_init(void))
+int __init net_profile_init(void)
 {
 	int i;
 
@@ -282,7 +280,6 @@ __initfunc(int net_profile_init(void))
 		return -1;
 	}
 #endif
-	start_bh_atomic();
 #ifdef __alpha__
 	alpha_tick(0);
 #endif
@@ -298,7 +295,6 @@ __initfunc(int net_profile_init(void))
 	}
 	net_prof_total.hits = 0;
 	net_profile_stamp(&net_prof_total.entered);
-	end_bh_atomic();
 	return 0;
 }
 

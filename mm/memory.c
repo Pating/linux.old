@@ -540,8 +540,10 @@ int map_user_kiobuf(int rw, struct kiobuf *iobuf, unsigned long va, size_t len)
 		wait_on_page(map);
 	}
 	
-	if (++repeat < 16)
+	if (++repeat < 16) {
+		ptr = va & PAGE_MASK;
 		goto repeat;
+	}
 	return -EAGAIN;
 }
 
@@ -819,7 +821,6 @@ static int do_wp_page(struct task_struct * tsk, struct vm_area_struct * vma,
 		if (PageReserved(page))
 			++vma->vm_mm->rss;
 		copy_cow_page(old_page,new_page);
-		flush_page_to_ram(old_page);
 		flush_page_to_ram(new_page);
 		flush_cache_page(vma, address);
 		set_pte(page_table, pte_mkwrite(pte_mkdirty(mk_pte(new_page, vma->vm_page_prot))));

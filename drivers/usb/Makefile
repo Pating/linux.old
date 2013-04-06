@@ -18,11 +18,14 @@ L_OBJS   :=
 MOD_LIST_NAME := USB_MODULES
 
 ifeq ($(CONFIG_USB),y)
-  L_OBJS +=usbcore.o
+  L_OBJS += usbcore.o
+  ifeq ($(CONFIG_USB_PROC),y)
+    L_OBJS += proc_usb.o
+  endif
 endif
 ifeq ($(CONFIG_USB),m)
-  M_OBJS +=usbcore.o
-  MIX_OBJS +=usb.o usb-debug.o usb-core.o
+  M_OBJS += usbcore.o
+  MIX_OBJS += usb.o usb-debug.o usb-core.o
   ifeq ($(CONFIG_USB_PROC),y)
     MIX_OBJS += proc_usb.o
   endif
@@ -57,16 +60,16 @@ ifeq ($(CONFIG_USB_MOUSE),y)
   L_OBJS += mouse.o
 endif
 ifeq ($(CONFIG_USB_MOUSE),m)
-  M_OBJS  +=mouse.o	
-  MIX_OBJS +=mouse.o
+  M_OBJS += mouse.o	
+  MIX_OBJS += mouse.o
 endif
 
 ifeq ($(CONFIG_USB_HUB),y)
   L_OBJS += hub.o
 endif
 ifeq ($(CONFIG_USB_HUB),m)
-  M_OBJS  +=hub.o
-  MIX_OBJS +=hub.o	
+  M_OBJS += hub.o
+  MIX_OBJS += hub.o	
 endif
 
 ifeq ($(CONFIG_USB_ACM),y)
@@ -74,7 +77,7 @@ ifeq ($(CONFIG_USB_ACM),y)
 endif
 ifeq ($(CONFIG_USB_ACM),m)
   M_OBJS += acm.o
-  MIX_OBJS +=acm.o
+  MIX_OBJS += acm.o
 endif
 
 ifeq ($(CONFIG_USB_PRINTER),y)
@@ -84,15 +87,6 @@ endif
 ifeq ($(CONFIG_USB_PRINTER),m)
   M_OBJS += printer.o
   MIX_OBJS += printer.o  
-endif
-
-ifeq ($(CONFIG_USB_CPIA),y)
-  L_OBJS += cpia.o
-endif
-
-ifeq ($(CONFIG_USB_CPIA),m)
-  M_OBJS += cpia.o
-  MIX_OBJS += cpia.o  
 endif
 
 ifeq ($(CONFIG_USB_KBD),y)
@@ -187,10 +181,10 @@ usb-uhci.o: uhci.o uhci-debug.o
 
 usb-ohci.o: ohci.o ohci-debug.o 
 	$(LD) $(LD_RFLAG) -r -o $@ ohci.o ohci-debug.o 
-       
+
 usb-ohci-hcd.o: ohci-hcd.o ohci-root-hub.o 
 	$(LD) $(LD_RFLAG) -r -o $@ ohci-hcd.o ohci-root-hub.o 
-       
+
 ifeq ($(CONFIG_USB_PROC),y)
 usbcore.o: usb.o usb-debug.o usb-core.o proc_usb.o
 	$(LD) $(LD_RFLAG) -r -o $@ usb.o usb-debug.o usb-core.o proc_usb.o
