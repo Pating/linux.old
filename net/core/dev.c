@@ -81,7 +81,7 @@
 #include <net/slhc.h>
 #include <linux/proc_fs.h>
 #include <linux/stat.h>
-#include <net/br.h>
+#include <linux/if_bridge.h>
 #include <net/dst.h>
 #include <net/pkt_sched.h>
 #include <net/profile.h>
@@ -190,14 +190,11 @@ void dev_add_pack(struct packet_type *pt)
 		dev_clear_fastroute(pt->dev);
 	}
 #endif
-	if(pt->type==htons(ETH_P_ALL))
-	{
+	if (pt->type == htons(ETH_P_ALL)) {
 		netdev_nit++;
 		pt->next=ptype_all;
 		ptype_all=pt;
-	}
-	else
-	{	
+	} else {
 		hash=ntohs(pt->type)&15;
 		pt->next = ptype_base[hash];
 		ptype_base[hash] = pt;
@@ -216,19 +213,16 @@ void dev_remove_pack(struct packet_type *pt)
 
 	write_lock_bh(&ptype_lock);
 
-	if(pt->type==htons(ETH_P_ALL))
-	{
+	if (pt->type == htons(ETH_P_ALL)) {
 		netdev_nit--;
 		pt1=&ptype_all;
-	}
-	else
+	} else {
 		pt1=&ptype_base[ntohs(pt->type)&15];
+	}
 
-	for(; (*pt1)!=NULL; pt1=&((*pt1)->next))
-	{
-		if(pt==(*pt1))
-		{
-			*pt1=pt->next;
+	for (; (*pt1) != NULL; pt1 = &((*pt1)->next)) {
+		if (pt == (*pt1)) {
+			*pt1 = pt->next;
 #ifdef CONFIG_NET_FASTROUTE
 			if (pt->data)
 				netdev_fastroute_obstacles--;
@@ -357,14 +351,13 @@ int dev_alloc_name(struct net_device *dev, const char *name)
 {
 	int i;
 	char buf[32];
+
 	/*
 	 *	If you need over 100 please also fix the algorithm...
 	 */
-	for(i=0;i<100;i++)
-	{
+	for (i = 0; i < 100; i++) {
 		sprintf(buf,name,i);
-		if(__dev_get_by_name(buf)==NULL)
-		{
+		if (__dev_get_by_name(buf) == NULL) {
 			strcpy(dev->name, buf);
 			return i;
 		}
@@ -375,16 +368,14 @@ int dev_alloc_name(struct net_device *dev, const char *name)
 struct net_device *dev_alloc(const char *name, int *err)
 {
 	struct net_device *dev=kmalloc(sizeof(struct net_device)+16, GFP_KERNEL);
-	if(dev==NULL)
-	{
-		*err=-ENOBUFS;
+	if (dev == NULL) {
+		*err = -ENOBUFS;
 		return NULL;
 	}
 	memset(dev, 0, sizeof(struct net_device));
-	dev->name=(char *)(dev+1);	/* Name string space */
-	*err=dev_alloc_name(dev,name);
-	if(*err<0)
-	{
+	dev->name = (char *)(dev + 1);	/* Name string space */
+	*err = dev_alloc_name(dev, name);
+	if (*err < 0) {
 		kfree(dev);
 		return NULL;
 	}
@@ -408,7 +399,7 @@ void netdev_state_change(struct net_device *dev)
 
 void dev_load(const char *name)
 {
-	if(!__dev_get_by_name(name) && capable(CAP_SYS_MODULE))
+	if (!__dev_get_by_name(name) && capable(CAP_SYS_MODULE))
 		request_module(name);
 }
 
@@ -441,6 +432,12 @@ int dev_open(struct net_device *dev)
 		return 0;
 
 	/*
+	 *	Is it even present?
+	 */
+	if (!netif_device_present(dev))
+		return -ENODEV;
+
+	/*
 	 *	Call device private open method
 	 */
 	 
@@ -458,7 +455,7 @@ int dev_open(struct net_device *dev)
 		 */
 		dev->flags |= IFF_UP;
 
-		set_bit(LINK_STATE_START, &dev->state);
+		set_bit(__LINK_STATE_START, &dev->state);
 
 		/*
 		 *	Initialize multicasting status 
@@ -528,11 +525,14 @@ int dev_close(struct net_device *dev)
 
 	dev_deactivate(dev);
 
-	clear_bit(LINK_STATE_START, &dev->state);
+	clear_bit(__LINK_STATE_START, &dev->state);
 
 	/*
 	 *	Call the device specific close. This cannot fail.
 	 *	Only if device is UP
+	 *
+	 *	We allow it to be called even after a DETACH hot-plug
+	 *	event.
 	 */
 	 
 	if (dev->stop)
@@ -673,7 +673,7 @@ int dev_queue_xmit(struct sk_buff *skb)
 			spin_lock(&dev->xmit_lock);
 			dev->xmit_lock_owner = cpu;
 
-			if (!test_bit(LINK_STATE_XOFF, &dev->state)) {
+			if (!netif_queue_stopped(dev)) {
 				if (netdev_nit)
 					dev_queue_xmit_nit(skb,dev);
 
@@ -781,7 +781,7 @@ void netif_rx(struct sk_buff *skb)
 	struct softnet_data *queue;
 	unsigned long flags;
 
-	if(skb->stamp.tv_sec==0)
+	if (skb->stamp.tv_sec == 0)
 		get_fast_time(&skb->stamp);
 
 	/* The code is rearranged so that the path is the most
@@ -832,37 +832,6 @@ drop:
 
 	kfree_skb(skb);
 }
-
-#ifdef CONFIG_BRIDGE
-static inline void handle_bridge(struct sk_buff *skb, unsigned short type)
-{
-	/* 
-	 * The br_stats.flags is checked here to save the expense of a 
-	 * function call.
-	 */
-	if ((br_stats.flags & BR_UP) && br_call_bridge(skb, type))
-	{
-		/*
-		 *	We pass the bridge a complete frame. This means
-		 *	recovering the MAC header first.
-		 */
-		
-		int offset;
-
-		skb=skb_clone(skb, GFP_ATOMIC);
-		if(skb==NULL)		
-			return;
-			
-		offset=skb->data-skb->mac.raw;
-		skb_push(skb,offset);	/* Put header back on for bridge */
-
-		if(br_receive_frame(skb))
-			return;
-		kfree_skb(skb);
-	}
-	return;
-}
-#endif
 
 /* Deliver skb to an old protocol, which is not threaded well
    or which do not understand shared skbs.
@@ -941,7 +910,7 @@ static void net_tx_action(struct softirq_action *h)
 			struct net_device *dev = head;
 			head = head->next_sched;
 
-			clear_bit(LINK_STATE_SCHED, &dev->state);
+			clear_bit(__LINK_STATE_SCHED, &dev->state);
 
 			if (spin_trylock(&dev->queue_lock)) {
 				qdisc_run(dev);
@@ -952,6 +921,32 @@ static void net_tx_action(struct softirq_action *h)
 		}
 	}
 }
+
+void net_call_rx_atomic(void (*fn)(void))
+{
+	write_lock_bh(&ptype_lock);
+	fn();
+	write_unlock_bh(&ptype_lock);
+}
+
+#if defined(CONFIG_BRIDGE) || defined(CONFIG_BRIDGE_MODULE)
+void (*br_handle_frame_hook)(struct sk_buff *skb) = NULL;
+#endif
+
+#define HANDLE_BRIDGE(SKB, PT_PREV)					\
+do {									\
+	if ((SKB)->dev->br_port != NULL &&				\
+	    br_handle_frame_hook != NULL) {				\
+		if (PT_PREV)						\
+			if (!(PT_PREV->data))				\
+				deliver_to_old_ones(PT_PREV, SKB, 1);	\
+			else						\
+				pt_prev->func(SKB, SKB->dev, PT_PREV);	\
+									\
+		br_handle_frame_hook(SKB);				\
+		continue;						\
+	}								\
+} while(0)
 
 static void net_rx_action(struct softirq_action *h)
 {
@@ -985,9 +980,7 @@ static void net_rx_action(struct softirq_action *h)
 		{
 			struct packet_type *ptype, *pt_prev;
 			unsigned short type = skb->protocol;
-#ifdef CONFIG_BRIDGE
-			handle_bridge(skb, type);
-#endif
+
 			pt_prev = NULL;
 			for (ptype = ptype_all; ptype; ptype = ptype->next) {
 				if (!ptype->dev || ptype->dev == skb->dev) {
@@ -1004,6 +997,11 @@ static void net_rx_action(struct softirq_action *h)
 					pt_prev = ptype;
 				}
 			}
+
+#if defined(CONFIG_BRIDGE) || defined(CONFIG_BRIDGE_MODULE)
+			HANDLE_BRIDGE(skb, pt_prev);
+#endif
+
 			for (ptype=ptype_base[ntohs(type)&15];ptype;ptype=ptype->next) {
 				if (ptype->type == type &&
 				    (!ptype->dev || ptype->dev == skb->dev)) {
@@ -1020,6 +1018,7 @@ static void net_rx_action(struct softirq_action *h)
 					pt_prev = ptype;
 				}
 			}
+
 			if (pt_prev) {
 				if (!pt_prev->data)
 					deliver_to_old_ones(pt_prev, skb, 1);
@@ -1212,11 +1211,10 @@ static int sprintf_stats(char *buffer, struct net_device *dev)
  
 static int dev_get_info(char *buffer, char **start, off_t offset, int length)
 {
-	int len=0;
-	off_t begin=0;
-	off_t pos=0;
+	int len = 0;
+	off_t begin = 0;
+	off_t pos = 0;
 	int size;
-	
 	struct net_device *dev;
 
 
@@ -1224,31 +1222,31 @@ static int dev_get_info(char *buffer, char **start, off_t offset, int length)
 		"Inter-|   Receive                                                |  Transmit\n"
 		" face |bytes    packets errs drop fifo frame compressed multicast|bytes    packets errs drop fifo colls carrier compressed\n");
 	
-	pos+=size;
-	len+=size;
+	pos += size;
+	len += size;
 	
 
 	read_lock(&dev_base_lock);
 	for (dev = dev_base; dev != NULL; dev = dev->next) {
 		size = sprintf_stats(buffer+len, dev);
-		len+=size;
-		pos=begin+len;
+		len += size;
+		pos = begin + len;
 				
-		if(pos<offset) {
-			len=0;
-			begin=pos;
+		if (pos < offset) {
+			len = 0;
+			begin = pos;
 		}
-		if(pos>offset+length)
+		if (pos > offset + length)
 			break;
 	}
 	read_unlock(&dev_base_lock);
 
-	*start=buffer+(offset-begin);	/* Start of wanted data */
-	len-=(offset-begin);		/* Start slop */
-	if(len>length)
-		len=length;		/* Ending slop */
-	if (len<0)
-		len=0;
+	*start = buffer + (offset - begin);	/* Start of wanted data */
+	len -= (offset - begin);		/* Start slop */
+	if (len > length)
+		len = length;			/* Ending slop */
+	if (len < 0)
+		len = 0;
 	return len;
 }
 
@@ -1280,7 +1278,7 @@ static int dev_proc_stats(char *buffer, char **start, off_t offset,
 
 	if (len > length)
 		len = length;
-	if(len < 0)
+	if (len < 0)
 		len = 0;
 
 	*start = buffer + offset;
@@ -1307,8 +1305,7 @@ static int sprintf_wireless_stats(char *buffer, struct net_device *dev)
 				       (struct iw_statistics *) NULL);
 	int size;
 
-	if(stats != (struct iw_statistics *) NULL)
-	{
+	if (stats != (struct iw_statistics *) NULL) {
 		size = sprintf(buffer,
 			       "%6s: %04x  %3d%c  %3d%c  %3d%c  %6d %6d %6d\n",
 			       dev->name,
@@ -1349,30 +1346,30 @@ static int dev_get_wireless_info(char * buffer, char **start, off_t offset,
 		       " face | tus | link level noise |  nwid  crypt   misc\n"
 			);
 	
-	pos+=size;
-	len+=size;
+	pos += size;
+	len += size;
 
 	read_lock(&dev_base_lock);
-	for(dev = dev_base; dev != NULL; dev = dev->next) {
-		size = sprintf_wireless_stats(buffer+len, dev);
-		len+=size;
-		pos=begin+len;
+	for (dev = dev_base; dev != NULL; dev = dev->next) {
+		size = sprintf_wireless_stats(buffer + len, dev);
+		len += size;
+		pos = begin + len;
 
-		if(pos < offset) {
-			len=0;
-			begin=pos;
+		if (pos < offset) {
+			len = 0;
+			begin = pos;
 		}
-		if(pos > offset + length)
+		if (pos > offset + length)
 			break;
 	}
 	read_unlock(&dev_base_lock);
 
 	*start = buffer + (offset - begin);	/* Start of wanted data */
 	len -= (offset - begin);		/* Start slop */
-	if(len > length)
-		len = length;		/* Ending slop */
-	if (len<0)
-		len=0;
+	if (len > length)
+		len = length;			/* Ending slop */
+	if (len < 0)
+		len = 0;
 
 	return len;
 }
@@ -1516,7 +1513,7 @@ static int dev_ifsioc(struct ifreq *ifr, unsigned int cmd)
 		case SIOCGIFFLAGS:	/* Get interface flags */
 			ifr->ifr_flags = (dev->flags&~(IFF_PROMISC|IFF_ALLMULTI|IFF_RUNNING))
 				|(dev->gflags&(IFF_PROMISC|IFF_ALLMULTI));
-			if (!test_bit(LINK_STATE_DOWN, &dev->state))
+			if (netif_running(dev))
 				ifr->ifr_flags |= IFF_RUNNING;
 			return 0;
 
@@ -1545,6 +1542,9 @@ static int dev_ifsioc(struct ifreq *ifr, unsigned int cmd)
 			if (ifr->ifr_mtu<0)
 				return -EINVAL;
 
+			if (!netif_device_present(dev))
+				return -ENODEV;
+
 			if (dev->change_mtu)
 				err = dev->change_mtu(dev, ifr->ifr_mtu);
 			else {
@@ -1561,17 +1561,19 @@ static int dev_ifsioc(struct ifreq *ifr, unsigned int cmd)
 			return 0;
 				
 		case SIOCSIFHWADDR:
-			if(dev->set_mac_address==NULL)
+			if (dev->set_mac_address == NULL)
 				return -EOPNOTSUPP;
-			if(ifr->ifr_hwaddr.sa_family!=dev->type)
+			if (ifr->ifr_hwaddr.sa_family!=dev->type)
 				return -EINVAL;
-			err=dev->set_mac_address(dev,&ifr->ifr_hwaddr);
+			if (!netif_device_present(dev))
+				return -ENODEV;
+			err = dev->set_mac_address(dev, &ifr->ifr_hwaddr);
 			if (!err)
 				notifier_call_chain(&netdev_chain, NETDEV_CHANGEADDR, dev);
 			return err;
 			
 		case SIOCSIFHWBROADCAST:
-			if(ifr->ifr_hwaddr.sa_family!=dev->type)
+			if (ifr->ifr_hwaddr.sa_family!=dev->type)
 				return -EINVAL;
 			memcpy(dev->broadcast, ifr->ifr_hwaddr.sa_data, MAX_ADDR_LEN);
 			notifier_call_chain(&netdev_chain, NETDEV_CHANGEADDR, dev);
@@ -1587,21 +1589,28 @@ static int dev_ifsioc(struct ifreq *ifr, unsigned int cmd)
 			return 0;
 			
 		case SIOCSIFMAP:
-			if (dev->set_config)
+			if (dev->set_config) {
+				if (!netif_device_present(dev))
+					return -ENODEV;
 				return dev->set_config(dev,&ifr->ifr_map);
+			}
 			return -EOPNOTSUPP;
 			
 		case SIOCADDMULTI:
-			if(dev->set_multicast_list==NULL ||
-			   ifr->ifr_hwaddr.sa_family!=AF_UNSPEC)
+			if (dev->set_multicast_list == NULL ||
+			    ifr->ifr_hwaddr.sa_family != AF_UNSPEC)
 				return -EINVAL;
+			if (!netif_device_present(dev))
+				return -ENODEV;
 			dev_mc_add(dev,ifr->ifr_hwaddr.sa_data, dev->addr_len, 1);
 			return 0;
 
 		case SIOCDELMULTI:
-			if(dev->set_multicast_list==NULL ||
-			   ifr->ifr_hwaddr.sa_family!=AF_UNSPEC)
+			if (dev->set_multicast_list == NULL ||
+			    ifr->ifr_hwaddr.sa_family!=AF_UNSPEC)
 				return -EINVAL;
+			if (!netif_device_present(dev))
+				return -ENODEV;
 			dev_mc_delete(dev,ifr->ifr_hwaddr.sa_data,dev->addr_len, 1);
 			return 0;
 
@@ -1614,7 +1623,7 @@ static int dev_ifsioc(struct ifreq *ifr, unsigned int cmd)
 			return 0;
 
 		case SIOCSIFTXQLEN:
-			if(ifr->ifr_qlen<0)
+			if (ifr->ifr_qlen<0)
 				return -EINVAL;
 			dev->tx_queue_len = ifr->ifr_qlen;
 			return 0;
@@ -1634,17 +1643,23 @@ static int dev_ifsioc(struct ifreq *ifr, unsigned int cmd)
 		 */
 
 		default:
-			if(cmd >= SIOCDEVPRIVATE &&
-			   cmd <= SIOCDEVPRIVATE + 15) {
-				if (dev->do_ioctl)
+			if (cmd >= SIOCDEVPRIVATE &&
+			    cmd <= SIOCDEVPRIVATE + 15) {
+				if (dev->do_ioctl) {
+					if (!netif_device_present(dev))
+						return -ENODEV;
 					return dev->do_ioctl(dev, ifr, cmd);
+				}
 				return -EOPNOTSUPP;
 			}
 
 #ifdef WIRELESS_EXT
-			if(cmd >= SIOCIWFIRST && cmd <= SIOCIWLAST) {
-				if (dev->do_ioctl)
+			if (cmd >= SIOCIWFIRST && cmd <= SIOCIWLAST) {
+				if (dev->do_ioctl) {
+					if (!netif_device_present(dev))
+						return -ENODEV;
 					return dev->do_ioctl(dev, ifr, cmd);
+				}
 				return -EOPNOTSUPP;
 			}
 #endif	/* WIRELESS_EXT */
@@ -1868,6 +1883,13 @@ int register_netdevice(struct net_device *dev)
 	if (dev->rebuild_header == NULL)
 		dev->rebuild_header = default_rebuild_header;
 
+	/*
+	 *	Default initial state at registry is that the
+	 *	device is present.
+	 */
+
+	set_bit(__LINK_STATE_PRESENT, &dev->state);
+
 	dev->next = NULL;
 	dev_init_scheduler(dev);
 	write_lock_bh(&dev_base_lock);
@@ -2048,15 +2070,6 @@ int __init net_dev_init(void)
 		queue->completion_queue = NULL;
 	}
 	
-	/*
-	 *	The bridge has to be up before the devices
-	 */
-
-#ifdef CONFIG_BRIDGE	 
-	br_init();
-#endif	
-	
-
 #ifdef CONFIG_NET_PROFILE
 	net_profile_init();
 	NET_PROFILE_REGISTER(dev_queue_xmit);
@@ -2124,22 +2137,11 @@ int __init net_dev_init(void)
 	dst_init();
 	dev_mcast_init();
 
-#ifdef CONFIG_BRIDGE
-	/*
-	 * Register any statically linked ethernet devices with the bridge
-	 */
-	br_spacedevice_register();
-#endif
-
 	/*
 	 *	Initialise network devices
 	 */
 	 
 	net_device_init();
-
-#ifdef CONFIG_IP_PNP
-	ip_auto_config();
-#endif
 
 	return 0;
 }

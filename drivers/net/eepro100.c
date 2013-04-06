@@ -188,10 +188,8 @@ static int multicast_filter_limit = 64;
 
 /* 'options' is used to pass a transceiver override or full-duplex flag
    e.g. "options=16" for FD, "options=32" for 100mbps-only. */
-#if MODULE_SETUP_FIXED
 static int full_duplex[] = {-1, -1, -1, -1, -1, -1, -1, -1};
 static int options[] = {-1, -1, -1, -1, -1, -1, -1, -1};
-#endif
 static int debug = -1;			/* The debug level */
 
 /* A few values that may be tweaked. */
@@ -214,7 +212,8 @@ static int debug = -1;			/* The debug level */
 #error You must compile this driver with "-O".
 #endif
 
-#include <linux/version.h>
+
+#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/string.h>
@@ -237,12 +236,8 @@ static int debug = -1;			/* The debug level */
 MODULE_AUTHOR("Donald Becker <becker@cesdis.gsfc.nasa.gov>");
 MODULE_DESCRIPTION("Intel i82557/i82558 PCI EtherExpressPro driver");
 MODULE_PARM(debug, "i");
-
-#if MODULE_OPTIONS_FIXED
 MODULE_PARM(options, "1-" __MODULE_STRING(8) "i");
 MODULE_PARM(full_duplex, "1-" __MODULE_STRING(8) "i");
-#endif
-
 MODULE_PARM(congenb, "i");
 MODULE_PARM(txfifo, "i");
 MODULE_PARM(rxfifo, "i");
@@ -256,6 +251,21 @@ MODULE_PARM(multicast_filter_limit, "i");
 #define PFX EEPRO100_MODULE_NAME ": "
 
 #define RUN_AT(x) (jiffies + (x))
+
+/* ACPI power states don't universally work (yet) */
+#ifndef CONFIG_EEPRO100_PM
+#undef pci_set_power_state
+#define pci_set_power_state null_set_power_state
+static inline int null_set_power_state(struct pci_dev *dev, int state)
+{
+	return 0;
+}
+#endif /* CONFIG_EEPRO100_PM */
+
+
+/* compile-time switch to en/disable slow PIO */
+#undef USE_IO
+
 
 int speedo_debug = 1;
 
@@ -522,6 +532,7 @@ static int __devinit eepro100_init_one (struct pci_dev *pdev,
 	u16 eeprom[0x100];
 	int acpi_idle_state = 0, pm, irq;
 	unsigned long ioaddr;
+	static int card_idx = -1;
 
 	static int did_version = 0;			/* Already printed version info. */
 
@@ -531,6 +542,8 @@ static int __devinit eepro100_init_one (struct pci_dev *pdev,
 	ioaddr = pci_resource_start (pdev, 1);
 #endif
 	irq = pdev->irq;
+
+	card_idx++;
 	
 	if (!request_region (pci_resource_start (pdev, 1),
 			     pci_resource_len (pdev, 1),
@@ -578,10 +591,8 @@ static int __devinit eepro100_init_one (struct pci_dev *pdev,
 
 	if (dev->mem_start > 0)
 		option = dev->mem_start;
-#if MODULE_SETUP_FIXED
 	else if (card_idx >= 0  &&  options[card_idx] >= 0)
 		option = options[card_idx];
-#endif
 	else
 		option = 0;
 
@@ -735,12 +746,10 @@ static int __devinit eepro100_init_one (struct pci_dev *pdev,
 	
 	sp->full_duplex = option >= 0 && (option & 0x10) ? 1 : 0;
 
-#if MODULE_SETUP_FIXED
 	if (card_idx >= 0) {
 		if (full_duplex[card_idx] >= 0)
 			sp->full_duplex = full_duplex[card_idx];
 	}
-#endif
 
 	sp->default_port = option >= 0 ? (option & 0x0f) : 0;
 
@@ -773,8 +782,8 @@ err_out_free_tx_ring:
 err_out_iounmap:
 #ifndef USE_IO
 	iounmap ((void *)ioaddr);
-#endif
 err_out_free_mmio_region:
+#endif
 	release_mem_region (pci_resource_start (pdev, 0),
 			    pci_resource_len (pdev, 0));
 err_out_free_pio_region:
@@ -903,7 +912,6 @@ speedo_open(struct net_device *dev)
 	/* Fire up the hardware. */
 	speedo_resume(dev);
 
-	clear_bit(LINK_STATE_RXSEM, &dev->state);
 	netif_start_queue(dev);
 
 	/* Setup the chip and configure the multicast list. */
@@ -1093,7 +1101,7 @@ speedo_init_rx_ring(struct net_device *dev)
 		rxf = (struct RxFD *)skb->tail;
 		sp->rx_ringp[i] = rxf;
 		sp->rx_ring_dma[i] =
-			pci_map_single(sp->pdev, rxf, PKT_BUF_SZ + sizeof(struct RxFD));
+			pci_map_single(sp->pdev, rxf, PKT_BUF_SZ + sizeof(struct RxFD), PCI_DMA_FROMDEVICE);
 		skb_reserve(skb, sizeof(struct RxFD));
 		if (last_rxf)
 			last_rxf->link = cpu_to_le32(sp->rx_ring_dma[i]);
@@ -1194,7 +1202,7 @@ speedo_start_xmit(struct sk_buff *skb, struct net_device *dev)
 		sp->tx_ring[entry].count = cpu_to_le32(sp->tx_threshold);
 		sp->tx_ring[entry].tx_buf_addr0 =
 			cpu_to_le32(pci_map_single(sp->pdev, skb->data,
-						   skb->len));
+						   skb->len, PCI_DMA_TODEVICE));
 		sp->tx_ring[entry].tx_buf_size0 = cpu_to_le32(skb->len);
 		/* Todo: perhaps leave the interrupt bit set if the Tx queue is more
 		   than half full.  Argument against: we should be receiving packets
@@ -1289,19 +1297,18 @@ static void speedo_interrupt(int irq, void *dev_instance, struct pt_regs *regs)
 				/* Free the original skb. */
 				if (sp->tx_skbuff[entry]) {
 					sp->stats.tx_packets++;	/* Count only user packets. */
-#if LINUX_VERSION_CODE > 0x20127
 					sp->stats.tx_bytes += sp->tx_skbuff[entry]->len;
-#endif
 					pci_unmap_single(sp->pdev,
 							 le32_to_cpu(sp->tx_ring[entry].tx_buf_addr0),
-							 sp->tx_skbuff[entry]->len);
+							 sp->tx_skbuff[entry]->len, PCI_DMA_TODEVICE);
 					dev_kfree_skb_irq(sp->tx_skbuff[entry]);
 					sp->tx_skbuff[entry] = 0;
 				} else if ((status & 0x70000) == CmdNOp) {
 					if (sp->mc_setup_busy)
 						pci_unmap_single(sp->pdev,
 								 sp->mc_setup_dma,
-								 sp->mc_setup_frm_len);
+								 sp->mc_setup_frm_len,
+								 PCI_DMA_TODEVICE);
 					sp->mc_setup_busy = 0;
 				}
 				dirty_tx++;
@@ -1386,7 +1393,7 @@ speedo_rx(struct net_device *dev)
 				skb_reserve(skb, 2);	/* Align IP on 16 byte boundaries */
 				/* 'skb_put()' points to the start of sk_buff data area. */
 				pci_dma_sync_single(sp->pdev, sp->rx_ring_dma[entry],
-						    PKT_BUF_SZ + sizeof(struct RxFD));
+						    PKT_BUF_SZ + sizeof(struct RxFD), PCI_DMA_FROMDEVICE);
 #if 1 || USE_IP_CSUM
 				/* Packet is in one chunk -- we can copy + cksum. */
 				eth_copy_and_sum(skb, sp->rx_skbuff[entry]->tail, pkt_len, 0);
@@ -1408,14 +1415,12 @@ speedo_rx(struct net_device *dev)
 				temp = skb_put(skb, pkt_len);
 				sp->rx_ringp[entry] = NULL;
 				pci_unmap_single(sp->pdev, sp->rx_ring_dma[entry],
-						 PKT_BUF_SZ + sizeof(struct RxFD));
+						 PKT_BUF_SZ + sizeof(struct RxFD), PCI_DMA_FROMDEVICE);
 			}
 			skb->protocol = eth_type_trans(skb, dev);
 			netif_rx(skb);
 			sp->stats.rx_packets++;
-#if LINUX_VERSION_CODE > 0x20127
 			sp->stats.rx_bytes += pkt_len;
-#endif
 		}
 		entry = (++sp->cur_rx) % RX_RING_SIZE;
 	}
@@ -1436,7 +1441,7 @@ speedo_rx(struct net_device *dev)
 			rxf = sp->rx_ringp[entry] = (struct RxFD *)skb->tail;
 			sp->rx_ring_dma[entry] =
 				pci_map_single(sp->pdev, rxf, PKT_BUF_SZ
-					       + sizeof(struct RxFD));
+					       + sizeof(struct RxFD), PCI_DMA_FROMDEVICE);
 			skb->dev = dev;
 			skb_reserve(skb, sizeof(struct RxFD));
 			rxf->rx_buf_addr = 0xffffffff;
@@ -1485,10 +1490,7 @@ speedo_close(struct net_device *dev)
 		if (skb) {
 			pci_unmap_single(sp->pdev,
 					 sp->rx_ring_dma[i],
-					 PKT_BUF_SZ + sizeof(struct RxFD));
-#if LINUX_VERSION_CODE < 0x20100
-			skb->free = 1;
-#endif
+					 PKT_BUF_SZ + sizeof(struct RxFD), PCI_DMA_FROMDEVICE);
 			dev_kfree_skb(skb);
 		}
 	}
@@ -1501,7 +1503,7 @@ speedo_close(struct net_device *dev)
 		if (skb) {
 			pci_unmap_single(sp->pdev,
 							 le32_to_cpu(sp->tx_ring[i].tx_buf_addr0),
-							 skb->len);
+							 skb->len, PCI_DMA_TODEVICE);
 			dev_kfree_skb(skb);
 		}
 	}
@@ -1554,7 +1556,7 @@ speedo_get_stats(struct net_device *dev)
 		sp->stats.rx_fifo_errors += le32_to_cpu(sp->lstats->rx_overrun_errs);
 		sp->stats.rx_length_errors += le32_to_cpu(sp->lstats->rx_runt_errs);
 		sp->lstats->done_marker = 0x0000;
-		if (test_bit(LINK_STATE_START, &dev->state)) {
+		if (netif_running(dev)) {
 			wait_for_cmd_done(ioaddr + SCBCmd);
 			outw(CUDumpStats, ioaddr + SCBCmd);
 		}
@@ -1746,7 +1748,7 @@ static void set_rx_mode(struct net_device *dev)
 		/* Change the command to a NoOp, pointing to the CmdMulti command. */
 		sp->tx_skbuff[entry] = 0;
 		sp->tx_ring[entry].status = cpu_to_le32(CmdNOp);
-		sp->mc_setup_dma = pci_map_single(sp->pdev, mc_setup_frm, sp->mc_setup_frm_len);
+		sp->mc_setup_dma = pci_map_single(sp->pdev, mc_setup_frm, sp->mc_setup_frm_len, PCI_DMA_TODEVICE);
 		sp->tx_ring[entry].link = cpu_to_le32(sp->mc_setup_dma);
 
 		/* Set the link in the setup frame. */
@@ -1773,7 +1775,7 @@ static void eepro100_suspend (struct pci_dev *pdev)
 	struct net_device *dev = pdev->driver_data;
 	long ioaddr = dev->base_addr;
 
-	netif_stop_queue (dev);
+	netif_device_detach(dev);
 	outl(PortPartialReset, ioaddr + SCBPort);
 	
 	/* XXX call pci_set_power_state ()? */
@@ -1785,6 +1787,7 @@ static void eepro100_resume (struct pci_dev *pdev)
 	struct net_device *dev = pdev->driver_data;
 	struct speedo_private *np = (struct speedo_private *)dev->priv;
 
+	netif_device_attach(dev);
 	speedo_resume(dev);
 	np->rx_mode = -1;
 	np->flow_ctrl = np->partner = 0;
@@ -1809,6 +1812,10 @@ static void __devexit eepro100_remove_one (struct pci_dev *pdev)
 #endif
 
 	pci_set_power_state (pdev, sp->acpi_pwr);
+
+	pci_free_consistent(pdev, TX_RING_SIZE * sizeof(struct TxFD)
+				  + sizeof(struct speedo_stats),
+			    sp->tx_ring, sp->tx_ring_dma);
 
 	kfree (dev);
 }
@@ -1846,6 +1853,7 @@ static int __init eepro100_init_module(void)
 	cards_found = pci_register_driver (&eepro100_driver);
 	if (cards_found <= 0) {
 		printk(KERN_INFO PFX "No cards found, driver not installed.\n");
+		pci_unregister_driver (&eepro100_driver);
 		return -ENODEV;
 	}
 

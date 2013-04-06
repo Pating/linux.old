@@ -330,6 +330,13 @@ M:	Philip.Blundell@pobox.com
 L:	linux-net@vger.rutgers.edu
 S:	Maintained
 
+ETHERNET BRIDGE
+P:	Lennert Buytenhek
+M:	buytenh@openrock.net
+L:	bridge@openrock.net
+W:	http://openrock.net/bridge
+S:	Maintained
+
 ETHERTEAM 16I DRIVER
 P:      Mika Kuoppala
 M:      miku@iki.fi
@@ -397,6 +404,13 @@ P:	Klaus Kudielka
 M:	oe1kib@oe1kib.ampr.org
 L:	linux-hams@vger.rutgers.edu
 S:	Maintained
+
+LOGICAL VOLUME MANAGER
+P:     Heinz Mauelshagen
+M:     linux-LVM@EZ-Darmstadt.Telekom.de
+L:     linux-LVM@msede.com
+W:     http://linux.msede.com/lvm
+S:     Maintained 
 
 HIPPI
 P:	Jes Sorensen

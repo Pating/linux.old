@@ -237,7 +237,6 @@ static ssize_t lp_write(struct file * file, const char * buf,
 	ssize_t retv = 0;
 	ssize_t written;
 	size_t copy_size = count;
-	long old_to;
 
 #ifdef LP_STATS
 	if (jiffies-lp_table[minor].lastcall > LP_TIME(minor))
@@ -263,8 +262,8 @@ static ssize_t lp_write(struct file * file, const char * buf,
 	/* Go to compatibility mode. */
 	parport_negotiate (port, IEEE1284_MODE_COMPAT);
 
-	old_to = parport_set_timeout (lp_table[minor].dev,
-				      lp_table[minor].timeout);
+	parport_set_timeout (lp_table[minor].dev,
+			     lp_table[minor].timeout);
 
 	do {
 		/* Write the data. */
@@ -309,9 +308,6 @@ static ssize_t lp_write(struct file * file, const char * buf,
 			}
 		}	
 	} while (count > 0);
-
-	/* Not really necessary, but polite. */
-	parport_set_timeout (lp_table[minor].dev, old_to);
 
  	parport_release (lp_table[minor].dev);
 
@@ -564,13 +560,12 @@ static void lp_console_write (struct console *co, const char *s,
 	struct pardevice *dev = lp_table[CONSOLE_LP].dev;
 	struct parport *port = dev->port;
 	ssize_t written;
-	signed long old_to;
 
 	if (parport_claim (dev))
 		/* Nothing we can do. */
 		return;
 
-	old_to = parport_set_timeout (dev, 0);
+	parport_set_timeout (dev, 0);
 
 	/* Go to compatibility mode. */
 	parport_negotiate (port, IEEE1284_MODE_COMPAT);
@@ -608,7 +603,6 @@ static void lp_console_write (struct console *co, const char *s,
 		}
 	} while (count > 0 && (CONSOLE_LP_STRICT || written > 0));
 
-	parport_set_timeout (dev, old_to);
 	parport_release (dev);
 }
 
@@ -680,6 +674,8 @@ void __init lp_setup(char *str, int *ints)
 
 static int lp_register(int nr, struct parport *port)
 {
+	char name[8];
+
 	lp_table[nr].dev = parport_register_device(port, "lp", 
 						   NULL, NULL, NULL, 0,
 						   (void *) &lp_table[nr]);
@@ -689,6 +685,12 @@ static int lp_register(int nr, struct parport *port)
 
 	if (reset)
 		lp_reset(nr);
+
+	sprintf (name, "%d", nr);
+	devfs_register (devfs_handle, name, 0,
+			DEVFS_FL_DEFAULT, LP_MAJOR, nr,
+			S_IFCHR | S_IRUGO | S_IWUGO, 0, 0,
+			&lp_fops, NULL);
 
 	printk(KERN_INFO "lp%d: using %s (%s).\n", nr, port->name, 
 	       (port->irq == PARPORT_IRQ_NONE)?"polling":"interrupt-driven");
@@ -787,26 +789,12 @@ int __init lp_init (void)
 	}
 
 	devfs_handle = devfs_mk_dir (NULL, "printers", 0, NULL);
-	if (lp_count) {
-		for (i = 0; i < LP_NO; ++i)
-		{
-		    char name[8];
-
-		    if (!(lp_table[i].flags & LP_EXIST)) 
-			continue; /* skip this entry: it doesn't exist. */
-		    sprintf (name, "%d", i);
-		    devfs_register (devfs_handle, name, 0,
-				    DEVFS_FL_DEFAULT, LP_MAJOR, i,
-				    S_IFCHR | S_IRUGO | S_IWUGO, 0, 0,
-				    &lp_fops, NULL);
-		}
-	}
 
 	if (!lp_count) {
 		printk (KERN_INFO "lp: driver loaded but no devices found\n");
-#ifndef CONFIG_PARPORT_12843
+#ifndef CONFIG_PARPORT_1284
 		if (parport_nr[0] == LP_PARPORT_AUTO)
-			printk (KERN_INFO "lp: (is IEEE 1284.3 support enabled?)\n");
+			printk (KERN_INFO "lp: (is IEEE 1284 support enabled?)\n");
 #endif
 	}
 

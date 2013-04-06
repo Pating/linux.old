@@ -87,7 +87,7 @@ an MMIO register read.
 #include <asm/io.h>
 
 
-#define RTL8139_VERSION "0.9.2"
+#define RTL8139_VERSION "0.9.3"
 #define RTL8139_MODULE_NAME "8139too"
 #define RTL8139_DRIVER_NAME   RTL8139_MODULE_NAME " Fast Ethernet driver " RTL8139_VERSION
 #define PFX RTL8139_MODULE_NAME ": "
@@ -154,7 +154,7 @@ enum {
 	HAS_LNK_CHNG = 0x040000,
 };
 
-#define RTL_IO_SIZE 256
+#define RTL_IO_SIZE 0x80
 
 #define RTL8139_CAPS  HAS_CHIP_XCVR|HAS_LNK_CHNG
 
@@ -163,8 +163,6 @@ typedef enum {
 	RTL8139_CB,
 	SMC1211TX,
 	/*MPX5030,*/
-	SIS900,
-	SIS7016,
 	DELTA8139,
 	ADDTRON8139,
 } chip_t;
@@ -178,8 +176,6 @@ static struct {
 	{ RTL8139_CB, "RealTek RTL8139B PCI/CardBus"},
 	{ SMC1211TX, "SMC1211TX EZCard 10/100 (RealTek RTL8139)"},
 /*	{ MPX5030, "Accton MPX5030 (RealTek RTL8139)"},*/
-	{ SIS900, "SiS 900 (RealTek RTL8139) Fast Ethernet"},
-	{ SIS7016, "SiS 7016 (RealTek RTL8139) Fast Ethernet"},
 	{ DELTA8139, "Delta Electronics 8139 10/100BaseTX"},
 	{ ADDTRON8139, "Addtron Technolgy 8139 10/100BaseTX"},
 	{0,},
@@ -191,8 +187,6 @@ static struct pci_device_id rtl8139_pci_tbl[] __devinitdata = {
 	{0x10ec, 0x8138, PCI_ANY_ID, PCI_ANY_ID, 0, 0, RTL8139_CB },
 	{0x1113, 0x1211, PCI_ANY_ID, PCI_ANY_ID, 0, 0, SMC1211TX },
 /*	{0x1113, 0x1211, PCI_ANY_ID, PCI_ANY_ID, 0, 0, MPX5030 },*/
-	{0x1039, 0x0900, PCI_ANY_ID, PCI_ANY_ID, 0, 0, SIS900 },
-	{0x1039, 0x7016, PCI_ANY_ID, PCI_ANY_ID, 0, 0, SIS7016 },
 	{0x1500, 0x1360, PCI_ANY_ID, PCI_ANY_ID, 0, 0, DELTA8139 },
 	{0x4033, 0x1360, PCI_ANY_ID, PCI_ANY_ID, 0, 0, ADDTRON8139 },
 	{0,},
@@ -1202,7 +1196,7 @@ static void rtl8139_tx_timeout (struct net_device *dev)
 			tp->stats.tx_dropped++;
 		}
 		if (rp->mapping != 0) {
-			pci_unmap_single (tp->pci_dev, rp->mapping, rp->skb->len);
+			pci_unmap_single (tp->pci_dev, rp->mapping, rp->skb->len, PCI_DMA_TODEVICE);
 			rp->mapping = 0;
 		}
 	}
@@ -1258,7 +1252,7 @@ static int rtl8139_start_xmit (struct sk_buff *skb, struct net_device *dev)
 		RTL_W32 (TxAddr0 + entry * 4, tp->tx_bufs_dma + (tp->tx_buf[entry] - tp->tx_bufs));
 	} else {
 		tp->tx_info[entry].mapping =
-			pci_map_single(tp->pci_dev, skb->data, skb->len);
+			pci_map_single(tp->pci_dev, skb->data, skb->len, PCI_DMA_TODEVICE);
 
 		assert (tp->tx_info[entry].mapping > 0);
 		RTL_W32 (TxAddr0 + entry * 4, tp->tx_info[entry].mapping);
@@ -1334,7 +1328,8 @@ static inline void rtl8139_tx_interrupt (struct net_device *dev,
 		if (tp->tx_info[entry].mapping != 0) {
 			pci_unmap_single (tp->pci_dev,
 					  tp->tx_info[entry].mapping,
-					  tp->tx_info[entry].skb->len);
+					  tp->tx_info[entry].skb->len,
+					  PCI_DMA_TODEVICE);
 			tp->tx_info[entry].mapping = 0;
 		}
 		/* Free the original skb. */
@@ -1675,7 +1670,7 @@ static int rtl8139_close (struct net_device *dev)
 
 		if (skb) {
 			if (mapping)
-				pci_unmap_single (tp->pci_dev, mapping, skb->len);
+				pci_unmap_single (tp->pci_dev, mapping, skb->len, PCI_DMA_TODEVICE);
 			dev_kfree_skb (skb);
 		}
 		tp->tx_info[i].skb = NULL;
@@ -1738,7 +1733,7 @@ static struct net_device_stats *rtl8139_get_stats (struct net_device *dev)
 
 	assert (tp != NULL);
 
-	if (test_bit(LINK_STATE_START, &dev->state)) {
+	if (netif_running(dev)) {
 		tp->stats.rx_missed_errors += RTL_R32 (RxMissed);
 		RTL_W32 (RxMissed, 0);
 	}
@@ -1865,6 +1860,8 @@ static int __init rtl8139_init_module (void)
 		printk (KERN_INFO RTL8139_DRIVER_NAME
 			" loaded (%d device%s registered)\n",
 			rc, rc > 1 ? "s" : "");
+	} else {
+		pci_unregister_driver (&rtl8139_pci_driver);
 	}
 
 	DPRINTK ("EXIT\n");

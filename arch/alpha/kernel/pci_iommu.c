@@ -121,10 +121,10 @@ iommu_arena_free(struct pci_iommu_arena *arena, long ofs, long n)
 /* Map a single buffer of the indicate size for PCI DMA in streaming
    mode.  The 32-bit PCI bus mastering address to use is returned.
    Once the device is given the dma address, the device owns this memory
-   until either pci_unmap_single or pci_sync_single is performed.  */
+   until either pci_unmap_single or pci_dma_sync_single is performed.  */
 
 dma_addr_t
-pci_map_single(struct pci_dev *pdev, void *cpu_addr, long size)
+pci_map_single(struct pci_dev *pdev, void *cpu_addr, long size, int direction)
 {
 	struct pci_controler *hose = pdev ? pdev->sysdata : pci_isa_hose;
 	dma_addr_t max_dma = pdev ? pdev->dma_mask : 0x00ffffff;
@@ -186,7 +186,7 @@ pci_map_single(struct pci_dev *pdev, void *cpu_addr, long size)
    wrote there.  */
 
 void
-pci_unmap_single(struct pci_dev *pdev, dma_addr_t dma_addr, long size)
+pci_unmap_single(struct pci_dev *pdev, dma_addr_t dma_addr, long size, int direction)
 {
 	struct pci_controler *hose = pdev ? pdev->sysdata : pci_isa_hose;
 	struct pci_iommu_arena *arena;
@@ -247,7 +247,7 @@ pci_alloc_consistent(struct pci_dev *pdev, long size, dma_addr_t *dma_addrp)
 	}
 	memset(cpu_addr, 0, size);
 
-	*dma_addrp = pci_map_single(pdev, cpu_addr, size);
+	*dma_addrp = pci_map_single(pdev, cpu_addr, size, PCI_DMA_BIDIRECTIONAL);
 	if (*dma_addrp == 0) {
 		free_pages((unsigned long)cpu_addr, order);
 		return NULL;
@@ -270,7 +270,7 @@ void
 pci_free_consistent(struct pci_dev *pdev, long size, void *cpu_addr,
 		    dma_addr_t dma_addr)
 {
-	pci_unmap_single(pdev, dma_addr, size);
+	pci_unmap_single(pdev, dma_addr, size, PCI_DMA_BIDIRECTIONAL);
 	free_pages((unsigned long)cpu_addr, get_order(size));
 
 	DBGA2("pci_free_consistent: [%x,%lx] from %p\n",
@@ -424,7 +424,7 @@ sg_fill(struct scatterlist *leader, struct scatterlist *end,
 }
 
 int
-pci_map_sg(struct pci_dev *pdev, struct scatterlist *sg, int nents)
+pci_map_sg(struct pci_dev *pdev, struct scatterlist *sg, int nents, int direction)
 {
 	struct scatterlist *start, *end, *out;
 	struct pci_controler *hose;
@@ -435,7 +435,7 @@ pci_map_sg(struct pci_dev *pdev, struct scatterlist *sg, int nents)
 	if (nents == 1) {
 		sg->dma_length = sg->length;
 		sg->dma_address
-		  = pci_map_single(pdev, sg->address, sg->length);
+		  = pci_map_single(pdev, sg->address, sg->length, direction);
 		return sg->dma_address != 0;
 	}
 
@@ -472,6 +472,10 @@ pci_map_sg(struct pci_dev *pdev, struct scatterlist *sg, int nents)
 		out++;
 	}
 
+	/* Mark the end of the list for pci_unmap_sg.  */
+	if (out < end)
+		out->dma_length = 0;
+
 	if (out - start == 0)
 		printk(KERN_INFO "pci_map_sg failed: no entries?\n");
 	DBGA("pci_map_sg: %ld entries\n", out - start);
@@ -485,7 +489,7 @@ error:
 	/* Some allocation failed while mapping the scatterlist
 	   entries.  Unmap them now.  */
 	if (out > start)
-		pci_unmap_sg(pdev, start, out - start);
+		pci_unmap_sg(pdev, start, out - start, direction);
 	return 0;
 }
 
@@ -495,7 +499,7 @@ error:
    above.  */
 
 void
-pci_unmap_sg(struct pci_dev *pdev, struct scatterlist *sg, int nents)
+pci_unmap_sg(struct pci_dev *pdev, struct scatterlist *sg, int nents, int direction)
 {
 	struct pci_controler *hose;
 	struct pci_iommu_arena *arena;
@@ -512,8 +516,6 @@ pci_unmap_sg(struct pci_dev *pdev, struct scatterlist *sg, int nents)
 	if (!arena || arena->dma_base + arena->size > max_dma)
 		arena = hose->sg_isa;
 
-	DBGA("pci_unmap_sg: %d entries\n", nents);
-
 	fstart = -1;
 	fend = 0;
 	for (end = sg + nents; sg < end; ++sg) {
@@ -521,6 +523,9 @@ pci_unmap_sg(struct pci_dev *pdev, struct scatterlist *sg, int nents)
 
 		addr = sg->dma_address;
 		size = sg->dma_length;
+
+		if (!size)
+			break;
 
 		if (addr >= __direct_map_base
 		    && addr < __direct_map_base + __direct_map_size) {
@@ -531,6 +536,9 @@ pci_unmap_sg(struct pci_dev *pdev, struct scatterlist *sg, int nents)
 			long npages, ofs;
 			dma_addr_t tend;
 
+			DBGA("    (%ld) sg [%lx,%lx]\n",
+			      sg - end + nents, addr, size);
+
 			npages = calc_npages((addr & ~PAGE_MASK) + size);
 			ofs = (addr - arena->dma_base) >> PAGE_SHIFT;
 			iommu_arena_free(arena, ofs, npages);
@@ -540,11 +548,10 @@ pci_unmap_sg(struct pci_dev *pdev, struct scatterlist *sg, int nents)
 				fstart = addr;
 			if (fend < tend)
 				fend = tend;
-
-			DBGA("    (%ld) sg [%lx,%lx]\n",
-			      sg - end + nents, addr, size);
 		}
 	}
 	if (fend)
 		alpha_mv.mv_pci_tbi(hose, fstart, fend);
+
+	DBGA("pci_unmap_sg: %d entries\n", nents - (end - sg));
 }

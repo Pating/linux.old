@@ -2713,8 +2713,6 @@ tulip_down(struct net_device *dev)
 	long ioaddr = dev->base_addr;
 	struct tulip_private *tp = (struct tulip_private *)dev->priv;
 
-	netif_stop_queue (dev);
-
 	/* Disable interrupts by clearing the interrupt mask. */
 	outl(0x00000000, ioaddr + CSR7);
 	/* Stop the chip's Tx and Rx processes. */
@@ -2725,8 +2723,6 @@ tulip_down(struct net_device *dev)
 
 	if (inl(ioaddr + CSR6) != 0xffffffff)
 		tp->stats.rx_missed_errors += inl(ioaddr + CSR8) & 0xffff;
-
-	del_timer(&tp->timer);
 
 	dev->if_port = tp->saved_if_port;
 }
@@ -2742,8 +2738,12 @@ tulip_close(struct net_device *dev)
 		printk(KERN_DEBUG "%s: Shutting down ethercard, status was %2.2x.\n",
 			   dev->name, inl(ioaddr + CSR5));
 
-	if (test_bit(LINK_STATE_START, &dev->state))
+	netif_stop_queue(dev);
+
+	if (netif_device_present(dev))
 		tulip_down(dev);
+
+	del_timer(&tp->timer);
 
 	free_irq(dev->irq, dev);
 
@@ -2774,7 +2774,7 @@ static struct net_device_stats *tulip_get_stats(struct net_device *dev)
 	struct tulip_private *tp = (struct tulip_private *)dev->priv;
 	long ioaddr = dev->base_addr;
 
-	if (test_bit(LINK_STATE_START, &dev->state))
+	if (netif_device_present(dev))
 		tp->stats.rx_missed_errors += inl(ioaddr + CSR8) & 0xffff;
 
 	return &tp->stats;
