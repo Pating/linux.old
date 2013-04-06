@@ -727,7 +727,8 @@ int rose_rt_ioctl(unsigned int cmd, void __user *arg)
 		}
 		if (rose_route.mask > 10) /* Mask can't be more than 10 digits */
 			return -EINVAL;
-
+		if (rose_route.ndigis > 8) /* No more than 8 digipeats */
+			return -EINVAL;
 		err = rose_add_node(&rose_route, dev);
 		dev_put(dev);
 		return err;
@@ -898,7 +899,8 @@ int rose_route_frame(struct sk_buff *skb, ax25_cb *ax25)
 	 */
 	if ((sk = rose_find_socket(lci, rose_neigh)) != NULL) {
 		if (frametype == ROSE_CALL_REQUEST) {
-			rose_cb *rose = rose_sk(sk);
+			struct rose_sock *rose = rose_sk(sk);
+
 			/* Remove an existing unused socket */
 			rose_clear_queues(sk);
 			rose->cause	 = ROSE_NETWORK_CONGESTION;

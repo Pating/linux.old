@@ -6,17 +6,11 @@
  *  Rock Ridge Extensions to iso9660
  */
 
-#include <linux/stat.h>
-#include <linux/time.h>
-#include <linux/iso_fs.h>
-#include <linux/string.h>
-#include <linux/mm.h>
 #include <linux/slab.h>
 #include <linux/pagemap.h>
 #include <linux/smp_lock.h>
-#include <linux/buffer_head.h>
-#include <asm/page.h>
 
+#include "isofs.h"
 #include "rock.h"
 
 /* These functions are designed to read the system areas of a directory record
@@ -53,6 +47,7 @@
   if(LEN & 1) LEN++;						\
   CHR = ((unsigned char *) DE) + LEN;				\
   LEN = *((unsigned char *) DE) - LEN;                          \
+  if (LEN<0) LEN=0;                                             \
   if (ISOFS_SB(inode->i_sb)->s_rock_offset!=-1)                \
   {                                                             \
      LEN-=ISOFS_SB(inode->i_sb)->s_rock_offset;                \
@@ -73,6 +68,10 @@
     offset1 = 0; \
     pbh = sb_bread(DEV->i_sb, block); \
     if(pbh){       \
+      if (offset > pbh->b_size || offset + cont_size > pbh->b_size){	\
+	brelse(pbh); \
+	goto out; \
+      } \
       memcpy(buffer + offset1, pbh->b_data + offset, cont_size - offset1); \
       brelse(pbh); \
       chr = (unsigned char *) buffer; \
@@ -103,12 +102,13 @@ int get_rock_ridge_filename(struct iso_directory_record * de,
     struct rock_ridge * rr;
     int sig;
     
-    while (len > 1){ /* There may be one byte for padding somewhere */
+    while (len > 2){ /* There may be one byte for padding somewhere */
       rr = (struct rock_ridge *) chr;
-      if (rr->len == 0) goto out; /* Something got screwed up here */
+      if (rr->len < 3) goto out; /* Something got screwed up here */
       sig = isonum_721(chr);
       chr += rr->len; 
       len -= rr->len;
+      if (len < 0) goto out;	/* corrupted isofs */
 
       switch(sig){
       case SIG('R','R'):
@@ -122,6 +122,7 @@ int get_rock_ridge_filename(struct iso_directory_record * de,
 	break;
       case SIG('N','M'):
 	if (truncate) break;
+	if (rr->len < 5) break;
         /*
 	 * If the flags are 2 or 4, this indicates '.' or '..'.
 	 * We don't want to do anything with this, because it
@@ -186,12 +187,13 @@ parse_rock_ridge_inode_internal(struct iso_directory_record *de,
     struct rock_ridge * rr;
     int rootflag;
     
-    while (len > 1){ /* There may be one byte for padding somewhere */
+    while (len > 2){ /* There may be one byte for padding somewhere */
       rr = (struct rock_ridge *) chr;
-      if (rr->len == 0) goto out; /* Something got screwed up here */
+      if (rr->len < 3) goto out; /* Something got screwed up here */
       sig = isonum_721(chr);
       chr += rr->len; 
       len -= rr->len;
+      if (len < 0) goto out;	/* corrupted isofs */
       
       switch(sig){
 #ifndef CONFIG_ZISOFS		/* No flag for SF or ZF */
@@ -462,7 +464,7 @@ static int rock_ridge_symlink_readpage(struct file *file, struct page *page)
 	struct rock_ridge *rr;
 
 	if (!ISOFS_SB(inode->i_sb)->s_rock)
-		panic ("Cannot have symlink with high sierra variant of iso filesystem\n");
+		goto error;
 
 	block = ei->i_iget5_block;
 	lock_kernel();
@@ -487,13 +489,15 @@ static int rock_ridge_symlink_readpage(struct file *file, struct page *page)
 	SETUP_ROCK_RIDGE(raw_inode, chr, len);
 
       repeat:
-	while (len > 1) { /* There may be one byte for padding somewhere */
+	while (len > 2) { /* There may be one byte for padding somewhere */
 		rr = (struct rock_ridge *) chr;
-		if (rr->len == 0)
+		if (rr->len < 3)
 			goto out;	/* Something got screwed up here */
 		sig = isonum_721(chr);
 		chr += rr->len;
 		len -= rr->len;
+		if (len < 0)
+			goto out;	/* corrupted isofs */
 
 		switch (sig) {
 		case SIG('R', 'R'):
@@ -543,6 +547,7 @@ static int rock_ridge_symlink_readpage(struct file *file, struct page *page)
       fail:
 	brelse(bh);
 	unlock_kernel();
+      error:
 	SetPageError(page);
 	kunmap(page);
 	unlock_page(page);

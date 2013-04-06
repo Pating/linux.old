@@ -12,29 +12,18 @@
  */
 
 #include <linux/config.h>
+#include <linux/init.h>
 #include <linux/module.h>
 
-#include <linux/stat.h>
-#include <linux/time.h>
-#include <linux/iso_fs.h>
-#include <linux/kernel.h>
-#include <linux/major.h>
-#include <linux/mm.h>
-#include <linux/string.h>
 #include <linux/slab.h>
-#include <linux/errno.h>
-#include <linux/cdrom.h>
-#include <linux/init.h>
 #include <linux/nls.h>
 #include <linux/ctype.h>
 #include <linux/smp_lock.h>
-#include <linux/blkdev.h>
-#include <linux/buffer_head.h>
-#include <linux/vfs.h>
+#include <linux/statfs.h>
+#include <linux/cdrom.h>
 #include <linux/parser.h>
-#include <asm/system.h>
-#include <asm/uaccess.h>
 
+#include "isofs.h"
 #include "zisofs.h"
 
 #define BEQUIET
@@ -685,6 +674,8 @@ root_found:
 	  sbi->s_log_zone_size = isonum_723 (h_pri->logical_block_size);
 	  sbi->s_max_size = isonum_733(h_pri->volume_space_size);
 	} else {
+	  if (!pri)
+	    goto out_freebh;
 	  rootp = (struct iso_directory_record *) pri->root_directory_record;
 	  sbi->s_nzones = isonum_733 (pri->volume_space_size);
 	  sbi->s_log_zone_size = isonum_723 (pri->logical_block_size);
@@ -1394,6 +1385,9 @@ struct inode *isofs_iget(struct super_block *sb,
 	unsigned long hashval;
 	struct inode *inode;
 	struct isofs_iget5_callback_data data;
+
+	if (offset >= 1ul << sb->s_blocksize_bits)
+		return NULL;
 
 	data.block = block;
 	data.offset = offset;
