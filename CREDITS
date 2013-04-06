@@ -431,6 +431,17 @@ S: 1123 North Oak Park Avenue
 S: Oak Park, Illinois 60302
 S: USA
 
+N: Jim Freeman
+E: jfree@caldera.com
+W: http://www.sovereign.org/
+D: Initial GPL'd Frame Relay driver
+D: Dynamic PPP devices
+D: Sundry modularizations (PPP, IPX, ...) and fixes
+S: Caldera, Inc.
+S: 240 West Center St.
+S: Orem, Utah 84059-1920
+S: USA
+
 N: Bob Frey
 E: bobf@advansys.com
 D: AdvanSys SCSI driver
@@ -604,12 +615,13 @@ S: CV5 8BZ
 S: United Kingdom
 
 N: Ron Holt
-E: ron@novell.com
+E: ron@caldera.com
+W: http://www.holt.org/
 D: Kernel development
-D: Contributed to kernel Wabi/Wine support
-S: Novell, Inc.
-S: 1700 South 122 East, Mailstop CP-1
-S: Provo, Utah 84606
+D: Minor kernel modifications to support Wabi and Wine
+S: Caldera, Inc.
+S: 240 West Center St.
+S: Orem, Utah 84059-1920
 S: USA
 
 N: Rob W. W. Hooft
@@ -867,7 +879,7 @@ S: Czech Republic
 
 N: John A. Martin
 E: jam@acm.org
-W: http://linux.wauug.org/~jam/
+W: http://www.tux.org/~jam/
 P: 1024/04456D53 9D A3 6C 6B 88 80 8A 61  D7 06 22 4F 95 40 CE D2
 P: 1024/3B986635 5A61 7EE6 9E20 51FB 59FB  2DA5 3E18 DD55 3B98 6635
 D: FSSTND contributor
@@ -987,10 +999,10 @@ S: D-37083 Goettingen
 S: Germany
 
 N: David Mosberger-Tang
-E: davidm@azstarnet.com
+E: David.Mosberger@acm.org
 D: Linux/Alpha
-S: 2552 E. Copper Street
-S: Tucson, Arizona 85716-2406
+S: 35706 Runckel Lane
+S: Fremont, CA 94536
 S: USA
 
 N: Ian A. Murdock
@@ -1030,9 +1042,10 @@ S: 55127 Mainz
 S: Germany
 
 N: David C. Niemi
-E: niemi@erols.com
+E: niemi@tux.org
+W: http://www.tux.org/~niemi/
 D: Assistant maintainer of Mtools, fdutils, and floppy driver
-D: Administrator of WAUUG Linux Server, http://linux.wauug.org
+D: Administrator of Tux.Org Linux Server, http://www.tux.org
 S: 2364 Old Trail Drive
 S: Reston, Virginia 20191
 S: USA
@@ -1511,6 +1524,14 @@ S: University of Nijmegen
 S: Geert-Grooteplein Noord 21
 S: 6525 EZ Nijmegen
 S: The Netherlands
+
+N: Ulrich Windl
+E: Ulrich.Windl@rz.uni-regensburg.de
+P: 1024/E843660D CF D7 43 A1 5A 49 14 25  7C 04 A0 6E 4C 3A AC 6D
+D: Bug fixes for adjtimex() and some other time stuff.
+S: Alte Regensburger Str. 11a
+S: 93149 Nittenau
+S: Germany
 
 N: Lars Wirzenius
 E: liw@iki.fi
