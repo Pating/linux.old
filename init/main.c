@@ -17,7 +17,6 @@
 #include <linux/sched.h>
 #include <linux/kernel.h>
 #include <linux/tty.h>
-#include <linux/head.h>
 #include <linux/unistd.h>
 #include <linux/string.h>
 #include <linux/timer.h>
@@ -83,6 +82,11 @@ extern long powermac_init(unsigned long, unsigned long);
 extern void sysctl_init(void);
 extern void filescache_init(void);
 extern void signals_init(void);
+
+extern void device_setup(void);
+extern void binfmt_setup(void);
+extern void free_initmem(void);
+extern void filesystem_setup(void);
 
 #ifdef CONFIG_ARCH_ACORN
 extern void ecard_init(void);
@@ -1109,6 +1113,14 @@ asmlinkage void __init start_kernel(void)
 
 	smp_init();
 
+	/*
+	 * Ok, the machine is now initialized. None of the devices
+	 * have been touched yet, but the CPU subsystem is up and
+	 * running, and memory management works.
+	 *
+	 * Now we can finally start doing some real work..
+	 */
+
 #if defined(CONFIG_MTRR)	/* Do this after SMP initialization */
 /*
  * We should probably create some architecture-dependent "fixup after
@@ -1182,7 +1194,7 @@ static void __init no_initrd(char *s,int *ints)
 }
 #endif
 
-static int init(void * unused)
+static void __init do_basic_setup(void)
 {
 #ifdef CONFIG_BLK_DEV_INITRD
 	int real_root_mountflags;
@@ -1211,7 +1223,18 @@ static int init(void * unused)
 	if (initrd_start && mount_initrd) root_mountflags &= ~MS_RDONLY;
 	else mount_initrd =0;
 #endif
-	setup(0);
+
+	/* Set up devices .. */
+	device_setup();
+
+	/* .. executable formats .. */
+	binfmt_setup();
+
+	/* .. filesystems .. */
+	filesystem_setup();
+
+	/* Mount the root filesystem.. */
+	mount_root();
 
 #ifdef CONFIG_UMSDOS_FS
 	{
@@ -1247,9 +1270,19 @@ static int init(void * unused)
 		}
 	}
 #endif
+}
 
-	setup(1);
-	
+static int init(void * unused)
+{
+	do_basic_setup();
+
+	/*
+	 * Ok, we have completed the initial bootup, and
+	 * we're essentially up and running. Get rid of the
+	 * initmem segments and start the user-mode stuff..
+	 */
+	free_initmem();
+
 	if (open("/dev/console", O_RDWR, 0) < 0)
 		printk("Warning: unable to open an initial console.\n");
 

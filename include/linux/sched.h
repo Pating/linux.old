@@ -1,8 +1,6 @@
 #ifndef _LINUX_SCHED_H
 #define _LINUX_SCHED_H
 
-extern void checksignals(void);
-
 #include <asm/param.h>	/* for HZ */
 
 extern unsigned long event;
@@ -66,7 +64,6 @@ extern unsigned long avenrun[];		/* Load averages */
 extern int nr_running, nr_tasks;
 extern int last_pid;
 
-#include <linux/head.h>
 #include <linux/fs.h>
 #include <linux/signal.h>
 #include <linux/time.h>
