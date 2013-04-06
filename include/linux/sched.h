@@ -20,7 +20,6 @@ extern unsigned long event;
 #include <linux/tty.h>
 #include <linux/sem.h>
 #include <linux/signal.h>
-#include <linux/capability.h>
 #include <linux/securebits.h>
 
 /*
@@ -65,11 +64,9 @@ extern int nr_running, nr_tasks;
 extern int last_pid;
 
 #include <linux/fs.h>
-#include <linux/signal.h>
 #include <linux/time.h>
 #include <linux/param.h>
 #include <linux/resource.h>
-#include <linux/ptrace.h>
 #include <linux/timer.h>
 
 #include <asm/processor.h>
@@ -457,7 +454,6 @@ extern unsigned long prof_shift;
 #define CURRENT_TIME (xtime.tv_sec)
 
 extern void FASTCALL(__wake_up(struct wait_queue ** p, unsigned int mode));
-extern void FASTCALL(sleep_on(struct wait_queue ** p));
 extern void FASTCALL(sleep_on(struct wait_queue ** p));
 extern void FASTCALL(interruptible_sleep_on(struct wait_queue ** p));
 extern long FASTCALL(interruptible_sleep_on_timeout(struct wait_queue ** p,
