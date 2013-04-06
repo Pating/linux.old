@@ -174,7 +174,7 @@ show_mem(void)
 
 extern unsigned long free_area_init(unsigned long, unsigned long);
 
-static struct thread_struct *
+static inline struct thread_struct *
 load_PCB(struct thread_struct * pcb)
 {
 	register unsigned long sp __asm__("$30");
@@ -219,7 +219,7 @@ paging_init(unsigned long start_mem, unsigned long end_mem)
 
 	/* Initialize the kernel's page tables.  Linux puts the vptb in
 	   the last slot of the L1 page table.  */
-	memset((void *) ZERO_PAGE, 0, PAGE_SIZE);
+	memset((void *) ZERO_PAGE(0), 0, PAGE_SIZE);
 	memset(swapper_pg_dir, 0, PAGE_SIZE);
 	newptbr = ((unsigned long) swapper_pg_dir - PAGE_OFFSET) >> PAGE_SHIFT;
 	pgd_val(swapper_pg_dir[1023]) =

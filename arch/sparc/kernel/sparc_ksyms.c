@@ -1,4 +1,4 @@
-/* $Id: sparc_ksyms.c,v 1.77 1999/03/21 06:37:43 davem Exp $
+/* $Id: sparc_ksyms.c,v 1.77.2.1 1999/08/07 10:42:47 davem Exp $
  * arch/sparc/kernel/ksyms.c: Sparc specific ksyms support.
  *
  * Copyright (C) 1996 David S. Miller (davem@caip.rutgers.edu)
@@ -40,7 +40,6 @@
 #include <asm/dma.h>
 #endif
 #include <asm/a.out.h>
-#include <asm/spinlock.h>
 #include <asm/io-unit.h>
 
 struct poll {

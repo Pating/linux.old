@@ -21,10 +21,12 @@
 #include <net/dst.h>
 #include <net/checksum.h>
 #include <linux/etherdevice.h>
+#include <net/route.h>
 #ifdef CONFIG_HIPPI
 #include <linux/hippidevice.h>
 #endif
 #include <net/pkt_sched.h>
+#include <net/scm.h>
 
 #ifdef CONFIG_BRIDGE
 #include <net/br.h>
@@ -32,7 +34,6 @@
 
 #ifdef CONFIG_INET
 #include <linux/ip.h>
-#include <linux/etherdevice.h>
 #include <net/protocol.h>
 #include <net/arp.h>
 #include <net/ip.h>
@@ -40,9 +41,7 @@
 #include <net/tcp.h>
 #include <net/icmp.h>
 #include <net/route.h>
-#include <net/scm.h>
 #include <net/inet_common.h>
-#include <net/pkt_sched.h>
 #include <linux/inet.h>
 #include <linux/mroute.h>
 #include <linux/igmp.h>
@@ -56,17 +55,17 @@ extern __u32 sysctl_rmem_max;
 #include <linux/icmpv6.h>
 #include <net/ipv6.h>
 #include <net/ndisc.h>
-#include <net/dst.h>
 #include <net/transp_v6.h>
 
 extern int tcp_tw_death_row_slot;
+extern int sysctl_local_port_range[2];
+extern int tcp_port_rover;
+extern int udp_port_rover;
 #endif
 
 #endif
 
 #include <linux/rtnetlink.h>
-
-#include <net/scm.h>
 
 #if	defined(CONFIG_ULTRA)	||	defined(CONFIG_WD80x3)		|| \
 	defined(CONFIG_EL2)	||	defined(CONFIG_NE2000)		|| \
@@ -90,10 +89,6 @@ extern void destroy_8023_client(struct datalink_proto *);
 
 #ifdef CONFIG_ATALK_MODULE
 #include <net/sock.h>
-#include <net/dst.h>
-#include <net/checksum.h>
-#include <linux/etherdevice.h>
-#include <net/pkt_sched.h>
 #endif
 
 #ifdef CONFIG_SYSCTL
@@ -183,6 +178,7 @@ EXPORT_SYMBOL(neigh_destroy);
 EXPORT_SYMBOL(neigh_parms_alloc);
 EXPORT_SYMBOL(neigh_parms_release);
 EXPORT_SYMBOL(neigh_rand_reach_time);
+EXPORT_SYMBOL(neigh_compat_output); 
 
 /*	dst_entry	*/
 EXPORT_SYMBOL(dst_alloc);
@@ -244,6 +240,7 @@ EXPORT_SYMBOL(__ip_finish_output);
 EXPORT_SYMBOL(inet_dgram_ops);
 EXPORT_SYMBOL(ip_cmsg_recv);
 EXPORT_SYMBOL(__release_sock);
+EXPORT_SYMBOL(inet_addr_type); 
 
 /* Route manipulation */
 EXPORT_SYMBOL(ip_rt_ioctl);
@@ -278,11 +275,9 @@ EXPORT_SYMBOL(inet_sendmsg);
 EXPORT_SYMBOL(inet_recvmsg);
 
 /* Socket demultiplexing. */
-EXPORT_SYMBOL(tcp_good_socknum);
 EXPORT_SYMBOL(tcp_established_hash);
 EXPORT_SYMBOL(tcp_listening_hash);
 EXPORT_SYMBOL(tcp_bound_hash);
-EXPORT_SYMBOL(udp_good_socknum);
 EXPORT_SYMBOL(udp_hash);
 
 EXPORT_SYMBOL(destroy_sock);
@@ -323,11 +318,12 @@ EXPORT_SYMBOL(tcp_v4_send_check);
 EXPORT_SYMBOL(tcp_v4_conn_request);
 EXPORT_SYMBOL(tcp_create_openreq_child);
 EXPORT_SYMBOL(tcp_bucket_create);
-EXPORT_SYMBOL(tcp_bucket_unlock);
+EXPORT_SYMBOL(__tcp_put_port);
+EXPORT_SYMBOL(tcp_put_port);
+EXPORT_SYMBOL(tcp_inherit_port);
 EXPORT_SYMBOL(tcp_v4_syn_recv_sock);
 EXPORT_SYMBOL(tcp_v4_do_rcv);
 EXPORT_SYMBOL(tcp_v4_connect);
-EXPORT_SYMBOL(inet_addr_type);
 EXPORT_SYMBOL(net_reset_timer);
 EXPORT_SYMBOL(net_delete_timer);
 EXPORT_SYMBOL(udp_prot);
@@ -339,6 +335,9 @@ EXPORT_SYMBOL(tcp_transmit_skb);
 EXPORT_SYMBOL(tcp_connect);
 EXPORT_SYMBOL(tcp_make_synack);
 EXPORT_SYMBOL(tcp_tw_death_row_slot);
+EXPORT_SYMBOL(sysctl_local_port_range);
+EXPORT_SYMBOL(tcp_port_rover);
+EXPORT_SYMBOL(udp_port_rover);
 EXPORT_SYMBOL(tcp_sync_mss);
 EXPORT_SYMBOL(net_statistics); 
 
