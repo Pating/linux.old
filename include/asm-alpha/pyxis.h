@@ -1,6 +1,7 @@
 #ifndef __ALPHA_PYXIS__H__
 #define __ALPHA_PYXIS__H__
 
+#include <linux/config.h> /* CONFIG_ALPHA_RUFFIAN. */
 #include <linux/types.h>
 
 /*
@@ -178,6 +179,20 @@
  * Translate physical memory address as seen on (PCI) bus into
  * a kernel virtual address and vv.
  */
+
+#if defined(CONFIG_ALPHA_RUFFIAN)
+/* Ruffian doesn't do 1G PCI window.  */
+
+extern inline unsigned long virt_to_bus(void * address)
+{
+	return virt_to_phys(address);
+}
+
+extern inline void * bus_to_virt(unsigned long address)
+{
+	return phys_to_virt(address);
+}
+#else
 extern inline unsigned long virt_to_bus(void * address)
 {
 	return virt_to_phys(address) + PYXIS_DMA_WIN_BASE;
@@ -187,6 +202,7 @@ extern inline void * bus_to_virt(unsigned long address)
 {
 	return phys_to_virt(address - PYXIS_DMA_WIN_BASE);
 }
+#endif /* RUFFIAN */
 
 /*
  * I/O functions:

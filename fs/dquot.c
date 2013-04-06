@@ -17,7 +17,7 @@
  * 
  * Author:  Marco van Wieringen <mvw@mcs.ow.nl> <mvw@tnix.net>
  * 
- * Fixes:   Dmitry Gorodchanin <begemot@bgm.rosprint.net>, 11 Feb 96
+ * Fixes:   Dmitry Gorodchanin <pgmdsg@ibi.com>, 11 Feb 96
  *	    removed race conditions in dqput(), dqget() and iput(). 
  *          Andi Kleen removed all verify_area() calls, 31 Dec 96  
  *          Nick Kralevich <nickkral@cal.alumni.berkeley.edu>, 21 Jul 97
@@ -938,7 +938,7 @@ int quota_off(kdev_t dev, short type)
 		vfsmnt->mnt_sb->dq_op = (struct dquot_operations *)NULL;
 		reset_dquot_ptrs(dev, cnt);
 		invalidate_dquots(dev, cnt);
-		close_fp(vfsmnt->mnt_quotas[cnt]);
+		fput(vfsmnt->mnt_quotas[cnt]);
 		vfsmnt->mnt_quotas[cnt] = (struct file *)NULL;
 		vfsmnt->mnt_iexp[cnt] = vfsmnt->mnt_bexp[cnt] = (time_t)NULL;
 	}

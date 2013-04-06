@@ -610,30 +610,47 @@ static inline char * task_name(struct task_struct *p, char * buf)
 	return buf+1;
 }
 
+/*
+ * The task state array is a strange "bitmap" of
+ * reasons to sleep. Thus "running" is zero, and
+ * you can test for combinations of others with
+ * simple bit tests.
+ */
+static const char *task_state_array[] = {
+	"R (running)",		/*  0 */
+	"S (sleeping)",		/*  1 */
+	"D (disk sleep)",	/*  2 */
+	"Z (zombie)",		/*  4 */
+	"T (stopped)",		/*  8 */
+	"W (paging)"		/* 16 */
+};
+
+static inline const char * get_task_state(struct task_struct *tsk)
+{
+	unsigned int state = tsk->state & (TASK_RUNNING |
+					   TASK_INTERRUPTIBLE |
+					   TASK_UNINTERRUPTIBLE |
+					   TASK_ZOMBIE |
+					   TASK_STOPPED |
+					   TASK_SWAPPING);
+	const char **p = &task_state_array[0];
+
+	while (state) {
+		p++;
+		state >>= 1;
+	}
+	return *p;
+}
+
 static inline char * task_state(struct task_struct *p, char *buffer)
 {
-#define NR_STATES (sizeof(states)/sizeof(const char *))
-	unsigned int n = p->state;
-	static const char * states[] = {
-		"R (running)",
-		"S (sleeping)",
-		"D (disk sleep)",
-		"Z (zombie)",
-		"T (stopped)",
-		"W (paging)",
-		". Huh?"
-	};
-
-	if (n >= NR_STATES)
-		n = NR_STATES-1;
-
 	buffer += sprintf(buffer,
 		"State:\t%s\n"
 		"Pid:\t%d\n"
 		"PPid:\t%d\n"
 		"Uid:\t%d\t%d\t%d\t%d\n"
 		"Gid:\t%d\t%d\t%d\t%d\n",
-		states[n],
+		get_task_state(p),
 		p->pid, p->p_pptr->pid,
 		p->uid, p->euid, p->suid, p->fsuid,
 		p->gid, p->egid, p->sgid, p->fsgid);
@@ -651,7 +668,7 @@ static inline char * task_mem(struct task_struct *p, char *buffer)
 
 		for (vma = mm->mmap; vma; vma = vma->vm_next) {
 			unsigned long len = (vma->vm_end - vma->vm_start) >> 10;
-			if (!vma->vm_dentry) {
+			if (!vma->vm_file) {
 				data += len;
 				if (vma->vm_flags & VM_GROWSDOWN)
 					stack += len;
@@ -769,10 +786,7 @@ static int get_stat(int pid, char * buffer)
 
 	if (!tsk)
 		return 0;
-	if (tsk->state < 0 || tsk->state > 5)
-		state = '.';
-	else
-		state = "RSDZTW"[tsk->state];
+	state = *get_task_state(tsk);
 	vsize = eip = esp = 0;
 	if (tsk->mm && tsk->mm != &init_mm) {
 		struct vm_area_struct *vma = tsk->mm->mmap;
@@ -1049,10 +1063,10 @@ static ssize_t read_maps (int pid, struct file * file, char * buf,
 
 		dev = 0;
 		ino = 0;
-		if (map->vm_dentry != NULL) {
-			dev = map->vm_dentry->d_inode->i_dev;
-			ino = map->vm_dentry->d_inode->i_ino;
-			line = d_path(map->vm_dentry, buffer, PAGE_SIZE);
+		if (map->vm_file != NULL) {
+			dev = map->vm_file->f_dentry->d_inode->i_dev;
+			ino = map->vm_file->f_dentry->d_inode->i_ino;
+			line = d_path(map->vm_file->f_dentry, buffer, PAGE_SIZE);
 			buffer[PAGE_SIZE-1] = '\n';
 			line -= maxlen;
 			if(line < buffer)
@@ -1065,7 +1079,7 @@ static ssize_t read_maps (int pid, struct file * file, char * buf,
 			      map->vm_start, map->vm_end, str, map->vm_offset,
 			      kdevname(dev), ino);
 
-		if(map->vm_dentry) {
+		if(map->vm_file) {
 			for(i = len; i < maxlen; i++)
 				line[i] = ' ';
 			len = buffer + PAGE_SIZE - line;

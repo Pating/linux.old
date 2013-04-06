@@ -3,10 +3,6 @@
 # Makefile for the Linux network (ethercard) device drivers.
 #
 
-# This will go away in some future future: hidden configuration files
-# are difficult for users to deal with.
-include CONFIG
-
 SUB_DIRS     := 
 MOD_SUB_DIRS := $(SUB_DIRS)
 ALL_SUB_DIRS := $(SUB_DIRS) hamradio
@@ -169,6 +165,16 @@ else
   ifeq ($(CONFIG_ULTRA),m)
   CONFIG_8390_MODULE = y
   M_OBJS += smc-ultra.o
+  endif
+endif
+
+ifeq ($(CONFIG_ULTRA32),y)
+L_OBJS += smc-ultra32.o
+CONFIG_8390_BUILTIN = y
+else
+  ifeq ($(CONFIG_ULTRA32),m)
+  CONFIG_8390_MODULE = y
+  M_OBJS += smc-ultra32.o
   endif
 endif
 

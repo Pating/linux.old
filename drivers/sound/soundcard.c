@@ -670,7 +670,7 @@ static unsigned int sound_poll(struct file *file, poll_table * wait)
 	case SND_DEV_DSP:
 	case SND_DEV_DSP16:
 	case SND_DEV_AUDIO:
-		return DMAbuf_poll(dev >> 4, wait);
+		return DMAbuf_poll(file, dev >> 4, wait);
 #endif
 	}
 	return 0;
@@ -732,7 +732,8 @@ static int sound_mmap(struct file *file, struct vm_area_struct *vma)
 		vma->vm_page_prot))
 		return -EAGAIN;
 
-	vma->vm_dentry = dget(file->f_dentry);
+	vma->vm_file = file;
+	file->f_count++;
 
 	dmap->mapping_flags |= DMA_MAP_MAPPED;
 

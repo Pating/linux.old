@@ -128,7 +128,7 @@ static int lp_preempt(void *handle)
 
 static __inline__ void lp_yield (int minor)
 {
-	if (parport_yield (lp_table[minor].dev, 1) == 1 && need_resched)
+	if (!parport_yield_blocking (lp_table[minor].dev) && need_resched)
 		schedule ();
 }
 
@@ -475,6 +475,7 @@ static int lp_open(struct inode * inode, struct file * file)
 		return -ENXIO;
 	if (LP_F(minor) & LP_BUSY)
 		return -EBUSY;
+	LP_F(minor) |= LP_BUSY;
 
 	MOD_INC_USE_COUNT;
 
@@ -491,23 +492,26 @@ static int lp_open(struct inode * inode, struct file * file)
 		if (status & LP_POUTPA) {
 			printk(KERN_INFO "lp%d out of paper\n", minor);
 			MOD_DEC_USE_COUNT;
+			LP_F(minor) &= ~LP_BUSY;
 			return -ENOSPC;
 		} else if (!(status & LP_PSELECD)) {
 			printk(KERN_INFO "lp%d off-line\n", minor);
 			MOD_DEC_USE_COUNT;
+			LP_F(minor) &= ~LP_BUSY;
 			return -EIO;
 		} else if (!(status & LP_PERRORP)) {
 			printk(KERN_ERR "lp%d printer error\n", minor);
 			MOD_DEC_USE_COUNT;
+			LP_F(minor) &= ~LP_BUSY;
 			return -EIO;
 		}
 	}
 	lp_table[minor].lp_buffer = (char *) kmalloc(LP_BUFFER_SIZE, GFP_KERNEL);
 	if (!lp_table[minor].lp_buffer) {
 		MOD_DEC_USE_COUNT;
+		LP_F(minor) &= ~LP_BUSY;
 		return -ENOMEM;
 	}
-	LP_F(minor) |= LP_BUSY;
 	return 0;
 }
 
@@ -654,7 +658,14 @@ static int parport_ptr = 0;
 
 __initfunc(void lp_setup(char *str, int *ints))
 {
-	if (!strncmp(str, "parport", 7)) {
+	if (!str) {
+		if (ints[0] == 0 || ints[1] == 0) {
+			/* disable driver on "lp=" or "lp=0" */
+			parport[0] = LP_PARPORT_OFF;
+		} else {
+			printk(KERN_WARNING "warning: 'lp=0x%x' is deprecated, ignored\n", ints[1]);
+		}
+	} else if (!strncmp(str, "parport", 7)) {
 		int n = simple_strtoul(str+7, NULL, 10);
 		if (parport_ptr < LP_NO)
 			parport[parport_ptr++] = n;
@@ -667,13 +678,6 @@ __initfunc(void lp_setup(char *str, int *ints))
 		parport[parport_ptr++] = LP_PARPORT_NONE;
 	} else if (!strcmp(str, "reset")) {
 		reset = 1;
-	} else {
-		if (ints[0] == 0 || ints[1] == 0) {
-			/* disable driver on "lp=" or "lp=0" */
-			parport[0] = LP_PARPORT_OFF;
-		} else {
-			printk(KERN_WARNING "warning: 'lp=0x%x' is deprecated, ignored\n", ints[1]);
-		}
 	}
 }
 

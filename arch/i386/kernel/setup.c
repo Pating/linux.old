@@ -331,17 +331,18 @@ struct cpu_model_info {
 
 static struct cpu_model_info cpu_models[] __initdata = {
 	{ X86_VENDOR_INTEL,	4,
-		{ "486 DX-25/33", "486 DX-50", "486 SX", "486 DX/2", "486 SL", "486 SX/2",
-		  NULL, "486 DX/2-WB", "486 DX/4", "486 DX/4-WB", NULL, NULL, NULL, NULL,
-		  NULL, NULL }},
+	  { "486 DX-25/33", "486 DX-50", "486 SX", "486 DX/2", "486 SL", 
+	    "486 SX/2", NULL, "486 DX/2-WB", "486 DX/4", "486 DX/4-WB", NULL, 
+	    NULL, NULL, NULL, NULL, NULL }},
 	{ X86_VENDOR_INTEL,	5,
 	  { "Pentium 60/66 A-step", "Pentium 60/66", "Pentium 75+",
 	    "OverDrive PODP5V83", "Pentium MMX", NULL, NULL,
 	    "Mobile Pentium 75+", "Mobile Pentium MMX", NULL, NULL, NULL,
 	    NULL, NULL, NULL, NULL }},
 	{ X86_VENDOR_INTEL,	6,
-	  { "Pentium Pro A-step", "Pentium Pro", NULL, "Pentium II", NULL,
-	    NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL }},
+	  { "Pentium Pro A-step", "Pentium Pro", NULL, "Pentium II (Klamath)", 
+	    NULL, "Pentium II (Deschutes)", NULL, NULL, NULL, NULL, NULL, NULL,
+	    NULL, NULL, NULL, NULL }},
 	{ X86_VENDOR_CYRIX,	4,
 	  { NULL, NULL, NULL, NULL, "MediaGX", NULL, NULL, NULL, NULL, "5x86",
 	    NULL, NULL, NULL, NULL, NULL, NULL }},
@@ -349,8 +350,8 @@ static struct cpu_model_info cpu_models[] __initdata = {
 	  { NULL, NULL, "6x86", NULL, "GXm", NULL, NULL, NULL, NULL,
 	    NULL, NULL, NULL, NULL, NULL, NULL, NULL }},
 	{ X86_VENDOR_CYRIX,	6,
-	  { "6x86MX", NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
-	    NULL, NULL, NULL, NULL, NULL }},
+	  { "6x86MX", NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 
+	    NULL, NULL, NULL, NULL, NULL, NULL }},
 	{ X86_VENDOR_AMD,	4,
 	  { NULL, NULL, NULL, "DX/2", NULL, NULL, NULL, "DX/2-WB", "DX/4",
 	    "DX/4-WB", NULL, NULL, NULL, NULL, "Am5x86-WT", "Am5x86-WB" }},
@@ -383,8 +384,7 @@ __initfunc(void identify_cpu(struct cpuinfo_x86 *c))
 	    c->cpuid_level < 0)
 		return;
 
-	if ((c->x86_vendor == X86_VENDOR_AMD && amd_model(c)) ||
-	    (c->x86_vendor == X86_VENDOR_CYRIX && cyrix_model(c)))
+	if (c->x86_vendor == X86_VENDOR_CYRIX && cyrix_model(c))
 		return;
 
 	if (c->x86_model < 16)
@@ -394,10 +394,15 @@ __initfunc(void identify_cpu(struct cpuinfo_x86 *c))
 				p = cpu_models[i].model_names[c->x86_model];
 				break;
 			}
-	if (p)
+	if (p) {
 		strcpy(c->x86_model_id, p);
-	else
-		sprintf(c->x86_model_id, "%02x/%02x", c->x86_vendor, c->x86_model);
+		return;
+	}
+
+	if (c->x86_vendor == X86_VENDOR_AMD && amd_model(c))
+		return;
+
+	sprintf(c->x86_model_id, "%02x/%02x", c->x86_vendor, c->x86_model);
 }
 
 static char *cpu_vendor_names[] __initdata = {
@@ -438,7 +443,7 @@ int get_cpuinfo(char * buffer)
                 "fpu", "vme", "de", "pse", "tsc", "msr", "pae", "mce",
                 "cx8", "apic", "10", "sep", "mtrr", "pge", "mca", "cmov",
                 "fcmov", "17", "18", "19", "20", "21", "22", "mmx",
-                "cxmmx", "25", "26", "27", "28", "29", "30", "amd3d"
+                "osfxsr", "25", "26", "27", "28", "29", "30", "amd3d"
         };
 	struct cpuinfo_x86 *c = cpu_data;
 	int i, n;

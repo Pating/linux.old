@@ -32,7 +32,7 @@ static unsigned long fat_file_mmap_nopage(
 	unsigned long address,
 	int error_code)
 {
-	struct inode * inode = area->vm_dentry->d_inode;
+	struct inode * inode = area->vm_file->f_dentry->d_inode;
 	unsigned long page;
 	unsigned int clear;
 	int pos;
@@ -112,14 +112,16 @@ int fat_mmap(struct file * file, struct vm_area_struct * vma)
 		mark_inode_dirty(inode);
 	}
 
-	vma->vm_dentry = dget(file->f_dentry);
+	vma->vm_file = file;
+	file->f_count++;
 	vma->vm_ops = &fat_file_mmap;
 	return 0;
 }
 
 
-int fat_readpage(struct dentry * dentry, struct page * page)
+int fat_readpage(struct file *file, struct page * page)
 {
+	struct dentry * dentry = file->f_dentry;
 	struct inode * inode = dentry->d_inode;
 	if (MSDOS_SB(inode->i_sb)->cvf_format &&
 	    MSDOS_SB(inode->i_sb)->cvf_format->cvf_readpage)

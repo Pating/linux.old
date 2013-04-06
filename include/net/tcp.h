@@ -54,7 +54,7 @@ extern int sysctl_tcp_sack;
 extern int sysctl_tcp_timestamps;
 extern int sysctl_tcp_window_scaling;
 
-/* These are AF independant. */
+/* These are AF independent. */
 static __inline__ int tcp_bhashfn(__u16 lport)
 {
 	return (lport ^ (lport >> 7)) & (TCP_BHTABLE_SIZE - 1);
@@ -65,7 +65,7 @@ static __inline__ int tcp_bhashfn(__u16 lport)
  * break TCP port selection. This function must also NOT wrap around
  * when the next number exceeds the largest possible port (2^16-1).
  */
-static __inline__ int tcp_bhashnext(__u16 short lport, __u16 h)
+static __inline__ int tcp_bhashnext(__u16 lport, __u16 h)
 {
         __u32 s;	/* don't change this to a smaller type! */
 
@@ -393,7 +393,7 @@ extern int			tcp_rcv_established(struct sock *sk,
 extern void			tcp_close(struct sock *sk, 
 					  unsigned long timeout);
 extern struct sock *		tcp_accept(struct sock *sk, int flags);
-extern unsigned int		tcp_poll(struct socket *sock, struct poll_table_struct *wait);
+extern unsigned int		tcp_poll(struct file * file, struct socket *sock, struct poll_table_struct *wait);
 extern int			tcp_getsockopt(struct sock *sk, int level, 
 					       int optname, char *optval, 
 					       int *optlen);

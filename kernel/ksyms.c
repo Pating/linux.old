@@ -70,7 +70,7 @@ extern unsigned char aux_device_present, kbd_read_mask;
 #endif
 
 extern char *get_options(char *str, int *ints);
-extern void set_device_ro(int dev,int flag);
+extern void set_device_ro(kdev_t dev,int flag);
 extern struct file_operations * get_blkfops(unsigned int);
 extern int blkdev_release(struct inode * inode);
 #if !defined(CONFIG_NFSD) && defined(CONFIG_NFSD_MODULE)
@@ -154,7 +154,6 @@ EXPORT_SYMBOL(__namei);
 EXPORT_SYMBOL(lookup_dentry);
 EXPORT_SYMBOL(open_namei);
 EXPORT_SYMBOL(sys_close);
-EXPORT_SYMBOL(close_fp);
 EXPORT_SYMBOL(d_alloc_root);
 EXPORT_SYMBOL(d_delete);
 EXPORT_SYMBOL(d_validate);
@@ -197,6 +196,7 @@ EXPORT_SYMBOL(posix_lock_file);
 EXPORT_SYMBOL(posix_test_lock);
 EXPORT_SYMBOL(posix_block_lock);
 EXPORT_SYMBOL(posix_unblock_lock);
+EXPORT_SYMBOL(locks_remove_flock);
 EXPORT_SYMBOL(dput);
 EXPORT_SYMBOL(get_cached_page);
 EXPORT_SYMBOL(put_cached_page);

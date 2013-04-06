@@ -37,6 +37,7 @@
 #include <linux/vmalloc.h>
 #include <linux/blkdev.h>
 #include <linux/sysrq.h>
+#include <linux/file.h>
 
 #include <asm/system.h>
 #include <asm/uaccess.h>
@@ -332,31 +333,29 @@ asmlinkage int sys_fsync(unsigned int fd)
 
 	lock_kernel();
 	err = -EBADF;
-
-	if (fd >= NR_OPEN)
-		goto out;
-
-	file = current->files->fd[fd];
+	file = fget(fd);
 	if (!file)
 		goto out;
 
 	dentry = file->f_dentry;
 	if (!dentry)
-		goto out;
+		goto out_putf;
 
 	inode = dentry->d_inode;
 	if (!inode)
-		goto out;
+		goto out_putf;
 
 	err = -EINVAL;
 	if (!file->f_op || !file->f_op->fsync)
-		goto out;
+		goto out_putf;
 
 	/* We need to protect against concurrent writers.. */
 	down(&inode->i_sem);
-	err = file->f_op->fsync(file, file->f_dentry);
+	err = file->f_op->fsync(file, dentry);
 	up(&inode->i_sem);
 
+out_putf:
+	fput(file);
 out:
 	unlock_kernel();
 	return err;
@@ -371,29 +370,27 @@ asmlinkage int sys_fdatasync(unsigned int fd)
 
 	lock_kernel();
 	err = -EBADF;
-
-	if (fd >= NR_OPEN)
-		goto out;
-
-	file = current->files->fd[fd];
+	file = fget(fd);
 	if (!file)
 		goto out;
 
 	dentry = file->f_dentry;
 	if (!dentry)
-		goto out;
+		goto out_putf;
 
 	inode = dentry->d_inode;
 	if (!inode)
-		goto out;
+		goto out_putf;
 
 	err = -EINVAL;
 	if (!file->f_op || !file->f_op->fsync)
-		goto out;
+		goto out_putf;
 
 	/* this needs further work, at the moment it is identical to fsync() */
-	err = file->f_op->fsync(file, file->f_dentry);
+	err = file->f_op->fsync(file, dentry);
 
+out_putf:
+	fput(file);
 out:
 	unlock_kernel();
 	return err;
@@ -870,8 +867,7 @@ repeat:
 	/*
 	 * Convert a reserved page into buffers ... should happen only rarely.
 	 */
-	if (nr_free_pages > (min_free_pages >> 1) &&
-	    grow_buffers(GFP_ATOMIC, size)) {
+	if (grow_buffers(GFP_ATOMIC, size)) {
 #ifdef BUFFER_DEBUG
 printk("refill_freelist: used reserve page\n");
 #endif
@@ -1321,14 +1317,13 @@ no_grow:
 /* Run the hooks that have to be done when a page I/O has completed. */
 static inline void after_unlock_page (struct page * page)
 {
-	if (test_and_clear_bit(PG_decr_after, &page->flags))
+	if (test_and_clear_bit(PG_decr_after, &page->flags)) {
 		atomic_dec(&nr_async_pages);
-	if (test_and_clear_bit(PG_swap_unlock_after, &page->flags)) {
-		/*
-		 * We're doing a swap, so check that this page is
-		 * swap-cached and do the necessary cleanup. 
-		 */
-		swap_after_unlock_page(page->offset);
+#ifdef DEBUG_SWAP
+		printk ("DebugVM: Finished IO on page %p, nr_async_pages %d\n",
+			(char *) page_address(page), 
+			atomic_read(&nr_async_pages));
+#endif
 	}
 	if (test_and_clear_bit(PG_free_after, &page->flags))
 		__free_page(page);
@@ -1531,8 +1526,9 @@ void mark_buffer_uptodate(struct buffer_head * bh, int on)
  * mark_buffer_uptodate() functions propagate buffer state into the
  * page struct once IO has completed.
  */
-int generic_readpage(struct dentry * dentry, struct page * page)
+int generic_readpage(struct file * file, struct page * page)
 {
+	struct dentry *dentry = file->f_dentry;
 	struct inode *inode = dentry->d_inode;
 	unsigned long block;
 	int *p, nr[PAGE_SIZE/512];

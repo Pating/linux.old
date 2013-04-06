@@ -37,7 +37,8 @@ N: C. Scott Ananian
 E: cananian@alumni.princeton.edu
 W: http://www.pdos.lcs.mit.edu/~cananian
 P: 1024/85AD9EED AD C0 49 08 91 67 DF D7  FA 04 1A EE 09 E8 44 B0
-D: pty improvements.
+D: Unix98 pty support.
+D: APM update to 1.2 spec.
 
 N: Erik Andersen
 E: andersee@debian.org
@@ -209,6 +210,14 @@ D: Co-author of wd7000 SCSI driver
 S: 101 Curl Drive #591
 S: Columbus, Ohio 43210
 S: USA
+
+N: Peter Braam
+E: braam@cs.cmu.edu
+W: http://coda.cs.cmu.edu/~braam
+D: Coda Filesystem
+S: Dept of Computer Science
+S: 5000 Forbes Ave
+S: Pittsburgh PA 15213
 
 N: Andries Brouwer
 E: aeb@cwi.nl
@@ -559,11 +568,11 @@ S: N.S.W., 2121
 S: Australia
 
 N: Dmitry S. Gorodchanin
-E: begemot@bgm.rosprint.net
+E: pgmdsg@ibi.com
 D: RISCom/8 driver, misc kernel fixes.
-S: 6/1 M.Koneva bl, apt #125 
-S: Poltava 314023
-S: Ukraine
+S: 4 Main Street
+S: Woodbridge, Connecticut 06525
+S: USA
 
 N: Paul Gortmaker
 E: gpg109@rsphy1.anu.edu.au
@@ -930,8 +939,8 @@ S: Unix Centre of Pedagogical Faculty, University of South Bohemia
 N: Bas Laarhoven
 E: bas@vimec.nl
 D: Loadable modules and ftape driver
-S: Mr. v. Boemellaan 39
-S: NL-5237 KA 's-Hertogenbosch
+S: J. Obrechtstr 23
+S: NL-5216 GP 's-Hertogenbosch
 S: The Netherlands
 
 N: Savio Lam
@@ -1133,8 +1142,8 @@ S: USA
 N: Dirk Melchers
 E: dirk@merlin.nbg.sub.org
 D: 8 bit XT hard disk driver for OMTI5520
-S: Heidackerstrass 19
-S: D-91056 Erlangen
+S: Schloessleinsgasse 31
+S: D-90453 Nuernberg
 S: Germany
 
 N: Michael Meskes
@@ -1730,6 +1739,13 @@ S: Schleiermacherstrasse 12
 S: 90491 Nuernberg
 S: Germany
 
+N: Petr Vandrovec
+E: vandrove@vc.cvut.cz
+D: Small contributions to ncpfs
+S: Chudenicka 8
+S: 10200 Prague 10, Hostivar
+S: Czech Republic
+
 N: Dirk Verworner
 D: Co-author of german book ``Linux-Kernel-Programmierung''
 D: Co-founder of Berlin Linux User Group
@@ -1841,10 +1857,12 @@ S: 2612 XV Delft
 S: The Netherlands
 
 N: David Woodhouse
-E: dwmw2@cam.ac.uk
+E: Dave@imladris.demon.co.uk
 D: Extensive ARCnet rewrite
 D: ARCnet COM20020, COM90xx IO-MAP drivers
 D: SO_BINDTODEVICE in 2.1.x (from Elliot Poger's code in 2.0.31)
+D: Contributed to NCPFS rewrite for 2.1.x dcache
+D: Alpha platforms: SX164, LX164 and Ruffian ported to 2.1.x
 S: Robinson College, Grange Road
 S: Cambridge. CB3 9AN
 S: England

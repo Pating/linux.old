@@ -19,6 +19,7 @@
 #include <linux/swapctl.h>
 #include <linux/interrupt.h>
 #include <linux/init.h>
+#include <linux/pagemap.h>
 
 #include <asm/dma.h>
 #include <asm/system.h> /* for cli()/sti() */
@@ -100,6 +101,46 @@ static inline void remove_mem_queue(struct page * entry)
 #ifdef __SMP__
 static spinlock_t page_alloc_lock;
 #endif
+
+/*
+ * This routine is used by the kernel swap deamon to determine
+ * whether we have "enough" free pages. It is fairly arbitrary,
+ * but this had better return false if any reasonable "get_free_page()"
+ * allocation could currently fail..
+ *
+ * Currently we approve of the following situations:
+ * - the highest memory order has two entries
+ * - the highest memory order has one free entry and:
+ *	- the next-highest memory order has two free entries
+ * - the highest memory order has one free entry and:
+ *	- the next-highest memory order has one free entry
+ *	- the next-next-highest memory order has two free entries
+ *
+ * [previously, there had to be two entries of the highest memory
+ *  order, but this lead to problems on large-memory machines.]
+ */
+int free_memory_available(void)
+{
+	int i, retval = 0;
+	unsigned long flags;
+	struct free_area_struct * list = NULL;
+
+	spin_lock_irqsave(&page_alloc_lock, flags);
+	/* We fall through the loop if the list contains one
+	 * item. -- thanks to Colin Plumb <colin@nyx.net>
+	 */
+	for (i = 1; i < 4; ++i) {
+		list = free_area + NR_MEM_LISTS - i;
+		if (list->next == memory_head(list))
+			break;
+		if (list->next->next == memory_head(list))
+			continue;
+		retval = 1;
+		break;
+	}
+	spin_unlock_irqrestore(&page_alloc_lock, flags);
+	return retval;
+}
 
 static inline void free_pages_ok(unsigned long map_nr, unsigned long order)
 {
@@ -328,31 +369,38 @@ __initfunc(unsigned long free_area_init(unsigned long start_mem, unsigned long e
 void swap_in(struct task_struct * tsk, struct vm_area_struct * vma,
 	pte_t * page_table, unsigned long entry, int write_access)
 {
-	unsigned long page = __get_free_page(GFP_KERNEL);
+	unsigned long page;
+	struct page *page_map;
+	
+	page_map = read_swap_cache(entry);
 
 	if (pte_val(*page_table) != entry) {
-		free_page(page);
+		if (page_map)
+			free_page_and_swap_cache(page_address(page_map));
 		return;
 	}
-	if (!page) {
+	if (!page_map) {
 		set_pte(page_table, BAD_PAGE);
 		swap_free(entry);
 		oom(tsk);
 		return;
 	}
-	read_swap_page(entry, (char *) page);
-	if (pte_val(*page_table) != entry) {
-		free_page(page);
-		return;
-	}
+
+	page = page_address(page_map);
 	vma->vm_mm->rss++;
-	tsk->maj_flt++;
-	if (!write_access && add_to_swap_cache(&mem_map[MAP_NR(page)], entry)) {
-		/* keep swap page allocated for the moment (swap cache) */
+	tsk->min_flt++;
+	swap_free(entry);
+
+	if (!write_access || is_page_shared(page_map)) {
 		set_pte(page_table, mk_pte(page, vma->vm_page_prot));
 		return;
 	}
+
+	/* The page is unshared, and we want write access.  In this
+	   case, it is safe to tear down the swap cache and give the
+	   page over entirely to this process. */
+		
+	delete_from_swap_cache(page_map);
 	set_pte(page_table, pte_mkwrite(pte_mkdirty(mk_pte(page, vma->vm_page_prot))));
-  	swap_free(entry);
   	return;
 }
