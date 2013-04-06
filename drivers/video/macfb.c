@@ -2,7 +2,6 @@
  *	We've been given MAC frame buffer info by the booter. Now go set it up
  */
 
-#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/sched.h>
@@ -217,22 +216,22 @@ static void macfb_set_disp(int con)
 	display->inverse = inverse;
 
 	switch (mac_depth) {
-#ifdef CONFIG_FBCON_MFB
+#ifdef FBCON_HAS_MFB
 	    case 1:
 		display->dispsw = &fbcon_mfb;
 		break;
 #endif
-#ifdef CONFIG_FBCON_CFB2
+#ifdef FBCON_HAS_CFB2
 	    case 2:
 		display->dispsw = &fbcon_cfb2;
 		break;
 #endif
-#ifdef CONFIG_FBCON_CFB4
+#ifdef FBCON_HAS_CFB4
 	    case 4:
 		display->dispsw = &fbcon_cfb4;
 		break;
 #endif
-#ifdef CONFIG_FBCON_CFB8
+#ifdef FBCON_HAS_CFB8
 	    case 8:
 		display->dispsw = &fbcon_cfb8;
 		break;

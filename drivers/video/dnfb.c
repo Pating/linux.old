@@ -5,7 +5,6 @@
 #include <linux/tty.h>
 #include <linux/malloc.h>
 #include <linux/delay.h>
-#include <linux/config.h>
 #include <linux/interrupt.h>
 #include <asm/setup.h>
 #include <asm/segment.h>
@@ -304,7 +303,7 @@ static void dnfb_set_disp(int con, struct fb_info *info)
    disp[con].can_soft_blank = 1;
    disp[con].inverse = 0;
    disp[con].line_length = fix.line_length;
-#ifdef CONFIG_FBCON_MFB
+#ifdef FBCON_HAS_MFB
    disp[con].dispsw = &fbcon_mfb;
 #else
    disp[con].dispsw = NULL;
