@@ -92,6 +92,7 @@ asmlinkage unsigned long sys_brk(unsigned long brk)
 	unsigned long newbrk, oldbrk;
 	struct mm_struct *mm = current->mm;
 
+	down(&mm->mmap_sem);
 	lock_kernel();
 	if (brk < mm->end_code)
 		goto out;
@@ -109,9 +110,7 @@ asmlinkage unsigned long sys_brk(unsigned long brk)
 
 	/* Check against rlimit and stack.. */
 	rlim = current->rlim[RLIMIT_DATA].rlim_cur;
-	if (rlim >= RLIM_INFINITY)
-		rlim = ~0;
-	if (brk - mm->end_code > rlim)
+	if (rlim < RLIM_INFINITY && brk - mm->end_code > rlim)
 		goto out;
 
 	/* Check against existing mmap mappings. */
@@ -132,6 +131,7 @@ set_brk:
 out:
 	retval = mm->brk;
 	unlock_kernel();
+	up(&mm->mmap_sem);
 	return retval;
 }
 
@@ -316,9 +316,21 @@ unsigned long do_mmap(struct file * file, unsigned long addr, unsigned long len,
 	merge_segments(mm, vma->vm_start, vma->vm_end);
 	
 	mm->total_vm += len >> PAGE_SHIFT;
-	if ((flags & VM_LOCKED) && !(flags & VM_IO)) {
-		unsigned long start = addr;
+	if (flags & VM_LOCKED) {
 		mm->locked_vm += len >> PAGE_SHIFT;
+
+/*
+ * This used to be just slightly broken, now it's just completely
+ * buggered. We can't take a page fault here, because we already
+ * hold the mm semaphore (as is proper). We should do this by hand
+ * by calling the appropriate fault-in routine.
+ *
+ * That would also fix this routine wrt writes and PROT_NONE
+ * areas, both of which can't be handled by the page fault
+ * approach anyway.
+ */
+#if 0
+		unsigned long start = addr;
 		do {
 			char c;
 			get_user(c,(char *) start);
@@ -326,6 +338,7 @@ unsigned long do_mmap(struct file * file, unsigned long addr, unsigned long len,
 			start += PAGE_SIZE;
 			__asm__ __volatile__("": :"r" (c));
 		} while (len > 0);
+#endif
 	}
 	return addr;
 
@@ -442,16 +455,6 @@ static int unmap_fixup(struct vm_area_struct *area, unsigned long addr,
 	return 1;
 }
 
-asmlinkage int sys_munmap(unsigned long addr, size_t len)
-{
-	int ret;
-
-	lock_kernel();
-	ret = do_munmap(addr, len);
-	unlock_kernel();
-	return ret;
-}
-
 /* Munmap is split into 2 main parts -- this part which finds
  * what needs doing, and the areas themselves, which do the
  * work.  This now handles partial unmappings.
@@ -460,7 +463,7 @@ asmlinkage int sys_munmap(unsigned long addr, size_t len)
 int do_munmap(unsigned long addr, size_t len)
 {
 	struct mm_struct * mm;
-	struct vm_area_struct *mpnt, *next, *free, *extra;
+	struct vm_area_struct *mpnt, *free, *extra;
 	int freed;
 
 	if ((addr & ~PAGE_MASK) || addr > TASK_SIZE || len > TASK_SIZE-addr)
@@ -481,6 +484,11 @@ int do_munmap(unsigned long addr, size_t len)
 	if (!mpnt)
 		return 0;
 
+	/* If we'll make "hole", check the vm areas limit */
+	if ((mpnt->vm_start < addr && mpnt->vm_end > addr+len) &&
+	    mm->map_count > MAX_MAP_COUNT)
+		return -ENOMEM;
+
 	/*
 	 * We may need one additional vma to fix up the mappings ... 
 	 * and this is the last chance for an easy error exit.
@@ -489,9 +497,7 @@ int do_munmap(unsigned long addr, size_t len)
 	if (!extra)
 		return -ENOMEM;
 
-	next = mpnt->vm_next;
-
-	/* we have mpnt->vm_next = next and addr < mpnt->vm_end */
+	/* we have addr < mpnt->vm_end */
 	free = NULL;
 	for ( ; mpnt && mpnt->vm_start < addr+len; ) {
 		struct vm_area_struct *next = mpnt->vm_next;
@@ -503,13 +509,6 @@ int do_munmap(unsigned long addr, size_t len)
 		mpnt->vm_next = free;
 		free = mpnt;
 		mpnt = next;
-	}
-
-	if (free && (free->vm_start < addr) && (free->vm_end > addr+len)) {
-		if (mm->map_count > MAX_MAP_COUNT) {
-			kmem_cache_free(vm_area_cachep, extra);
-			return -ENOMEM;
-		}
 	}
 
 	/* Ok - we have the memory areas we should free on the 'free' list,
@@ -553,6 +552,18 @@ int do_munmap(unsigned long addr, size_t len)
 	if (freed)
 		mm->mmap_cache = NULL;	/* Kill the cache. */
 	return 0;
+}
+
+asmlinkage int sys_munmap(unsigned long addr, size_t len)
+{
+	int ret;
+
+	down(&current->mm->mmap_sem);
+	lock_kernel();
+	ret = do_munmap(addr, len);
+	unlock_kernel();
+	up(&current->mm->mmap_sem);
+	return ret;
 }
 
 /* Release all mmaps. */
@@ -630,12 +641,12 @@ void insert_vm_struct(struct mm_struct *mm, struct vm_area_struct *vmp)
  * This assumes that the list is ordered by address.
  * We don't need to traverse the entire list, only those segments
  * which intersect or are adjacent to a given interval.
+ *
+ * We must already hold the mm semaphore when we get here..
  */
 void merge_segments (struct mm_struct * mm, unsigned long start_addr, unsigned long end_addr)
 {
 	struct vm_area_struct *prev, *mpnt, *next;
-
-	down(&mm->mmap_sem);
 
 	prev = NULL;
 	mpnt = mm->mmap;
@@ -644,7 +655,7 @@ void merge_segments (struct mm_struct * mm, unsigned long start_addr, unsigned l
 		mpnt = mpnt->vm_next;
 	}
 	if (!mpnt)
-		goto no_vma;
+		return;
 
 	next = mpnt->vm_next;
 
@@ -700,8 +711,6 @@ void merge_segments (struct mm_struct * mm, unsigned long start_addr, unsigned l
 		mpnt = prev;
 	}
 	mm->mmap_cache = NULL;		/* Kill the cache. */
-no_vma:
-	up(&mm->mmap_sem);
 }
 
 __initfunc(void vma_init(void))

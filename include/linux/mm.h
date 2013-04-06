@@ -290,6 +290,7 @@ extern int zeromap_page_range(unsigned long from, unsigned long size, pgprot_t p
 
 extern void vmtruncate(struct inode * inode, unsigned long offset);
 extern void handle_mm_fault(struct task_struct *tsk,struct vm_area_struct *vma, unsigned long address, int write_access);
+extern void check_pgt_cache(void);
 
 extern unsigned long paging_init(unsigned long start_mem, unsigned long end_mem);
 extern void mem_init(unsigned long start_mem, unsigned long end_mem);
@@ -299,13 +300,14 @@ extern void si_meminfo(struct sysinfo * val);
 
 /* mmap.c */
 extern void vma_init(void);
-extern unsigned long do_mmap(struct file * file, unsigned long addr, unsigned long len,
-	unsigned long prot, unsigned long flags, unsigned long off);
 extern void merge_segments(struct mm_struct *, unsigned long, unsigned long);
 extern void insert_vm_struct(struct mm_struct *, struct vm_area_struct *);
 extern void exit_mmap(struct mm_struct *);
-extern int do_munmap(unsigned long, size_t);
 extern unsigned long get_unmapped_area(unsigned long, unsigned long);
+
+extern unsigned long do_mmap(struct file *, unsigned long, unsigned long,
+	unsigned long, unsigned long, unsigned long);
+extern int do_munmap(unsigned long, size_t);
 
 /* filemap.c */
 extern unsigned long page_unuse(unsigned long);

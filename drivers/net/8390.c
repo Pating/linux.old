@@ -334,7 +334,6 @@ void ei_interrupt(int irq, void *dev_id, struct pt_regs * regs)
 	}
     
 	dev->interrupt = 1;
-	sti();
     
 	/* Change to page 0 and read the intr status reg. */
 	outb_p(E8390_NODMA+E8390_PAGE0, e8390_base + E8390_CMD);
@@ -850,8 +849,11 @@ static void set_multicast_list(struct device *dev)
   		outb_p(E8390_RXCONFIG, e8390_base + EN0_RXCR);
 }
 
-/* Initialize the rest of the 8390 device structure. */
-__initfunc(int ethdev_init(struct device *dev))
+/*
+ * Initialize the rest of the 8390 device structure.  Do NOT __initfunc
+ * this, as it is used by 8390 based modular drivers too.
+ */
+int ethdev_init(struct device *dev)
 {
 	if (ei_debug > 1)
 		printk(version);
