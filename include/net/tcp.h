@@ -154,16 +154,16 @@ struct tcp_tw_bucket {
 	struct sock		*sklist_prev;
 	struct sock		*bind_next;
 	struct sock		**bind_pprev;
-	struct sock		*next;
-	struct sock		**pprev;
 	__u32			daddr;
 	__u32			rcv_saddr;
-	int			bound_dev_if;
+	__u16			dport;
 	unsigned short		num;
+	int			bound_dev_if;
+	struct sock		*next;
+	struct sock		**pprev;
 	unsigned char		state,
 				zapped;
 	__u16			sport;
-	__u16			dport;
 	unsigned short		family;
 	unsigned char		reuse,
 				nonagle;
@@ -180,6 +180,43 @@ struct tcp_tw_bucket {
 };
 
 extern kmem_cache_t *tcp_timewait_cachep;
+
+/* Socket demux engine toys. */
+#ifdef __BIG_ENDIAN
+#define TCP_COMBINED_PORTS(__sport, __dport) \
+	(((__u32)(__sport)<<16) | (__u32)(__dport))
+#else /* __LITTLE_ENDIAN */
+#define TCP_COMBINED_PORTS(__sport, __dport) \
+	(((__u32)(__dport)<<16) | (__u32)(__sport))
+#endif
+
+#if defined(__alpha__) || defined(__sparc_v9__)
+#ifdef __BIG_ENDIAN
+#define TCP_V4_ADDR_COOKIE(__name, __saddr, __daddr) \
+	__u64 __name = (((__u64)(__saddr))<<32)|((__u64)(__daddr));
+#else /* __LITTLE_ENDIAN */
+#define TCP_V4_ADDR_COOKIE(__name, __saddr, __daddr) \
+	__u64 __name = (((__u64)(__daddr))<<32)|((__u64)(__saddr));
+#endif /* __BIG_ENDIAN */
+#define TCP_IPV4_MATCH(__sk, __cookie, __saddr, __daddr, __ports, __dif)\
+	(((*((__u64 *)&((__sk)->daddr)))== (__cookie))	&&		\
+	 ((*((__u32 *)&((__sk)->dport)))== (__ports))   &&		\
+	 (!((__sk)->bound_dev_if) || ((__sk)->bound_dev_if == (__dif))))
+#else /* 32-bit arch */
+#define TCP_V4_ADDR_COOKIE(__name, __saddr, __daddr)
+#define TCP_IPV4_MATCH(__sk, __cookie, __saddr, __daddr, __ports, __dif)\
+	(((__sk)->daddr			== (__saddr))	&&		\
+	 ((__sk)->rcv_saddr		== (__daddr))	&&		\
+	 ((*((__u32 *)&((__sk)->dport)))== (__ports))   &&		\
+	 (!((__sk)->bound_dev_if) || ((__sk)->bound_dev_if == (__dif))))
+#endif /* 64-bit arch */
+
+#define TCP_IPV6_MATCH(__sk, __saddr, __daddr, __ports, __dif)			   \
+	(((*((__u32 *)&((__sk)->dport)))== (__ports))   			&& \
+	 ((__sk)->family		== AF_INET6)				&& \
+	 !ipv6_addr_cmp(&(__sk)->net_pinfo.af_inet6.daddr, (__saddr))		&& \
+	 !ipv6_addr_cmp(&(__sk)->net_pinfo.af_inet6.rcv_saddr, (__daddr))	&& \
+	 (!((__sk)->bound_dev_if) || ((__sk)->bound_dev_if == (__dif))))
 
 /* tcp_ipv4.c: These sysctl variables need to be shared between v4 and v6
  * because the v6 tcp code to intialize a connection needs to interoperate
@@ -266,8 +303,6 @@ static __inline__ int tcp_sk_listen_hashfn(struct sock *sk)
 #define TCP_KEEPALIVE_TIME (180*60*HZ)		/* two hours */
 #define TCP_KEEPALIVE_PROBES	9		/* Max of 9 keepalive probes	*/
 #define TCP_KEEPALIVE_PERIOD ((75*HZ)>>2)	/* period of keepalive check	*/
-#define TCP_NO_CHECK	0	/* turn to one if you want the default
-				 * to be no checksum			*/
 
 #define TCP_SYNACK_PERIOD	(HZ/2)
 #define TCP_QUICK_TRIES		8  /* How often we try to retransmit, until
@@ -304,14 +339,6 @@ static __inline__ int tcp_sk_listen_hashfn(struct sock *sk)
 #define TCPOLEN_SACK_BASE		2
 #define TCPOLEN_SACK_BASE_ALIGNED	4
 #define TCPOLEN_SACK_PERBLOCK		8
-
-/*
- *	TCP Vegas constants
- */
-
-#define TCP_VEGAS_ALPHA		2	/*  v_cong_detect_top_nseg */
-#define TCP_VEGAS_BETA		4	/*  v_cong_detect_bot_nseg */
-#define TCP_VEGAS_GAMMA		1	/*  v_exp_inc_nseg	   */
 
 struct open_request;
 
@@ -552,6 +579,7 @@ extern void tcp_read_wakeup(struct sock *);
 extern void tcp_write_xmit(struct sock *);
 extern void tcp_time_wait(struct sock *);
 extern int tcp_retransmit_skb(struct sock *, struct sk_buff *);
+extern void tcp_fack_retransmit(struct sock *);
 extern void tcp_xmit_retransmit_queue(struct sock *);
 extern void tcp_simple_retransmit(struct sock *);
 
@@ -651,10 +679,17 @@ extern __inline__ int tcp_raise_window(struct sock *sk)
 
 /* This is what the send packet queueing engine uses to pass
  * TCP per-packet control information to the transmission
- * code.
+ * code.  We also store the host-order sequence numbers in
+ * here too.  This is 36 bytes on 32-bit architectures,
+ * 40 bytes on 64-bit machines, if this grows please adjust
+ * skbuff.h:skbuff->cb[xxx] size appropriately.
  */
 struct tcp_skb_cb {
-	__u8	flags;			/* TCP header flags.		*/
+	struct inet_skb_parm	header;	/* For incoming frames		*/
+	__u32		seq;		/* Starting sequence number	*/
+	__u32		end_seq;	/* SEQ + FIN + SYN + datalen	*/
+	unsigned long	when;		/* used to compute rtt's	*/
+	__u8		flags;		/* TCP header flags.		*/
 
 	/* NOTE: These must match up to the flags byte in a
 	 *       real TCP header.
@@ -666,14 +701,40 @@ struct tcp_skb_cb {
 #define TCPCB_FLAG_ACK		0x10
 #define TCPCB_FLAG_URG		0x20
 
-	__u8	sacked;			/* State flags for SACK/FACK.	*/
+	__u8		sacked;		/* State flags for SACK/FACK.	*/
 #define TCPCB_SACKED_ACKED	0x01	/* SKB ACK'd by a SACK block	*/
 #define TCPCB_SACKED_RETRANS	0x02	/* SKB retransmitted		*/
 
-	__u16	urg_ptr;		/* Valid w/URG flags is set.	*/
+	__u16		urg_ptr;	/* Valid w/URG flags is set.	*/
+	__u32		ack_seq;	/* Sequence number ACK'd	*/
 };
 
 #define TCP_SKB_CB(__skb)	((struct tcp_skb_cb *)&((__skb)->cb[0]))
+
+/* We store the congestion window as a packet count, shifted by
+ * a factor so that implementing the 1/2 MSS ssthresh rules
+ * is easy.
+ */
+#define TCP_CWND_SHIFT	1
+
+/* This determines how many packets are "in the network" to the best
+ * or our knowledge.  In many cases it is conservative, but where
+ * detailed information is available from the receiver (via SACK
+ * blocks etc.) we can make more agressive calculations.
+ *
+ * Use this for decisions involving congestion control, use just
+ * tp->packets_out to determine if the send queue is empty or not.
+ *
+ * Read this equation as:
+ *
+ *	"Packets sent once on transmission queue" MINUS
+ *	"Packets acknowledged by FACK information" PLUS
+ *	"Packets fast retransmitted"
+ */
+static __inline__ int tcp_packets_in_flight(struct tcp_opt *tp)
+{
+	return tp->packets_out - tp->fackets_out + tp->retrans_out;
+}
 
 /* This checks if the data bearing packet SKB (usually tp->send_head)
  * should be put on the wire right now.
@@ -682,7 +743,6 @@ static __inline__ int tcp_snd_test(struct sock *sk, struct sk_buff *skb)
 {
 	struct tcp_opt *tp = &(sk->tp_pinfo.af_tcp);
 	int nagle_check = 1;
-	int len;
 
 	/*	RFC 1122 - section 4.2.3.4
 	 *
@@ -697,13 +757,13 @@ static __inline__ int tcp_snd_test(struct sock *sk, struct sk_buff *skb)
 	 *
 	 * 	Don't use the nagle rule for urgent data.
 	 */
-	len = skb->end_seq - skb->seq;
-	if (!sk->nonagle && len < (sk->mss >> 1) && tp->packets_out && 
+	if (!sk->nonagle && skb->len < (sk->mss >> 1) && tp->packets_out &&
 	    !(TCP_SKB_CB(skb)->flags & TCPCB_FLAG_URG))
 		nagle_check = 0;
 
-	return (nagle_check && tp->packets_out < tp->snd_cwnd &&
-		!after(skb->end_seq, tp->snd_una + tp->snd_wnd) &&
+	return (nagle_check &&
+		(tcp_packets_in_flight(tp) < (tp->snd_cwnd>>TCP_CWND_SHIFT)) &&
+		!after(TCP_SKB_CB(skb)->end_seq, tp->snd_una + tp->snd_wnd) &&
 		tp->retransmits == 0);
 }
 

@@ -126,7 +126,17 @@ int free_memory_available(int nr)
 {
 	int retval = 0;
 	unsigned long flags;
-	struct free_area_struct * list = NULL;
+	struct free_area_struct * list;
+
+	/*
+	 * If we have more than about 6% of all memory free,
+	 * consider it to be good enough for anything.
+	 * It may not be, due to fragmentation, but we
+	 * don't want to keep on forever trying to find
+	 * free unfragmented memory.
+	 */
+	if (nr_free_pages > num_physpages >> 4)
+		return nr+1;
 
 	list = free_area + NR_MEM_LISTS;
 	spin_lock_irqsave(&page_alloc_lock, flags);

@@ -120,6 +120,7 @@ EXPORT_SYMBOL(put_cmsg);
 EXPORT_SYMBOL(net_families);
 EXPORT_SYMBOL(sock_kmalloc);
 EXPORT_SYMBOL(sock_kfree_s);
+EXPORT_SYMBOL(skb_queue_lock);
 
 #ifdef CONFIG_FILTER
 EXPORT_SYMBOL(sk_run_filter);
