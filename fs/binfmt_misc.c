@@ -50,7 +50,7 @@ struct binfmt_entry {
 
 #define ENTRY_ENABLED 1		/* the old binfmt_entry.enabled */
 #define	ENTRY_MAGIC 8		/* not filename detection */
-#define ENTRY_STRIP_EXT 32	/* strip of last filename extension */
+#define ENTRY_STRIP_EXT 32	/* strip off last filename extension */
 
 static int load_misc_binary(struct linux_binprm *bprm, struct pt_regs *regs);
 static void entry_proc_cleanup(struct binfmt_entry *e);
@@ -157,10 +157,12 @@ static struct binfmt_entry *check_file(struct linux_binprm *bprm)
 static int load_misc_binary(struct linux_binprm *bprm, struct pt_regs *regs)
 {
 	struct binfmt_entry *fmt;
+	struct dentry * dentry;
 	char iname[128];
 	char *iname_addr = iname, *p;
 	int retval, fmt_flags = 0;
 
+	MOD_INC_USE_COUNT;
 	if (!enabled) {
 		retval = -ENOEXEC;
 		goto _ret;
@@ -179,8 +181,8 @@ static int load_misc_binary(struct linux_binprm *bprm, struct pt_regs *regs)
 		goto _ret;
 	}
 
-	iput(bprm->inode);
-	bprm->dont_iput = 1;
+	dput(bprm->dentry);
+	bprm->dentry = NULL;
 
 	/* Build args for interpreter */
 	if ((fmt_flags & ENTRY_STRIP_EXT) &&
@@ -197,13 +199,17 @@ static int load_misc_binary(struct linux_binprm *bprm, struct pt_regs *regs)
 	}
 	bprm->filename = iname;	/* for binfmt_script */
 
-	if ((retval = open_namei(iname, 0, 0, &bprm->inode, NULL)))
+	dentry = open_namei(iname, 0, 0);
+	retval = PTR_ERR(dentry);
+	if (IS_ERR(dentry))
 		goto _ret;
-	bprm->dont_iput = 0;
+	bprm->dentry = dentry;
 
-	if ((retval = prepare_binprm(bprm)) >= 0)
+	retval = prepare_binprm(bprm);
+	if (retval >= 0)
 		retval = search_binary_handler(bprm, regs);
 _ret:
+	MOD_DEC_USE_COUNT;
 	return retval;
 }
 
@@ -262,13 +268,18 @@ static int proc_write_register(struct file *file, const char *buffer,
 	struct binfmt_entry *e;
 	int memsize, cnt = count - 1, err = 0;
 
+	MOD_INC_USE_COUNT;
 	/* some sanity checks */
-	if ((count < 11) || (count > 256))
-		return -EINVAL;
+	if ((count < 11) || (count > 256)) {
+		err = -EINVAL;
+		goto _err;
+	}
 
 	memsize = sizeof(struct binfmt_entry) + count;
-	if (!(e = (struct binfmt_entry *) kmalloc(memsize, GFP_USER)))
-		return -ENOMEM;
+	if (!(e = (struct binfmt_entry *) kmalloc(memsize, GFP_USER))) {
+		err = -ENOMEM;
+		goto _err;
+	}
 
 	sp = buffer + 1;
 	del = buffer[0];
@@ -305,7 +316,8 @@ static int proc_write_register(struct file *file, const char *buffer,
 	    !(e->proc_name) || !(e->interpreter) ||
 	    entry_proc_setup(e)) {
 		kfree(e);
-		return -EINVAL;
+		err = -EINVAL;
+		goto _err;
 	}
 
 	write_lock(&entries_lock);
@@ -313,7 +325,10 @@ static int proc_write_register(struct file *file, const char *buffer,
 	entries = e;
 	write_unlock(&entries_lock);
 
-	return count;
+	err = count;
+_err:
+	MOD_DEC_USE_COUNT;
+	return err;
 }
 
 /*
@@ -328,6 +343,7 @@ static int proc_read_status(char *page, char **start, off_t off,
 	char *dp;
 	int elen, i;
 
+	MOD_INC_USE_COUNT;
 #ifndef VERBOSE_STATUS
 	if (data) {
 		read_lock(&entries_lock);
@@ -387,6 +403,7 @@ _out:
 	*eof = (elen <= count) ? 1 : 0;
 	*start = page + off;
 
+	MOD_DEC_USE_COUNT;
 	return elen;
 }
 
@@ -400,6 +417,7 @@ static int proc_write_status(struct file *file, const char *buffer,
 	struct binfmt_entry *e;
 	int res = count;
 
+	MOD_INC_USE_COUNT;
 	if (((buffer[0] == '1') || (buffer[0] == '0')) &&
 	    ((count == 1) || ((count == 2) && (buffer[1] == '\n')))) {
 		if (data) {
@@ -419,6 +437,7 @@ static int proc_write_status(struct file *file, const char *buffer,
 	} else {
 		res = -EINVAL;
 	}
+	MOD_DEC_USE_COUNT;
 	return res;
 }
 

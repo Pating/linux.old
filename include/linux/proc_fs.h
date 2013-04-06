@@ -309,7 +309,7 @@ static inline int proc_scsi_unregister(struct proc_dir_entry *driver, int x)
 extern struct super_block *proc_read_super(struct super_block *,void *,int);
 extern int init_proc_fs(void);
 extern struct inode * proc_get_inode(struct super_block *, int, struct proc_dir_entry *);
-extern void proc_statfs(struct super_block *, struct statfs *, int);
+extern int proc_statfs(struct super_block *, struct statfs *, int);
 extern void proc_read_inode(struct inode *);
 extern void proc_write_inode(struct inode *);
 
@@ -323,7 +323,7 @@ extern int proc_match(int, const char *,struct proc_dir_entry *);
  * of the /proc/<pid> subdirectories.
  */
 extern int proc_readdir(struct inode *, struct file *, void *, filldir_t);
-extern int proc_lookup(struct inode *, struct qstr *, struct inode **);
+extern int proc_lookup(struct inode *, struct dentry *);
 
 struct openpromfs_dev {
  	struct openpromfs_dev *next;

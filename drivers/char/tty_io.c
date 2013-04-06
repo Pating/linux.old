@@ -373,13 +373,15 @@ void do_tty_hangup(struct tty_struct * tty, struct file_operations *fops)
 	for (filp = inuse_filps; filp; filp = filp->f_next) {
 		if (filp->private_data != tty)
 			continue;
-		if (!filp->f_inode)
+		if (!filp->f_dentry)
 			continue;
-		if (filp->f_inode->i_rdev == CONSOLE_DEV)
+		if (!filp->f_dentry->d_inode)
+			continue;
+		if (filp->f_dentry->d_inode->i_rdev == CONSOLE_DEV)
 			continue;
 		if (filp->f_op != &tty_fops)
 			continue;
-		tty_fasync(filp->f_inode, filp, 0);
+		tty_fasync(filp->f_dentry->d_inode, filp, 0);
 		filp->f_op = fops;
 	}
 	
@@ -387,7 +389,7 @@ void do_tty_hangup(struct tty_struct * tty, struct file_operations *fops)
 		tty->ldisc.flush_buffer(tty);
 	if (tty->driver.flush_buffer)
 		tty->driver.flush_buffer(tty);
-	if ((tty->flags & (1 << TTY_DO_WRITE_WAKEUP)) &&
+	if ((test_bit(TTY_DO_WRITE_WAKEUP, &tty->flags)) &&
 	    tty->ldisc.write_wakeup)
 		(tty->ldisc.write_wakeup)(tty);
 	wake_up_interruptible(&tty->write_wait);
@@ -536,7 +538,7 @@ void start_tty(struct tty_struct *tty)
 	}
 	if (tty->driver.start)
 		(tty->driver.start)(tty);
-	if ((tty->flags & (1 << TTY_DO_WRITE_WAKEUP)) &&
+	if ((test_bit(TTY_DO_WRITE_WAKEUP, &tty->flags)) &&
 	    tty->ldisc.write_wakeup)
 		(tty->ldisc.write_wakeup)(tty);
 	wake_up_interruptible(&tty->write_wait);
@@ -551,7 +553,7 @@ static long tty_read(struct inode * inode, struct file * file,
 	tty = (struct tty_struct *)file->private_data;
 	if (tty_paranoia_check(tty, inode->i_rdev, "tty_read"))
 		return -EIO;
-	if (!tty || (tty->flags & (1 << TTY_IO_ERROR)))
+	if (!tty || (test_bit(TTY_IO_ERROR, &tty->flags)))
 		return -EIO;
 
 	/* This check not only needs to be done before reading, but also
@@ -633,7 +635,7 @@ static long tty_write(struct inode * inode, struct file * file,
 		tty = (struct tty_struct *)file->private_data;
 	if (tty_paranoia_check(tty, inode->i_rdev, "tty_write"))
 		return -EIO;
-	if (!tty || !tty->driver.write || (tty->flags & (1 << TTY_IO_ERROR)))
+	if (!tty || !tty->driver.write || (test_bit(TTY_IO_ERROR, &tty->flags)))
 		return -EIO;
 #if 0
 	if (!is_console && L_TOSTOP(tty) && (tty->pgrp > 0) &&
@@ -822,7 +824,7 @@ static int init_dev(kdev_t device, struct tty_struct **ret_tty)
 	 * opens on a pty master.
 	 */
 fast_track:
-	if (tty->flags & (1 << TTY_CLOSING)) {
+	if (test_bit(TTY_CLOSING, &tty->flags)) {
 		retval = -EIO;
 		goto end_init;
 	}
@@ -919,12 +921,12 @@ static void release_dev(struct file * filp)
 	int	idx;
 	
 	tty = (struct tty_struct *)filp->private_data;
-	if (tty_paranoia_check(tty, filp->f_inode->i_rdev, "release_dev"))
+	if (tty_paranoia_check(tty, filp->f_dentry->d_inode->i_rdev, "release_dev"))
 		return;
 
 	check_tty_count(tty, "release_dev");
 
-	tty_fasync(filp->f_inode, filp, 0);
+	tty_fasync(filp->f_dentry->d_inode, filp, 0);
 
 	idx = MINOR(tty->device) - tty->driver.minor_start;
 	pty_master = (tty->driver.type == TTY_DRIVER_TYPE_PTY &&
@@ -1069,9 +1071,9 @@ static void release_dev(struct file * filp)
 	 * to close, and TTY_CLOSING makes sure we can't be reopened.
 	 */
 	if(tty_closing)
-		tty->flags |= (1 << TTY_CLOSING);
+		set_bit(TTY_CLOSING, &tty->flags);
 	if(o_tty_closing)
-		o_tty->flags |= (1 << TTY_CLOSING);
+		set_bit(TTY_CLOSING, &o_tty->flags);
 
 	/*
 	 * If _either_ side is closing, make sure there aren't any
@@ -1248,7 +1250,7 @@ static unsigned int tty_poll(struct file * filp, poll_table * wait)
 	struct tty_struct * tty;
 
 	tty = (struct tty_struct *)filp->private_data;
-	if (tty_paranoia_check(tty, filp->f_inode->i_rdev, "tty_poll"))
+	if (tty_paranoia_check(tty, filp->f_dentry->d_inode->i_rdev, "tty_poll"))
 		return 0;
 
 	if (tty->ldisc.poll)

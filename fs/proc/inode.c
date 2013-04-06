@@ -25,8 +25,14 @@ static void proc_put_inode(struct inode *inode)
 	    && proc_openprom_use)
 		(*proc_openprom_use)(inode, 0);
 #endif	
-	if (inode->i_nlink)
-		return;
+}
+
+/*
+ * Does this ever happen?
+ */
+static void proc_delete_inode(struct inode *inode)
+{
+	printk("proc_delete_inode()?\n");
 	inode->i_size = 0;
 }
 
@@ -39,9 +45,10 @@ static void proc_put_super(struct super_block *sb)
 
 static struct super_operations proc_sops = { 
 	proc_read_inode,
-	NULL,
 	proc_write_inode,
 	proc_put_inode,
+	proc_delete_inode,
+	NULL,
 	proc_put_super,
 	NULL,
 	proc_statfs,
@@ -141,7 +148,7 @@ struct super_block *proc_read_super(struct super_block *s,void *data,
 	return s;
 }
 
-void proc_statfs(struct super_block *sb, struct statfs *buf, int bufsiz)
+int proc_statfs(struct super_block *sb, struct statfs *buf, int bufsiz)
 {
 	struct statfs tmp;
 
@@ -153,7 +160,7 @@ void proc_statfs(struct super_block *sb, struct statfs *buf, int bufsiz)
 	tmp.f_files = 0;
 	tmp.f_ffree = 0;
 	tmp.f_namelen = NAME_MAX;
-	copy_to_user(buf, &tmp, bufsiz);
+	return copy_to_user(buf, &tmp, bufsiz) ? -EFAULT : 0;
 }
 
 void proc_read_inode(struct inode * inode)
@@ -201,5 +208,4 @@ void proc_read_inode(struct inode * inode)
 
 void proc_write_inode(struct inode * inode)
 {
-	inode->i_dirt=0;
 }

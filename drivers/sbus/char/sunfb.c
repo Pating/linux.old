@@ -1,4 +1,4 @@
-/* $Id: sunfb.c,v 1.25 1997/07/01 09:12:06 jj Exp $
+/* $Id: sunfb.c,v 1.26 1997/07/17 02:21:48 davem Exp $
  * sunfb.c: Sun generic frame buffer support.
  *
  * Copyright (C) 1995, 1996 Miguel de Icaza (miguel@nuclecu.unam.mx)
@@ -275,7 +275,8 @@ fb_mmap (struct inode *inode, struct file *file, struct vm_area_struct *vma)
 		int v;
 		
 		v = (*fb->mmap)(inode, file, vma, fb->base, fb);
-		if (v) return v;
+		if (v)
+			return v;
 		vma->vm_flags |= VM_IO;
 		if (!fb->mmaped) {
 			fb->mmaped = 1;

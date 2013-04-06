@@ -6,7 +6,7 @@
  * Laboratory for Computer Science Research Computing Facility
  * Rutgers, The State University of New Jersey
  *
- * $Id: ufs_fs.h,v 1.7 1996/08/13 19:27:59 ecd Exp $
+ * $Id: ufs_fs.h,v 1.8 1997/07/17 02:17:54 davem Exp $
  *
  */
 
@@ -225,7 +225,7 @@ extern void ufs_put_inode(struct inode * inode);
 extern void ufs_print_inode (struct inode *);
 
 /* ufs_namei.c */
-extern int ufs_lookup (struct inode *, const char *, int, struct inode **);
+extern int ufs_lookup (struct inode *, struct qstr *, struct inode **);
 
 /* ufs_super.c */
 extern void ufs_warning (struct super_block *, const char *, const char *, ...)

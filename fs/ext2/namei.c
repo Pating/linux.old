@@ -155,31 +155,26 @@ failure:
 	return NULL;
 }
 
-int ext2_lookup(struct inode * dir, struct qstr *name, struct inode ** result)
+int ext2_lookup(struct inode * dir, struct dentry *dentry)
 {
-	unsigned long ino;
+	struct inode * inode;
 	struct ext2_dir_entry * de;
 	struct buffer_head * bh;
 
-	*result = NULL;
-	if (!dir)
-		return -ENOENT;
-
-	if (!S_ISDIR(dir->i_mode))
-		return -ENOTDIR;
-
-	if (name->len > EXT2_NAME_LEN)
+	if (dentry->d_name.len > EXT2_NAME_LEN)
 		return -ENAMETOOLONG;
 
-	ino = dir->i_version;
-	if (!(bh = ext2_find_entry (dir, name->name, name->len, &de)))
-		return -ENOENT;
+	bh = ext2_find_entry (dir, dentry->d_name.name, dentry->d_name.len, &de);
+	inode = NULL;
+	if (bh) {
+		unsigned long ino = le32_to_cpu(de->inode);
+		brelse (bh);
+		inode = iget(dir->i_sb, ino);
 
-	ino = le32_to_cpu(de->inode);
-	brelse (bh);
-	if (!(*result = iget (dir->i_sb, ino)))
-		return -EACCES;
-
+		if (!inode)
+			return -EACCES;
+	}
+	d_add(dentry, inode);
 	return 0;
 }
 
@@ -252,7 +247,7 @@ static struct buffer_head * ext2_add_entry (struct inode * dir,
 				de->inode = le32_to_cpu(0);
 				de->rec_len = le16_to_cpu(sb->s_blocksize);
 				dir->i_size = offset + sb->s_blocksize;
-				dir->i_dirt = 1;
+				mark_inode_dirty(dir);
 			} else {
 
 				ext2_debug ("skipping to next block\n");
@@ -297,7 +292,7 @@ static struct buffer_head * ext2_add_entry (struct inode * dir,
 			 * and/or different from the directory change time.
 			 */
 			dir->i_mtime = dir->i_ctime = CURRENT_TIME;
-			dir->i_dirt = 1;
+			mark_inode_dirty(dir);
 			dir->i_version = ++event;
 			mark_buffer_dirty(bh, 1);
 			*res_dir = de;
@@ -346,10 +341,10 @@ static int ext2_delete_entry (struct ext2_dir_entry * dir,
 /*
  * By the time this is called, we already have created
  * the directory cache entry for the new file, but it
- * is so far marked "D_NEGATIVE".
+ * is so far negative - it has no inode.
  *
- * If the create succeeds, remove the D_NEGATIVE flag,
- * and fill in the inode information with d_instantiate().
+ * If the create succeeds, we fill in the inode information
+ * with d_instantiate(). 
  */
 int ext2_create (struct inode * dir, struct dentry * dentry, int mode)
 {
@@ -366,11 +361,11 @@ int ext2_create (struct inode * dir, struct dentry * dentry, int mode)
 
 	inode->i_op = &ext2_file_inode_operations;
 	inode->i_mode = mode;
-	inode->i_dirt = 1;
+	mark_inode_dirty(inode);
 	bh = ext2_add_entry (dir, dentry->d_name.name, dentry->d_name.len, &de, &err);
 	if (!bh) {
 		inode->i_nlink--;
-		inode->i_dirt = 1;
+		mark_inode_dirty(inode);
 		iput (inode);
 		return err;
 	}
@@ -382,7 +377,7 @@ int ext2_create (struct inode * dir, struct dentry * dentry, int mode)
 		wait_on_buffer (bh);
 	}
 	brelse (bh);
-	d_instantiate(dentry, inode, 0);
+	d_instantiate(dentry, inode);
 	return 0;
 }
 
@@ -423,11 +418,11 @@ int ext2_mknod (struct inode * dir, struct dentry *dentry, int mode, int rdev)
 		init_fifo(inode);
 	if (S_ISBLK(mode) || S_ISCHR(mode))
 		inode->i_rdev = to_kdev_t(rdev);
-	inode->i_dirt = 1;
+	mark_inode_dirty(inode);
 	bh = ext2_add_entry (dir, dentry->d_name.name, dentry->d_name.len, &de, &err);
 	if (!bh) {
 		inode->i_nlink--;
-		inode->i_dirt = 1;
+		mark_inode_dirty(inode);
 		iput(inode);
 		return err;
 	}
@@ -439,7 +434,7 @@ int ext2_mknod (struct inode * dir, struct dentry *dentry, int mode, int rdev)
 		wait_on_buffer (bh);
 	}
 	brelse(bh);
-	d_instantiate(dentry, inode, 0);
+	d_instantiate(dentry, inode);
 	return 0;
 }
 
@@ -465,7 +460,7 @@ int ext2_mkdir(struct inode * dir, struct dentry * dentry, int mode)
 	dir_block = ext2_bread (inode, 0, 1, &err);
 	if (!dir_block) {
 		inode->i_nlink--;
-		inode->i_dirt = 1;
+		mark_inode_dirty(inode);
 		iput (inode);
 		return err;
 	}
@@ -486,11 +481,11 @@ int ext2_mkdir(struct inode * dir, struct dentry * dentry, int mode)
 	inode->i_mode = S_IFDIR | (mode & (S_IRWXUGO|S_ISVTX) & ~current->fs->umask);
 	if (dir->i_mode & S_ISGID)
 		inode->i_mode |= S_ISGID;
-	inode->i_dirt = 1;
+	mark_inode_dirty(inode);
 	bh = ext2_add_entry (dir, dentry->d_name.name, dentry->d_name.len, &de, &err);
 	if (!bh) {
 		inode->i_nlink = 0;
-		inode->i_dirt = 1;
+		mark_inode_dirty(inode);
 		iput (inode);
 		return err;
 	}
@@ -502,8 +497,8 @@ int ext2_mkdir(struct inode * dir, struct dentry * dentry, int mode)
 		wait_on_buffer (bh);
 	}
 	dir->i_nlink++;
-	dir->i_dirt = 1;
-	d_instantiate(dentry, inode, D_DIR);
+	mark_inode_dirty(dir);
+	d_instantiate(dentry, inode);
 	brelse (bh);
 	return 0;
 }
@@ -613,7 +608,7 @@ int ext2_rmdir (struct inode * dir, struct dentry *dentry)
 	else if (le32_to_cpu(de->inode) != inode->i_ino)
 		retval = -ENOENT;
 	else {
-		if (atomic_read(&inode->i_count) > 1) {
+		if (inode->i_count > 1) {
 		/*
 		 * Are we deleting the last instance of a busy directory?
 		 * Better clean up if so.
@@ -640,10 +635,10 @@ int ext2_rmdir (struct inode * dir, struct dentry *dentry)
 			      inode->i_nlink);
 	inode->i_version = ++event;
 	inode->i_nlink = 0;
-	inode->i_dirt = 1;
+	mark_inode_dirty(inode);
 	dir->i_nlink--;
 	inode->i_ctime = dir->i_ctime = dir->i_mtime = CURRENT_TIME;
-	dir->i_dirt = 1;
+	mark_inode_dirty(dir);
 	d_delete(dentry);
 
 end_rmdir:
@@ -701,9 +696,9 @@ int ext2_unlink(struct inode * dir, struct dentry *dentry)
 		wait_on_buffer (bh);
 	}
 	dir->i_ctime = dir->i_mtime = CURRENT_TIME;
-	dir->i_dirt = 1;
+	mark_inode_dirty(dir);
 	inode->i_nlink--;
-	inode->i_dirt = 1;
+	mark_inode_dirty(inode);
 	inode->i_ctime = dir->i_ctime;
 	retval = 0;
 	d_delete(dentry);	/* This also frees the inode */
@@ -738,7 +733,7 @@ int ext2_symlink (struct inode * dir, struct dentry *dentry, const char * symnam
 		name_block = ext2_bread (inode, 0, 1, &err);
 		if (!name_block) {
 			inode->i_nlink--;
-			inode->i_dirt = 1;
+			mark_inode_dirty(inode);
 			iput (inode);
 			return err;
 		}
@@ -758,12 +753,12 @@ int ext2_symlink (struct inode * dir, struct dentry *dentry, const char * symnam
 		brelse (name_block);
 	}
 	inode->i_size = i;
-	inode->i_dirt = 1;
+	mark_inode_dirty(inode);
 
 	bh = ext2_add_entry (dir, dentry->d_name.name, dentry->d_name.len, &de, &err);
 	if (!bh) {
 		inode->i_nlink--;
-		inode->i_dirt = 1;
+		mark_inode_dirty(inode);
 		iput (inode);
 		return err;
 	}
@@ -775,7 +770,7 @@ int ext2_symlink (struct inode * dir, struct dentry *dentry, const char * symnam
 		wait_on_buffer (bh);
 	}
 	brelse (bh);
-	d_instantiate(dentry, inode, 0);
+	d_instantiate(dentry, inode);
 	return 0;
 }
 
@@ -808,43 +803,37 @@ int ext2_link (struct inode * inode, struct inode * dir, struct dentry *dentry)
 	brelse (bh);
 	inode->i_nlink++;
 	inode->i_ctime = CURRENT_TIME;
-	inode->i_dirt = 1;
-	atomic_inc(&inode->i_count);
-	d_instantiate(dentry, inode, 0);
+	mark_inode_dirty(inode);
+	inode->i_count++;
+	d_instantiate(dentry, inode);
 	return 0;
 }
 
-static int subdir (struct inode * new_inode, struct inode * old_inode)
+/*
+ * Trivially implemented using the dcache structure
+ */
+static int subdir (struct dentry * new_dentry, struct dentry * old_dentry)
 {
-	int ino;
 	int result;
 
-	atomic_inc(&new_inode->i_count);
 	result = 0;
 	for (;;) {
-		if (new_inode == old_inode) {
-			result = 1;
-			break;
+		if (new_dentry != old_dentry) {
+			struct dentry * parent = new_dentry->d_parent;
+			if (parent == new_dentry)
+				break;
+			new_dentry = parent;
+			continue;
 		}
-		if (new_inode->i_dev != old_inode->i_dev)
-			break;
-		ino = new_inode->i_ino;
-		if (ext2_lookup (new_inode, &(struct qstr) { "..", 2, 0 }, &new_inode))
-			break;
-		if (new_inode->i_ino == ino)
-			break;
+		result = 1;
+		break;
 	}
-	iput (new_inode);
 	return result;
 }
 
 #define PARENT_INO(buffer) \
 	((struct ext2_dir_entry *) ((char *) buffer + \
 	le16_to_cpu(((struct ext2_dir_entry *) buffer)->rec_len)))->inode
-
-#define PARENT_NAME(buffer) \
-	((struct ext2_dir_entry *) ((char *) buffer + \
-	le16_to_cpu(((struct ext2_dir_entry *) buffer)->rec_len)))->name
 
 /*
  * rename uses retrying to avoid race-conditions: at least they should be
@@ -906,13 +895,13 @@ static int do_ext2_rename (struct inode * old_dir, struct dentry *old_dentry,
 		if (!S_ISDIR(old_inode->i_mode))
 			goto end_rename;
 		retval = -EINVAL;
-		if (subdir (new_dir, old_inode))
+		if (subdir(new_dentry, old_dentry))
 			goto end_rename;
 		retval = -ENOTEMPTY;
 		if (!empty_dir (new_inode))
 			goto end_rename;
 		retval = -EBUSY;
-		if (atomic_read(&new_inode->i_count) > 1)
+		if (new_inode->i_count > 1)
 			goto end_rename;
 	}
 	retval = -EPERM;
@@ -925,7 +914,7 @@ static int do_ext2_rename (struct inode * old_dir, struct dentry *old_dentry,
 		if (new_inode && !S_ISDIR(new_inode->i_mode))
 			goto end_rename;
 		retval = -EINVAL;
-		if (subdir (new_dir, old_inode))
+		if (subdir(new_dentry, old_dentry))
 			goto end_rename;
 		dir_bh = ext2_bread (old_inode, 0, 0, &retval);
 		if (!dir_bh)
@@ -953,21 +942,21 @@ static int do_ext2_rename (struct inode * old_dir, struct dentry *old_dentry,
 	if (new_inode) {
 		new_inode->i_nlink--;
 		new_inode->i_ctime = CURRENT_TIME;
-		new_inode->i_dirt = 1;
+		mark_inode_dirty(new_inode);
 	}
 	old_dir->i_ctime = old_dir->i_mtime = CURRENT_TIME;
-	old_dir->i_dirt = 1;
+	mark_inode_dirty(old_dir);
 	if (dir_bh) {
 		PARENT_INO(dir_bh->b_data) = le32_to_cpu(new_dir->i_ino);
 		mark_buffer_dirty(dir_bh, 1);
 		old_dir->i_nlink--;
-		old_dir->i_dirt = 1;
+		mark_inode_dirty(old_dir);
 		if (new_inode) {
 			new_inode->i_nlink--;
-			new_inode->i_dirt = 1;
+			mark_inode_dirty(new_inode);
 		} else {
 			new_dir->i_nlink++;
-			new_dir->i_dirt = 1;
+			mark_inode_dirty(new_dir);
 		}
 	}
 	mark_buffer_dirty(old_bh,  1);

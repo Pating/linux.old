@@ -15,16 +15,13 @@
 #include <linux/net.h>
 #include <linux/kdev_t.h>
 #include <linux/ioctl.h>
+#include <linux/list.h>
+#include <linux/dcache.h>
 
 #include <asm/atomic.h>
 #include <asm/bitops.h>
 
-/* Prefixes for routines (having no effect), but indicate what
- * the routine may do. This can greatly ease reasoning about routines...
- */
-#define blocking /*routine may schedule()*/
 
-#include <linux/dalloc.h>
 
 /*
  * It's silly to have NR_OPEN bigger than NR_FILE, but I'll fix
@@ -78,9 +75,6 @@ extern int max_files, nr_files;
 			   */
 #define FS_IBASKET      8 /* FS does callback to free_ibasket() if space gets low. */
 
-/* public flags for i_status */
-#define ST_MODIFIED 1024
-
 /*
  * These are the fs-independent mount-flags: up to 16 flags are supported
  */
@@ -126,7 +120,12 @@ extern int max_files, nr_files;
 #define IS_APPEND(inode) ((inode)->i_flags & S_APPEND)
 #define IS_IMMUTABLE(inode) ((inode)->i_flags & S_IMMUTABLE)
 #define IS_NOATIME(inode) ((inode)->i_flags & MS_NOATIME)
-#define DO_UPDATE_ATIME(inode) (!IS_NOATIME(inode) && !IS_RDONLY(inode))
+
+#define UPDATE_ATIME(inode) \
+	if (!IS_NOATIME(inode) && !IS_RDONLY(inode)) { \
+		inode->i_atime = CURRENT_TIME; \
+		mark_inode_dirty(inode); \
+	}
 
 /* the read-only stuff doesn't really belong here, but any other place is
    probably as bad and I don't want to create yet another include file. */
@@ -152,7 +151,7 @@ extern int max_files, nr_files;
 extern void buffer_init(void);
 extern void inode_init(void);
 extern void file_table_init(void);
-extern unsigned long name_cache_init(unsigned long start, unsigned long end);
+extern void dcache_init(void);
 
 typedef char buffer_block[BLOCK_SIZE];
 
@@ -300,14 +299,12 @@ struct iattr {
 #include <linux/quota.h>
 
 struct inode {
-	struct inode 		*i_hash_next;
-	struct inode		*i_hash_prev;
-	struct inode		*i_next;
-	struct inode		*i_prev;
+	struct list_head	i_hash;
+	struct list_head	i_list;
 
 	unsigned long		i_ino;
 	kdev_t			i_dev;
-	atomic_t		i_count;
+	unsigned short		i_count;
 	umode_t			i_mode;
 	nlink_t			i_nlink;
 	uid_t			i_uid;
@@ -330,24 +327,13 @@ struct inode {
 	struct page		*i_pages;
 	struct dquot		*i_dquot[MAXQUOTAS];
 
-	struct inode		*i_lru_next;
-	struct inode		*i_lru_prev;
+	struct list_head	i_dentry;
 
-	struct inode		*i_basket_next;
-	struct inode		*i_basket_prev;
-	struct dentry		*i_dentry;
-
-	unsigned short		i_status;
-	unsigned short		i_reuse_count;
+	unsigned long		i_state;
 
 	unsigned int		i_flags;
-	unsigned char		i_lock;
-	unsigned char		i_dirt;
 	unsigned char		i_pipe;
 	unsigned char		i_sock;
-
-	unsigned char		i_level;
-	unsigned short		i_fill;
 
 	int			i_writecount;
 	unsigned int		i_attr_flags;
@@ -369,9 +355,21 @@ struct inode {
 	} u;
 };
 
+/* Inode state bits.. */
+#define I_DIRTY		0
+#define I_LOCK		1
+#define I_FREEING	2
+
+extern void __mark_inode_dirty(struct inode *);
+static inline void mark_inode_dirty(struct inode *inode)
+{
+	if (!test_and_set_bit(I_DIRTY, &inode->i_state))
+		__mark_inode_dirty(inode);
+}
+
 struct file {
 	struct file		*f_next, **f_pprev;
-	struct inode		*f_inode;
+	struct dentry		*f_dentry;
 	struct file_operations	*f_op;
 	mode_t			f_mode;
 	loff_t			f_pos;
@@ -545,7 +543,7 @@ struct file_operations {
 struct inode_operations {
 	struct file_operations * default_file_ops;
 	int (*create) (struct inode *,struct dentry *,int);
-	int (*lookup) (struct inode *,struct qstr *name,struct inode **);
+	int (*lookup) (struct inode *,struct dentry *);
 	int (*link) (struct inode *,struct inode *,struct dentry *);
 	int (*unlink) (struct inode *,struct dentry *);
 	int (*symlink) (struct inode *,struct dentry *,const char *);
@@ -568,12 +566,13 @@ struct inode_operations {
 
 struct super_operations {
 	void (*read_inode) (struct inode *);
-	int (*notify_change) (struct inode *, struct iattr *);
 	void (*write_inode) (struct inode *);
 	void (*put_inode) (struct inode *);
+	void (*delete_inode) (struct inode *);
+	int (*notify_change) (struct inode *, struct iattr *);
 	void (*put_super) (struct super_block *);
 	void (*write_super) (struct super_block *);
-	void (*statfs) (struct super_block *, struct statfs *, int);
+	int (*statfs) (struct super_block *, struct statfs *, int);
 	int (*remount_fs) (struct super_block *, int *, char *);
 };
 
@@ -602,7 +601,7 @@ asmlinkage int sys_close(unsigned int);		/* yes, it's really unsigned */
 
 extern void kill_fasync(struct fasync_struct *fa, int sig);
 
-extern int getname(const char * filename, char **result);
+extern char * getname(const char * filename);
 extern void putname(char * name);
 extern int do_truncate(struct inode *, unsigned long);
 extern int register_blkdev(unsigned int, const char *, struct file_operations *);
@@ -632,8 +631,8 @@ extern struct file_operations rdwr_pipe_fops;
 extern struct file_system_type *get_fs_type(const char *name);
 
 extern int fs_may_mount(kdev_t dev);
-extern int fs_may_umount(kdev_t dev, struct dentry * root);
-extern int fs_may_remount_ro(kdev_t dev);
+extern int fs_may_umount(struct super_block *, struct dentry * root);
+extern int fs_may_remount_ro(struct super_block *);
 
 extern struct file *inuse_filps;
 extern struct super_block super_blocks[NR_SUPER];
@@ -684,9 +683,8 @@ extern int notify_change(struct inode *, struct iattr *);
 extern int permission(struct inode * inode,int mask);
 extern int get_write_access(struct inode *inode);
 extern void put_write_access(struct inode *inode);
-extern int open_namei(const char * pathname, int flag, int mode,
-	struct inode ** res_inode, struct dentry * base);
-extern int do_mknod(const char * filename, int mode, dev_t dev);
+extern struct dentry * open_namei(const char * pathname, int flag, int mode);
+extern struct dentry * do_mknod(const char * filename, int mode, dev_t dev);
 extern int do_pipe(int *);
 
 /*
@@ -702,10 +700,10 @@ extern int do_pipe(int *);
 #define IS_ERR(ptr)	((unsigned long)(ptr) > (unsigned long)(-1000))
 
 extern struct dentry * lookup_dentry(const char *, struct dentry *, int);
-extern int __namei(const char *, struct inode **, int);
+extern struct dentry * __namei(const char *, int);
 
-#define namei(pathname, inode_p)	__namei(pathname, inode_p, 1)
-#define lnamei(pathname, inode_p)	__namei(pathname, inode_p, 0)
+#define namei(pathname)		__namei(pathname, 1)
+#define lnamei(pathname)	__namei(pathname, 0)
 
 #include <asm/semaphore.h>
 
@@ -735,50 +733,19 @@ extern inline void vfs_unlock(void)
 
 /* Not to be used by ordinary vfs users */
 extern void _get_inode(struct inode * inode);
-extern blocking void __iput(struct inode * inode);
+extern void iput(struct inode * inode);
 
-extern blocking void _iput(struct inode * inode);
-extern inline blocking void iput(struct inode * inode)
-{
-	if (inode) {
-		extern void wake_up_interruptible(struct wait_queue **q);
+extern struct inode * iget(struct super_block * sb, unsigned long nr);
+extern void clear_inode(struct inode * inode);
+extern struct inode * get_empty_inode(void);
 
-		if (inode->i_pipe)
-			wake_up_interruptible(&inode->u.pipe_i.wait);
-
-		/* It does not matter if somebody re-increments it in between,
-		 * only the _last_ user needs to call _iput().
-		 */
-		if (atomic_dec_and_test(&inode->i_count))
-			_iput(inode);
-	}
-}
-
-extern blocking struct inode * iget(struct super_block * sb, unsigned long nr);
-extern blocking void _clear_inode(struct inode * inode, int external, int verbose);
-extern blocking inline void clear_inode(struct inode * inode)
-{
-	vfs_lock();
-	_clear_inode(inode, 1, 1);
-	vfs_unlock();
-}
-extern blocking struct inode * _get_empty_inode(void);
-extern inline blocking struct inode * get_empty_inode(void)
-{
-	struct inode * inode;
-	vfs_lock();
-	inode = _get_empty_inode();
-	vfs_unlock();
-	return inode;
-}
 /* Please prefer to use this function in future, instead of using
  * a get_empty_inode()/insert_inode_hash() combination.
  * It allows for better checking and less race conditions.
  */
-blocking struct inode * get_empty_inode_hashed(dev_t i_dev, unsigned long i_ino);
+extern struct inode * get_empty_inode_hashed(dev_t i_dev, unsigned long i_ino);
 
 extern void insert_inode_hash(struct inode *);
-extern blocking struct inode * get_pipe_inode(void);
 extern int get_unused_fd(void);
 extern void put_unused_fd(int);
 extern struct file * get_empty_filp(void);

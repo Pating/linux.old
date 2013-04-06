@@ -16,7 +16,6 @@
 #include <linux/mm.h>
 #include <linux/sysctl.h>
 #include <linux/swapctl.h>
-#include <linux/nametrans.h>
 #include <linux/proc_fs.h>
 #include <linux/malloc.h>
 #include <linux/stat.h>
@@ -171,10 +170,6 @@ static ctl_table kern_table[] = {
 	 64, 0644, NULL, &proc_dostring, &sysctl_string },
 	{KERN_JAVA_APPLETVIEWER, "java-appletviewer", binfmt_java_appletviewer,
 	 64, 0644, NULL, &proc_dostring, &sysctl_string },
-#endif
-#ifdef CONFIG_TRANS_NAMES
-	{KERN_NAMETRANS, "nametrans", nametrans_txt, MAX_DEFAULT_TRANSLEN,
-	 0644, NULL, &nametrans_dostring, &nametrans_string},
 #endif
 #ifdef __sparc__
 	{KERN_SPARC_REBOOT, "reboot-cmd", reboot_command,
@@ -823,6 +818,12 @@ int proc_dointvec_jiffies(ctl_table *table, int write, struct file *filp,
 
 #else /* CONFIG_PROC_FS */
 
+int proc_dointvec_jiffies(ctl_table *table, int write, struct file *filp,
+			  void *buffer, size_t *lenp)
+{
+  return -ENOSYS; 
+}
+
 int proc_dostring(ctl_table *table, int write, struct file *filp,
 		  void *buffer, size_t *lenp)
 {
@@ -836,6 +837,12 @@ int proc_dointvec(ctl_table *table, int write, struct file *filp,
 }
 
 int proc_dointvec_minmax(ctl_table *table, int write, struct file *filp,
+		    void *buffer, size_t *lenp)
+{
+	return -ENOSYS;
+}
+
+int proc_dointvec_jiffies(ctl_table *table, int write, struct file *filp,
 		    void *buffer, size_t *lenp)
 {
 	return -ENOSYS;
@@ -1036,6 +1043,12 @@ int proc_dointvec(ctl_table *table, int write, struct file *filp,
 }
 
 int proc_dointvec_minmax(ctl_table *table, int write, struct file *filp,
+		    void *buffer, size_t *lenp)
+{
+	return -ENOSYS;
+}
+
+int proc_dointvec_jiffies(ctl_table *table, int write, struct file *filp,
 		    void *buffer, size_t *lenp)
 {
 	return -ENOSYS;

@@ -1,4 +1,4 @@
-/* $Id: tcx.c,v 1.16 1997/06/06 10:56:31 jj Exp $
+/* $Id: tcx.c,v 1.17 1997/07/17 02:21:50 davem Exp $
  * tcx.c: SUNW,tcx 24/8bit frame buffer driver
  *
  * Copyright (C) 1996 Jakub Jelinek (jj@sunsite.mff.cuni.cz)
@@ -169,11 +169,12 @@ tcx_mmap (struct inode *inode, struct file *file, struct vm_area_struct *vma,
 					 map_offset,
 					 map_size, vma->vm_page_prot,
 					 fb->space);
-		if (r) return -EAGAIN;
+		if (r)
+			return -EAGAIN;
 		page += map_size;
 	}
-        vma->vm_inode = inode;
-        atomic_inc(&inode->i_count);
+
+	vma->vm_dentry = dget(file->f_dentry);
         return 0;
 }
 

@@ -33,7 +33,6 @@
 #include <linux/smp.h>
 #include <linux/smp_lock.h>
 #include <linux/fd.h>
-#include <linux/dalloc.h>
 #include <linux/init.h>
 
 #include <asm/system.h>
@@ -102,13 +101,13 @@ struct vfsmount *add_vfsmnt(kdev_t dev, const char *dev_name, const char *dir_na
 
 	lptr->mnt_dev = dev;
 	sema_init(&lptr->mnt_sem, 1);
-	if (dev_name && !getname(dev_name, &tmp)) {
+	if (dev_name && !IS_ERR(tmp = getname(dev_name))) {
 		if ((lptr->mnt_devname =
 		    (char *) kmalloc(strlen(tmp)+1, GFP_KERNEL)) != (char *)NULL)
 			strcpy(lptr->mnt_devname, tmp);
 		putname(tmp);
 	}
-	if (dir_name && !getname(dir_name, &tmp)) {
+	if (dir_name && !IS_ERR(tmp = getname(dir_name))) {
 		if ((lptr->mnt_dirname =
 		    (char *) kmalloc(strlen(tmp)+1, GFP_KERNEL)) != (char *)NULL)
 			strcpy(lptr->mnt_dirname, tmp);
@@ -198,9 +197,11 @@ static int fs_index(const char * __name)
 	char * name;
 	int err, index;
 
-	err = getname(__name, &name);
-	if (err)
+	name = getname(__name);
+	err = PTR_ERR(name);
+	if (IS_ERR(name))
 		return err;
+
 	index = 0;
 	for (tmp = file_systems ; tmp ; tmp = tmp->next) {
 		if (strcmp(tmp->name, name) == 0) {
@@ -454,26 +455,6 @@ struct super_block * get_super(kdev_t dev)
 	return NULL;
 }
 
-void put_super(kdev_t dev)
-{
-	struct super_block * sb;
-
-	if (dev == ROOT_DEV) {
-		printk("VFS: Root device %s: prepare for armageddon\n",
-		       kdevname(dev));
-		return;
-	}
-	if (!(sb = get_super(dev)))
-		return;
-	if (sb->s_root != sb->s_root->d_mounts) {
-		printk("VFS: Mounted device %s - tssk, tssk\n",
-		       kdevname(dev));
-		return;
-	}
-	if (sb->s_op && sb->s_op->put_super)
-		sb->s_op->put_super(sb);
-}
-
 asmlinkage int sys_ustat(dev_t dev, struct ustat * ubuf)
 {
         struct super_block *s;
@@ -573,14 +554,12 @@ static void d_umount(struct dentry *dentry)
 {
 	struct dentry * covers = dentry->d_covers;
 
-	if (covers == dentry) {
-		printk("VFS: unmount - covers == dentry?\n");
-		return;
+	if (covers != dentry) {
+		covers->d_mounts = covers;
+		dentry->d_covers = dentry;
+		dput(covers);
+		dput(dentry);
 	}
-	covers->d_mounts = covers;
-	dentry->d_covers = dentry;
-	dput(covers);
-	dput(dentry);
 }
 
 static void d_mount(struct dentry *covers, struct dentry *dentry)
@@ -598,13 +577,18 @@ static int do_umount(kdev_t dev,int unmount_root)
 	struct super_block * sb;
 	int retval;
 	
+	sb = get_super(dev);
+	if (!sb)
+		return -ENOENT;
+
+	if (!sb->s_root)
+		return -ENOENT;
+
 	if (dev==ROOT_DEV && !unmount_root) {
 		/*
 		 * Special case for "unmounting" root. We just try to remount
 		 * it readonly, and sync() the device.
 		 */
-		if (!(sb=get_super(dev)))
-			return -ENOENT;
 		if (!(sb->s_flags & MS_RDONLY)) {
 			/*
 			 * Make sure all quotas are turned off on this device we need to mount
@@ -620,9 +604,6 @@ static int do_umount(kdev_t dev,int unmount_root)
 		}
 		return 0;
 	}
-	sb=get_super(dev);
-	if (!sb)
-		return -ENOENT;
 
 	/*
 	 * Before checking if the filesystem is still busy make sure the kernel
@@ -630,21 +611,42 @@ static int do_umount(kdev_t dev,int unmount_root)
 	 * too bad there are no quotas running anymore. Turn them on again by hand.
 	 */
 	quota_off(dev, -1);
-	if (!fs_may_umount(dev, sb->s_root))
+	if (!fs_may_umount(sb, sb->s_root))
 		return -EBUSY;
 
-	/* Clear up the dcache tree. This should be cleaner.. */
-	if (sb->s_root) {
-		d_umount(sb->s_root);
-		d_delete(sb->s_root);
-	}
-
+	/* clean up dcache .. */
+	d_umount(sb->s_root);
 	sb->s_root = NULL;
-	if (sb->s_op && sb->s_op->write_super && sb->s_dirt)
-		sb->s_op->write_super(sb);
-	put_super(dev);
+
+	if (sb->s_op) {
+		if (sb->s_op->write_super && sb->s_dirt)
+			sb->s_op->write_super(sb);
+		if (sb->s_op->put_super)
+			sb->s_op->put_super(sb);
+	}
 	remove_vfsmnt(dev);
 	return 0;
+}
+
+static int umount_dev(kdev_t dev)
+{
+	int retval;
+	struct inode * inode = get_empty_inode();
+
+	inode->i_rdev = dev;
+	if (MAJOR(dev) >= MAX_BLKDEV)
+		return -ENXIO;
+
+	retval = do_umount(dev,0);
+	if (!retval) {
+		fsync_dev(dev);
+		if (dev != ROOT_DEV) {
+			blkdev_release(inode);
+			put_unnamed_dev(dev);
+		}
+	}
+	iput(inode);
+	return retval;
 }
 
 /*
@@ -660,50 +662,36 @@ static int do_umount(kdev_t dev,int unmount_root)
 
 asmlinkage int sys_umount(char * name)
 {
-	struct inode * inode;
-	kdev_t dev;
-	struct inode * dummy_inode = NULL;
-	int retval = -EPERM;
+	struct dentry * dentry;
+	int retval;
+
+	if (!suser())
+		return -EPERM;
 
 	lock_kernel();
-	if (!suser())
-		goto out;
-	retval = namei(name, &inode);
-	if (S_ISBLK(inode->i_mode)) {
-		dev = inode->i_rdev;
-		retval = -EACCES;
-		if (IS_NODEV(inode)) {
-			iput(inode);
-			goto out;
+	dentry = namei(name);
+	retval = PTR_ERR(dentry);
+	if (!IS_ERR(dentry)) {
+		struct inode * inode = dentry->d_inode;
+		kdev_t dev = inode->i_rdev;
+
+		retval = 0;		
+		if (S_ISBLK(inode->i_mode)) {
+			if (IS_NODEV(inode))
+				retval = -EACCES;
+		} else {
+			struct super_block *sb = inode->i_sb;
+			retval = -EINVAL;
+			if (sb && inode == sb->s_root->d_inode) {
+				dev = sb->s_dev;
+				retval = 0;
+			}
 		}
-	} else {
-		retval = -EINVAL;
-		if (!inode->i_sb || inode != inode->i_sb->s_root->d_inode) {
-			iput(inode);
-			goto out;
-		}
-		dev = inode->i_sb->s_dev;
-		iput(inode);
-		inode = dummy_inode = get_empty_inode();
-		inode->i_rdev = dev;
+		dput(dentry);
+
+		if (!retval)
+			retval = umount_dev(dev);
 	}
-	retval = -ENXIO;
-	if (MAJOR(dev) >= MAX_BLKDEV) {
-		iput(inode);
-		goto out;
-	}
-	retval = do_umount(dev,0);
-	if (!retval) {
-		fsync_dev(dev);
-		if (dev != ROOT_DEV) {
-			blkdev_release (inode);
-			put_unnamed_dev(dev);
-		}
-	}
-	iput(inode);
-	if (!retval)
-		fsync_dev(dev);
-out:
 	unlock_kernel();
 	return retval;
 }
@@ -740,15 +728,10 @@ int do_mount(kdev_t dev, const char * dev_name, const char * dir_name, const cha
 		return -EACCES;
 		/*flags |= MS_RDONLY;*/
 
-	dir_d = lookup_dentry(dir_name, NULL, 1);
+	dir_d = namei(dir_name);
 	error = PTR_ERR(dir_d);
 	if (IS_ERR(dir_d))
 		return error;
-
-	if (dir_d->d_flag & D_NEGATIVE) {
-		dput(dir_d);
-		return -ENOENT;
-	}
 
 	if (dir_d->d_covers != dir_d) {
 		dput(dir_d);
@@ -797,7 +780,7 @@ static int do_remount_sb(struct super_block *sb, int flags, char *data)
 		/*flags |= MS_RDONLY;*/
 	/* If we are remounting RDONLY, make sure there are no rw files open */
 	if ((flags & MS_RDONLY) && !(sb->s_flags & MS_RDONLY))
-		if (!fs_may_remount_ro(sb->s_dev))
+		if (!fs_may_remount_ro(sb))
 			return -EBUSY;
 	sb->s_flags = (flags & ~MS_RDONLY) | (sb->s_flags & MS_RDONLY);
 	if (sb->s_op && sb->s_op->remount_fs) {
@@ -815,18 +798,19 @@ static int do_remount_sb(struct super_block *sb, int flags, char *data)
 
 static int do_remount(const char *dir,int flags,char *data)
 {
-	struct inode *dir_i;
+	struct dentry *dentry;
 	int retval;
 
-	retval = namei(dir, &dir_i);
-	if (retval)
-		return retval;
-	if (dir_i != dir_i->i_sb->s_root->d_inode) {
-		iput(dir_i);
-		return -EINVAL;
+	dentry = namei(dir);
+	retval = PTR_ERR(dentry);
+	if (!IS_ERR(dentry)) {
+		struct super_block * sb = dentry->d_inode->i_sb;
+
+		retval = -EINVAL;
+		if (dentry == sb->s_root)
+			retval = do_remount_sb(sb, flags, data);
+		dput(dentry);
 	}
-	retval = do_remount_sb(dir_i->i_sb, flags, data);
-	iput(dir_i);
 	return retval;
 }
 
@@ -877,7 +861,8 @@ asmlinkage int sys_mount(char * dev_name, char * dir_name, char * type,
 	unsigned long new_flags, void * data)
 {
 	struct file_system_type * fstype;
-	struct inode * inode;
+	struct dentry * dentry = NULL;
+	struct inode * inode = NULL;
 	struct file_operations * fops;
 	kdev_t dev;
 	int retval = -EPERM;
@@ -909,58 +894,54 @@ asmlinkage int sys_mount(char * dev_name, char * dir_name, char * type,
 		goto out;
 	t = fstype->name;
 	fops = NULL;
-	if ((fstype->fs_flags & FS_REQUIRES_DEV)) {
-		retval = namei(dev_name, &inode);
-		if (retval)
+	if (fstype->fs_flags & FS_REQUIRES_DEV) {
+		dentry = namei(dev_name);
+		retval = PTR_ERR(dentry);
+		if (IS_ERR(dentry))
 			goto out;
+
+		inode = dentry->d_inode;
 		retval = -ENOTBLK;
-		if (!S_ISBLK(inode->i_mode)) {
-			iput(inode);
-			goto out;
-		}
+		if (!S_ISBLK(inode->i_mode))
+			goto dput_and_out;
+
 		retval = -EACCES;
-		if (IS_NODEV(inode)) {
-			iput(inode);
-			goto out;
-		}
+		if (IS_NODEV(inode))
+			goto dput_and_out;
+
 		dev = inode->i_rdev;
 		retval = -ENXIO;
-		if (MAJOR(dev) >= MAX_BLKDEV) {
-			iput(inode);
-			goto out;
-		}
+		if (MAJOR(dev) >= MAX_BLKDEV)
+			goto dput_and_out;
+
 		fops = get_blkfops(MAJOR(dev));
 		retval = -ENOTBLK;
-		if (!fops) {
-			iput(inode);
-			goto out;
-		}
+		if (!fops)
+			goto dput_and_out;
+
 		if (fops->open) {
 			struct file dummy;	/* allows read-write or read-only flag */
 			memset(&dummy, 0, sizeof(dummy));
-			dummy.f_inode = inode;
+			dummy.f_dentry = dentry;
 			dummy.f_mode = (new_flags & MS_RDONLY) ? 1 : 3;
 			retval = fops->open(inode, &dummy);
-			if (retval) {
-				iput(inode);
-				goto out;
-			}
+			if (retval)
+				goto dput_and_out;
 		}
 
 	} else {
 		retval = -EMFILE;
 		if (!(dev = get_unnamed_dev()))
 			goto out;
-		inode = NULL;
 	}
+
 	page = 0;
 	if ((new_flags & MS_MGC_MSK) == MS_MGC_VAL) {
 		flags = new_flags & ~MS_MGC_MSK;
 		retval = copy_mount_options(data, &page);
 		if (retval < 0) {
 			put_unnamed_dev(dev);
-			iput(inode);
-			goto out;
+			goto dput_and_out;
 		}
 	}
 	retval = do_mount(dev,dev_name,dir_name,t,flags,(void *) page);
@@ -969,7 +950,8 @@ asmlinkage int sys_mount(char * dev_name, char * dir_name, char * type,
 		fops->release(inode, NULL);
 		put_unnamed_dev(dev);
 	}
-	iput(inode);
+dput_and_out:
+	dput(dentry);
 out:
 	unlock_kernel();
 	return retval;
@@ -1036,7 +1018,7 @@ __initfunc(static void do_mount_root(void))
 	memset(&filp, 0, sizeof(filp));
 	d_inode = get_empty_inode();
 	d_inode->i_rdev = ROOT_DEV;
-	filp.f_inode = d_inode;
+	filp.f_dentry = NULL;
 	if ( root_mountflags & MS_RDONLY)
 		filp.f_mode = 1; /* read only */
 	else
@@ -1094,8 +1076,7 @@ __initfunc(static int do_change_root(kdev_t new_root_dev,const char *put_old))
 {
 	kdev_t old_root_dev;
 	struct vfsmount *vfsmnt;
-	struct inode *old_root,*old_pwd,*inode;
-	unsigned long old_fs;
+	struct dentry *old_root,*old_pwd,*dir_d = NULL;
 	int error;
 
 	old_root = current->fs->root;
@@ -1107,24 +1088,29 @@ __initfunc(static int do_change_root(kdev_t new_root_dev,const char *put_old))
 	}
 	ROOT_DEV = new_root_dev;
 	do_mount_root();
-	old_fs = get_fs();
-	set_fs(get_ds());
-        error = namei(put_old, &inode);
-	if (error) inode = NULL;
-	set_fs(old_fs);
-	if (!error && (atomic_read(&inode->i_count) != 1 || inode->i_mount))
+	dir_d = lookup_dentry(put_old, NULL, 1);
+	if (IS_ERR(dir_d)) {
+		error = PTR_ERR(dir_d);
+	} else if (!dir_d->d_inode) {
+		dput(dir_d);
+		error = -ENOENT;
+	} else {
+		error = 0;
+	}
+	if (!error && dir_d->d_covers != dir_d) {
+		dput(dir_d);
 		error = -EBUSY;
-	if (!error && !S_ISDIR(inode->i_mode))
+	}
+	if (!error && !S_ISDIR(dir_d->d_inode->i_mode)) {
+		dput(dir_d);
 		error = -ENOTDIR;
-	iput(old_root); /* current->fs->root */
-	iput(old_pwd); /* current->fs->pwd */
+	}
+	dput(old_root);
+	dput(old_pwd);
 	if (error) {
 		int umount_error;
 
-		if (inode) iput(inode);
 		printk(KERN_NOTICE "Trying to unmount old root ... ");
-		old_root->i_mount = old_root;
-			/* does this belong into do_mount_root ? */
 		umount_error = do_umount(old_root_dev,1);
 		if (umount_error) printk(KERN_ERR "error %d\n",umount_error);
 		else {
@@ -1133,16 +1119,16 @@ __initfunc(static int do_change_root(kdev_t new_root_dev,const char *put_old))
 		}
 		return umount_error ? error : 0;
 	}
-	iput(old_root); /* sb->s_covered */
 	remove_vfsmnt(old_root_dev);
 	vfsmnt = add_vfsmnt(old_root_dev,"/dev/root.old",put_old);
 	if (!vfsmnt) printk(KERN_CRIT "Trouble: add_vfsmnt failed\n");
 	else {
-		vfsmnt->mnt_sb = old_root->i_sb;
-		vfsmnt->mnt_sb->s_covered = inode;
+		vfsmnt->mnt_sb = old_root->d_inode->i_sb;
+		d_mount(dir_d,vfsmnt->mnt_sb->s_root);
 		vfsmnt->mnt_flags = vfsmnt->mnt_sb->s_flags;
 	}
-	inode->i_mount = old_root;
+	d_umount(old_root);
+	d_mount(dir_d,old_root);
 	return 0;
 }
 

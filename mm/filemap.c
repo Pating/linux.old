@@ -753,10 +753,7 @@ page_read_error:
 	filp->f_reada = 1;
 	if (page_cache)
 		free_page(page_cache);
-	if (DO_UPDATE_ATIME(inode)) {
-		inode->i_atime = CURRENT_TIME;
-		inode->i_dirt = 1;
-	}
+	UPDATE_ATIME(inode)
 	if (!read)
 		read = error;
 	return read;
@@ -775,7 +772,7 @@ static unsigned long filemap_nopage(struct vm_area_struct * area, unsigned long 
 {
 	unsigned long offset;
 	struct page * page, **hash;
-	struct inode * inode = area->vm_inode;
+	struct inode * inode = area->vm_dentry->d_inode;
 	unsigned long old_page, new_page;
 
 	new_page = 0;
@@ -919,7 +916,6 @@ static inline int do_write_page(struct inode * inode, struct file * file,
 	retval = -EIO;
 	if (size == file->f_op->write(inode, file, (const char *) page, size))
 		retval = 0;
-	/* inode->i_status |= ST_MODIFIED is willingly *not* done here */
 	set_fs(old_fs);
 	return retval;
 }
@@ -930,6 +926,7 @@ static int filemap_write_page(struct vm_area_struct * vma,
 {
 	int result;
 	struct file file;
+	struct dentry * dentry;
 	struct inode * inode;
 	struct buffer_head * bh;
 
@@ -944,14 +941,15 @@ static int filemap_write_page(struct vm_area_struct * vma,
 		return 0;
 	}
 
-	inode = vma->vm_inode;
+	dentry = vma->vm_dentry;
+	inode = dentry->d_inode;
 	file.f_op = inode->i_op->default_file_ops;
 	if (!file.f_op->write)
 		return -EIO;
 	file.f_mode = 3;
 	file.f_flags = 0;
 	file.f_count = 1;
-	file.f_inode = inode;
+	file.f_dentry = dentry;
 	file.f_pos = offset;
 	file.f_reada = 0;
 
@@ -1189,12 +1187,8 @@ int generic_file_mmap(struct inode * inode, struct file * file, struct vm_area_s
 		return -EACCES;
 	if (!inode->i_op || !inode->i_op->readpage)
 		return -ENOEXEC;
-	if (DO_UPDATE_ATIME(inode)) {
-		inode->i_atime = CURRENT_TIME;
-		inode->i_dirt = 1;
-	}
-	vma->vm_inode = inode;
-	atomic_inc(&inode->i_count);
+	UPDATE_ATIME(inode);
+	vma->vm_dentry = dget(file->f_dentry);
 	vma->vm_ops = ops;
 	return 0;
 }
@@ -1207,7 +1201,7 @@ int generic_file_mmap(struct inode * inode, struct file * file, struct vm_area_s
 static int msync_interval(struct vm_area_struct * vma,
 	unsigned long start, unsigned long end, int flags)
 {
-	if (!vma->vm_inode)
+	if (!vma->vm_dentry)
 		return 0;
 	if (vma->vm_ops->sync) {
 		int error;
@@ -1215,7 +1209,7 @@ static int msync_interval(struct vm_area_struct * vma,
 		if (error)
 			return error;
 		if (flags & MS_SYNC)
-			return file_fsync(vma->vm_inode, NULL);
+			return file_fsync(vma->vm_dentry->d_inode, NULL);
 		return 0;
 	}
 	return 0;

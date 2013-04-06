@@ -14,7 +14,6 @@
 #include <linux/mm.h>
 #include <linux/proc_fs.h>
 #include <linux/stat.h>
-#include <linux/dalloc.h>
 
 static int proc_readlink(struct inode *, char *, int);
 static struct dentry * proc_follow_link(struct inode *, struct dentry *);
@@ -105,7 +104,7 @@ static struct dentry * proc_follow_link(struct inode *inode, struct dentry *base
 			vma = p->mm->mmap;
 			while (vma) {
 				if (vma->vm_flags & VM_EXECUTABLE)
-					return dget(vma->vm_inode->i_dentry);
+					return dget(vma->vm_dentry);
 
 				vma = vma->vm_next;
 			}
@@ -121,9 +120,9 @@ static struct dentry * proc_follow_link(struct inode *inode, struct dentry *base
 					break;
 				if (!p->files->fd[ino])
 					break;
-				if (!p->files->fd[ino]->f_inode)
+				if (!p->files->fd[ino]->f_dentry)
 					break;
-				result = dget(p->files->fd[ino]->f_inode->i_dentry);
+				result = dget(p->files->fd[ino]->f_dentry);
 				break;
 			}
 	}
