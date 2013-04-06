@@ -1,0 +1,7 @@
+--- linux/drivers/scsi/psi_chip.h	Wed Nov 12 13:34:26 1997
++++ drivers/scsi/psi_chip.h	Wed Nov 12 13:36:53 1997
+@@ -192,3 +192,4 @@
+ 	}	SETUP, *PSETUP;
+ 
+ #endif
++
