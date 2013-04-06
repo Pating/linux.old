@@ -54,6 +54,9 @@ extern int blkdev_release(struct inode * inode);
 #if !defined(CONFIG_NFSD) && defined(CONFIG_NFSD_MODULE)
 extern int (*do_nfsservctl)(int, void *, void *);
 #endif
+#if !defined(CONFIG_LOCKD) && defined(CONFIG_LOCKD_MODULE)
+extern int (*do_lockdctl)(int, void *, void *);
+#endif
 
 extern void *sys_call_table;
 
@@ -121,6 +124,7 @@ EXPORT_SYMBOL(__fput);
 EXPORT_SYMBOL(igrab);
 EXPORT_SYMBOL(iunique);
 EXPORT_SYMBOL(iget);
+EXPORT_SYMBOL(iget_in_use);
 EXPORT_SYMBOL(iput);
 EXPORT_SYMBOL(__namei);
 EXPORT_SYMBOL(lookup_dentry);
@@ -136,6 +140,7 @@ EXPORT_SYMBOL(d_instantiate);
 EXPORT_SYMBOL(d_alloc);
 EXPORT_SYMBOL(d_lookup);
 EXPORT_SYMBOL(d_path);
+EXPORT_SYMBOL(have_submounts);
 EXPORT_SYMBOL(__mark_inode_dirty);
 EXPORT_SYMBOL(get_empty_filp);
 EXPORT_SYMBOL(init_private_file);
@@ -144,7 +149,7 @@ EXPORT_SYMBOL(filp_close);
 EXPORT_SYMBOL(fput);
 EXPORT_SYMBOL(put_filp);
 EXPORT_SYMBOL(check_disk_change);
-EXPORT_SYMBOL(invalidate_buffers);
+EXPORT_SYMBOL(__invalidate_buffers);
 EXPORT_SYMBOL(invalidate_inodes);
 EXPORT_SYMBOL(invalidate_inode_pages);
 EXPORT_SYMBOL(truncate_inode_pages);
@@ -189,9 +194,13 @@ EXPORT_SYMBOL(vfs_unlink);
 EXPORT_SYMBOL(vfs_rename);
 EXPORT_SYMBOL(__pollwait);
 EXPORT_SYMBOL(ROOT_DEV);
+EXPORT_SYMBOL(inode_generation_count);
 
 #if !defined(CONFIG_NFSD) && defined(CONFIG_NFSD_MODULE)
 EXPORT_SYMBOL(do_nfsservctl);
+#endif
+#if !defined(CONFIG_LOCKD) && defined(CONFIG_LOCKD_MODULE)
+EXPORT_SYMBOL(do_lockdctl);
 #endif
 
 /* device registration */
@@ -270,8 +279,6 @@ EXPORT_SYMBOL(proc_dointvec_minmax);
 /* interrupt handling */
 EXPORT_SYMBOL(request_irq);
 EXPORT_SYMBOL(free_irq);
-EXPORT_SYMBOL(probe_irq_on);
-EXPORT_SYMBOL(probe_irq_off);
 EXPORT_SYMBOL(bh_active);
 EXPORT_SYMBOL(bh_mask);
 EXPORT_SYMBOL(bh_mask_count);
@@ -291,14 +298,23 @@ EXPORT_SYMBOL(tqueue_lock);
 EXPORT_SYMBOL(waitqueue_lock);
 #endif
 
+/*
+ *	S390 has no auto-irq
+ */
+ 
+#ifndef CONFIG_ARCH_S390
+EXPORT_SYMBOL(probe_irq_on);
+EXPORT_SYMBOL(probe_irq_off);
 /* autoirq from  drivers/net/auto_irq.c */
 EXPORT_SYMBOL(autoirq_setup);
 EXPORT_SYMBOL(autoirq_report);
+#endif
 
 /* dma handling */
 EXPORT_SYMBOL(request_dma);
 EXPORT_SYMBOL(free_dma);
 EXPORT_SYMBOL(dma_spin_lock);
+
 #ifdef HAVE_DISABLE_HLT
 EXPORT_SYMBOL(disable_hlt);
 EXPORT_SYMBOL(enable_hlt);
@@ -377,7 +393,7 @@ EXPORT_SYMBOL(insert_inode_hash);
 EXPORT_SYMBOL(remove_inode_hash);
 EXPORT_SYMBOL(make_bad_inode);
 EXPORT_SYMBOL(is_bad_inode);
-EXPORT_SYMBOL(event);
+EXPORT_SYMBOL(global_event);
 EXPORT_SYMBOL(__down);
 EXPORT_SYMBOL(__down_interruptible);
 EXPORT_SYMBOL(__down_trylock);

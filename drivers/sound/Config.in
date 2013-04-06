@@ -28,6 +28,9 @@ if [ "$CONFIG_SOUND_ES1371" = "y" ]; then
       hex 'Gameport I/O 200,208,210,218' CONFIG_SOUND_ES1371_GAMEPORT 200
    fi
 fi
+
+dep_tristate 'ESS Maestro' CONFIG_SOUND_MAESTRO $CONFIG_SOUND
+
 if [ "$CONFIG_EXPERIMENTAL" = "y" ]; then
    dep_tristate 'ESS Solo1 (Experimental)' CONFIG_SOUND_ESSSOLO1 $CONFIG_SOUND
 fi
@@ -114,8 +117,6 @@ if [ "$CONFIG_SOUND_OSS" = "y" -o "$CONFIG_SOUND_OSS" = "m" ]; then
       comment 'Enter -1 to the following question if you have something else such as SB16/32.'
       int 'SB MPU401 IRQ (Jazz16, SM Wave and ES1688) Check from manual of the card' CONFIG_SB_MPU_IRQ -1
   fi
-  
-  dep_tristate 'Generic OPL2/OPL3 FM synthesizer support' CONFIG_SOUND_ADLIB $CONFIG_SOUND_OSS
   
   dep_tristate 'Gravis Ultrasound support' CONFIG_SOUND_GUS $CONFIG_SOUND_OSS
   if [ "$CONFIG_SOUND_GUS" = "y" -o "$CONFIG_SOUND_GUS" = "m" ]; then

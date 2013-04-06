@@ -117,8 +117,8 @@ sr_set_blocklength(int minor, int blocklength)
 		density = (blocklength > 2048) ? 0x81 : 0x83;
 #endif
 
-	buffer = (unsigned char *) scsi_malloc(512);
-	if (!buffer) return -ENOMEM;
+	if ((buffer = (unsigned char *) scsi_malloc(512)) == NULL)
+		return -ENOMEM;
 
 #ifdef DEBUG
 	printk("sr%d: MODE SELECT 0x%x/%d\n",minor,density,blocklength);
@@ -160,8 +160,8 @@ int sr_cd_check(struct cdrom_device_info *cdi)
 	if (scsi_CDs[minor].cdi.mask & CDC_MULTI_SESSION)
 		return 0;
 	
-	buffer = (unsigned char *) scsi_malloc(512);
-	if(!buffer) return -ENOMEM;
+	if ((buffer = (unsigned char *) scsi_malloc(512)) == NULL)
+		return -ENOMEM;
 	
 	sector   = 0;         /* the multisession sector offset goes here  */
 	no_multi = 0;         /* flag: the drive can't handle multisession */

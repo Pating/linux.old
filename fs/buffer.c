@@ -24,6 +24,9 @@
  * - RMK
  */
 
+/* invalidate_buffers/set_blocksize/sync_dev race conditions and
+   fs corruption fixes, 1999, Andrea Arcangeli <andrea@suse.de> */
+
 #include <linux/malloc.h>
 #include <linux/locks.h>
 #include <linux/errno.h>
@@ -58,11 +61,12 @@ static char buffersize_index[65] =
 /*
  * Hash table mask..
  */
-static unsigned long bh_hash_mask = 0;
+static unsigned int bh_hash_mask = 0;
+static unsigned int bh_hash_shift = 0;
+static struct buffer_head ** hash_table = NULL;
 
 static int grow_buffers(int size);
 
-static struct buffer_head ** hash_table;
 static struct buffer_head * lru_list[NR_LIST] = {NULL, };
 static struct buffer_head * free_list[NR_SIZES] = {NULL, };
 
@@ -79,7 +83,7 @@ static int nr_unused_buffer_heads = 0;
 static int nr_hashed_buffers = 0;
 
 /* This is used by some architectures to estimate available memory. */
-int buffermem = 0;
+long buffermem = 0;
 
 /* Here is the parameter block for the bdflush process. If you add or
  * remove any of the parameters, make sure to update kernel/sysctl.c.
@@ -262,11 +266,14 @@ repeat:
 
 void sync_dev(kdev_t dev)
 {
-	sync_buffers(dev, 0);
 	sync_supers(dev);
 	sync_inodes(dev);
-	sync_buffers(dev, 0);
 	DQUOT_SYNC(dev);
+	/* sync all the dirty buffers out to disk only _after_ all the
+	   high level layers finished generated buffer dirty data
+	   (or we'll return with some buffer still dirty on the blockdevice
+	   so breaking the semantics of this call) */
+	sync_buffers(dev, 0);
 	/*
 	 * FIXME(eric) we need to sync the physical devices here.
 	 * This is because some (scsi) controllers have huge amounts of
@@ -395,33 +402,13 @@ out:
 	return err;
 }
 
-void invalidate_buffers(kdev_t dev)
-{
-	int i;
-	int nlist;
-	struct buffer_head * bh;
-
-	for(nlist = 0; nlist < NR_LIST; nlist++) {
-		bh = lru_list[nlist];
-		for (i = nr_buffers_type[nlist]*2 ; --i > 0 ; bh = bh->b_next_free) {
-			if (bh->b_dev != dev)
-				continue;
-			wait_on_buffer(bh);
-			if (bh->b_dev != dev)
-				continue;
-			if (bh->b_count)
-				continue;
-			bh->b_flushtime = 0;
-			clear_bit(BH_Protected, &bh->b_state);
-			clear_bit(BH_Uptodate, &bh->b_state);
-			clear_bit(BH_Dirty, &bh->b_state);
-			clear_bit(BH_Req, &bh->b_state);
-		}
-	}
-}
-
-#define _hashfn(dev,block) (((unsigned)(HASHDEV(dev)^block)) & bh_hash_mask)
-#define hash(dev,block) hash_table[_hashfn(dev,block)]
+/* After several hours of tedious analysis, the following hash
+ * function won.  Do not mess with it... -DaveM
+ */
+#define _hashfn(dev,block)	\
+	((((dev)<<(bh_hash_shift - 6)) ^ ((dev)<<(bh_hash_shift - 9))) ^ \
+	 (((block)<<(bh_hash_shift - 6)) ^ ((block) >> 13) ^ ((block) << (bh_hash_shift - 12))))
+#define hash(dev,block) hash_table[_hashfn(dev,block) & bh_hash_mask]
 
 static inline void remove_from_hash_queue(struct buffer_head * bh)
 {
@@ -434,8 +421,8 @@ static inline void remove_from_hash_queue(struct buffer_head * bh)
 		}
 		*pprev = next;
 		bh->b_pprev = NULL;
+		nr_hashed_buffers--;
 	}
-	nr_hashed_buffers--;
 }
 
 static inline void remove_from_lru_list(struct buffer_head * bh)
@@ -486,11 +473,14 @@ static void remove_from_queues(struct buffer_head * bh)
 	remove_from_lru_list(bh);
 }
 
-static inline void put_last_free(struct buffer_head * bh)
+static void put_last_free(struct buffer_head * bh)
 {
 	if (bh) {
 		struct buffer_head **bhp = &free_list[BUFSIZE_INDEX(bh->b_size)];
 
+		bh->b_count = 0;
+		bh->b_state = 0;
+		remove_from_queues(bh);
 		bh->b_dev = B_FREE;  /* So it is obvious we are on the free list. */
 
 		/* Add to back of free list. */
@@ -510,7 +500,7 @@ static void insert_into_queues(struct buffer_head * bh)
 {
 	/* put at end of free list */
 	if(bh->b_dev == B_FREE) {
-		put_last_free(bh);
+		panic("B_FREE inserted into queues");
 	} else {
 		struct buffer_head **bhp = &lru_list[bh->b_list];
 
@@ -542,8 +532,8 @@ static void insert_into_queues(struct buffer_head * bh)
 			}
 			*bhp = bh;
 			bh->b_pprev = bhp;
+			nr_hashed_buffers++;
 		}
-		nr_hashed_buffers++;
 	}
 }
 
@@ -600,10 +590,61 @@ unsigned int get_hardblocksize(kdev_t dev)
 	return 0;
 }
 
+/* If invalidate_buffers() will trash dirty buffers, it means some kind
+   of fs corruption is going on. Trashing dirty data always imply losing
+   information that was supposed to be just stored on the physical layer
+   by the user.
+
+   Thus invalidate_buffers in general usage is not allwowed to trash dirty
+   buffers. For example ioctl(FLSBLKBUF) expects dirty data to be preserved.
+
+   NOTE: In the case where the user removed a removable-media-disk even if
+   there's still dirty data not synced on disk (due a bug in the device driver
+   or due an error of the user), by not destroying the dirty buffers we could
+   generate corruption also on the next media inserted, thus a parameter is
+   necessary to handle this case in the most safe way possible (trying
+   to not corrupt also the new disk inserted with the data belonging to
+   the old now corrupted disk). Also for the ramdisk the natural thing
+   to do in order to release the ramdisk memory is to destroy dirty buffers.
+
+   These are two special cases. Normal usage imply the device driver
+   to issue a sync on the device (without waiting I/O completation) and
+   then an invalidate_buffers call that doesn't trashes dirty buffers. */
+void __invalidate_buffers(kdev_t dev, int destroy_dirty_buffers)
+{
+	int i, nlist, slept;
+	struct buffer_head * bh, * bhnext;
+
+ again:
+	slept = 0;
+	for(nlist = 0; nlist < NR_LIST; nlist++) {
+		bh = lru_list[nlist];
+		if (!bh)
+			continue;
+		for (i = nr_buffers_type[nlist] ; i > 0 ;
+		     bh = bhnext, i--)
+		{
+			bhnext = bh->b_next_free;
+			if (bh->b_dev != dev)
+				continue;
+			if (buffer_locked(bh))
+			{
+				slept = 1;
+				__wait_on_buffer(bh);
+			}
+			if (!bh->b_count &&
+			    (destroy_dirty_buffers || !buffer_dirty(bh)))
+				put_last_free(bh);
+			if (slept)
+				goto again;
+		}
+	}
+}
+
 void set_blocksize(kdev_t dev, int size)
 {
 	extern int *blksize_size[];
-	int i, nlist;
+	int i, nlist, slept;
 	struct buffer_head * bh, *bhnext;
 
 	if (!blksize_size[MAJOR(dev)])
@@ -625,27 +666,35 @@ void set_blocksize(kdev_t dev, int size)
 	/* We need to be quite careful how we do this - we are moving entries
 	 * around on the free list, and we can get in a loop if we are not careful.
 	 */
-	for(nlist = 0; nlist < NR_LIST; nlist++) {
+ again:
+	slept = 0;
+ 	for(nlist = 0; nlist < NR_LIST; nlist++) {
 		bh = lru_list[nlist];
-		for (i = nr_buffers_type[nlist]*2 ; --i > 0 ; bh = bhnext) {
-			if(!bh)
-				break;
-
-			bhnext = bh->b_next_free; 
-			if (bh->b_dev != dev)
-				 continue;
-			if (bh->b_size == size)
-				 continue;
-			bhnext->b_count++;
-			wait_on_buffer(bh);
-			bhnext->b_count--;
-			if (bh->b_dev == dev && bh->b_size != size) {
-				clear_bit(BH_Dirty, &bh->b_state);
-				clear_bit(BH_Uptodate, &bh->b_state);
-				clear_bit(BH_Req, &bh->b_state);
-				bh->b_flushtime = 0;
+		if (!bh)
+			continue;
+		for (i = nr_buffers_type[nlist] ; i > 0 ;
+		     bh = bhnext, i--)
+		{
+			bhnext = bh->b_next_free;
+			if (bh->b_dev != dev || bh->b_size == size)
+				continue;
+			if (buffer_dirty(bh))
+				printk(KERN_ERR "set_blocksize: dev %s buffer_dirty %lu size %lu\n", kdevname(dev), bh->b_blocknr, bh->b_size);
+			if (buffer_locked(bh))
+			{
+				slept = 1;
+				wait_on_buffer(bh);
 			}
-			remove_from_hash_queue(bh);
+			if (!bh->b_count)
+				put_last_free(bh);
+			else
+				printk(KERN_ERR
+				       "set_blocksize: "
+				       "b_count %d, dev %s, block %lu!\n",
+				       bh->b_count, bdevname(bh->b_dev),
+				       bh->b_blocknr);
+			if (slept)
+				goto again;
 		}
 	}
 }
@@ -825,9 +874,6 @@ void __bforget(struct buffer_head * buf)
 		__brelse(buf);
 		return;
 	}
-	buf->b_count = 0;
-	buf->b_state = 0;
-	remove_from_queues(buf);
 	put_last_free(buf);
 }
 
@@ -1459,7 +1505,7 @@ void show_buffers(void)
 	int nlist;
 	static char *buf_types[NR_LIST] = {"CLEAN","LOCKED","DIRTY"};
 
-	printk("Buffer memory:   %6dkB\n",buffermem>>10);
+	printk("Buffer memory:   %8ldkB\n",buffermem>>10);
 	printk("Buffer heads:    %6d\n",nr_buffer_heads);
 	printk("Buffer blocks:   %6d\n",nr_buffers);
 	printk("Buffer hashed:   %6d\n",nr_hashed_buffers);
@@ -1506,22 +1552,32 @@ void __init buffer_init(unsigned long memory_size)
 	   fsync times (ext2) manageable, is the following */
 
 	memory_size >>= 20;
-	for (order = 5; (1UL << order) < memory_size; order++);
+	for (order = 0; (1UL << order) < memory_size; order++);
 
 	/* try to allocate something until we get it or we're asking
            for something that is really too small */
 
 	do {
+		unsigned long tmp;
+
 		nr_hash = (1UL << order) * PAGE_SIZE /
 		    sizeof(struct buffer_head *);
+		bh_hash_mask = (nr_hash - 1);
+
+		tmp = nr_hash;
+		bh_hash_shift = 0;
+		while((tmp >>= 1UL) != 0UL)
+			bh_hash_shift++;
+
 		hash_table = (struct buffer_head **)
 		    __get_free_pages(GFP_ATOMIC, order);
-	} while (hash_table == NULL && --order > 4);
+	} while (hash_table == NULL && --order >= 0);
+	printk("Buffer cache hash table entries: %d (order %d, %ldk)\n",
+	       nr_hash, order, (1UL<<order) * PAGE_SIZE / 1024);
 	
 	if (!hash_table)
 		panic("Failed to allocate buffer hash table\n");
 	memset(hash_table, 0, nr_hash * sizeof(struct buffer_head *));
-	bh_hash_mask = nr_hash-1;
 
 	bh_cachep = kmem_cache_create("buffer_head",
 				      sizeof(struct buffer_head),
@@ -1563,7 +1619,6 @@ void wakeup_bdflush(int wait)
 		return;
 	wake_up(&bdflush_wait);
 	if (wait) {
-		run_task_queue(&tq_disk);
 		sleep_on(&bdflush_done);
 	}
 }

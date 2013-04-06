@@ -661,7 +661,7 @@ xlate_to_uni(const char *name, int len, char *outname, int *outlen,
 		op = outname;
 		if (nls) {
 			for (i = 0, ip = name, op = outname, *outlen = 0;
-			     i < len && *outlen <= 260; i++, *outlen += 1)
+			     i < len && *outlen <= 260; *outlen += 1)
 			{
 				if (escape && (*ip == ':')) {
 					if (i > len - 4) return -EINVAL;
@@ -673,10 +673,12 @@ xlate_to_uni(const char *name, int len, char *outname, int *outlen,
 					*op++ = (c1 << 4) + (c2 >> 2);
 					*op++ = ((c2 & 0x3) << 6) + c3;
 					ip += 4;
+					i += 4;
 				} else {
 					*op++ = nls->charset2uni[*ip].uni1;
 					*op++ = nls->charset2uni[*ip].uni2;
 					ip++;
+					i++;
 				}
 			}
 		} else {
@@ -975,8 +977,8 @@ int vfat_create(struct inode *dir,struct dentry* dentry,int mode)
 		return res;
 	inode->i_mtime = inode->i_atime = inode->i_ctime = CURRENT_TIME;
 	mark_inode_dirty(inode);
-	inode->i_version = ++event;
-	dir->i_version = event;
+	inode->i_version = ++global_event;
+	dir->i_version = global_event;
 	MSDOS_I(dir)->i_last_pos = 0;
 	dentry->d_time = dentry->d_parent->d_inode->i_version;
 	d_instantiate(dentry,inode);
@@ -1022,7 +1024,7 @@ static void vfat_remove_entry(struct inode *dir,struct vfat_slot_info *sinfo,
 	/* remove the shortname */
 	dir->i_mtime = CURRENT_TIME;
 	dir->i_atime = CURRENT_TIME;
-	dir->i_version = ++event;
+	dir->i_version = ++global_event;
 	MSDOS_I(dir)->i_last_pos = 0;
 	mark_inode_dirty(dir);
 	de->name[0] = DELETED_FLAG;
@@ -1108,8 +1110,8 @@ int vfat_mkdir(struct inode *dir,struct dentry* dentry,int mode)
 		goto out;
 	inode->i_mtime = inode->i_atime = inode->i_ctime = CURRENT_TIME;
 	mark_inode_dirty(inode);
-	inode->i_version = ++event;
-	dir->i_version = event;
+	inode->i_version = ++global_event;
+	dir->i_version = global_event;
 	MSDOS_I(dir)->i_last_pos = 0;
 	dir->i_nlink++;
 	inode->i_nlink = 2; /* no need to mark them dirty */
@@ -1181,7 +1183,7 @@ int vfat_rename(struct inode *old_dir,struct dentry *old_dentry,
 		if (res < 0) goto rename_done;
 	}
 
-	new_dir->i_version = ++event;
+	new_dir->i_version = ++global_event;
 	MSDOS_I(new_dir)->i_last_pos = 0;
 
 	/* releases old_bh */
@@ -1191,7 +1193,7 @@ int vfat_rename(struct inode *old_dir,struct dentry *old_dentry,
 	fat_attach(old_inode, sinfo.ino);
 	mark_inode_dirty(old_inode);
 
-	old_dir->i_version = ++event;
+	old_dir->i_version = ++global_event;
 	old_dir->i_ctime = old_dir->i_mtime = CURRENT_TIME;
 	mark_inode_dirty(old_dir);
 	if (new_inode) {

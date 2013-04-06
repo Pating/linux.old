@@ -346,6 +346,7 @@
 #include <asm/irq.h>
 #include <asm/uaccess.h>
 #include <asm/io.h>
+#include <asm/byteorder.h>
 #include <asm/unaligned.h>
 #include <asm/bitops.h>
 
@@ -522,9 +523,9 @@ typedef struct idetape_packet_command_s {
 	int b_count;
 	byte *buffer;				/* Data buffer */
 	byte *current_position;			/* Pointer into the above buffer */
-	void (*callback) (ide_drive_t *);	/* Called when this packet command is completed */
+	ide_startstop_t (*callback) (ide_drive_t *);	/* Called when this packet command is completed */
 	byte pc_buffer[IDETAPE_PC_BUFFER_SIZE];	/* Temporary buffer */
-	unsigned int flags;			/* Status/Action bit flags */
+	unsigned long flags;			/* Status/Action bit flags */
 } idetape_pc_t;
 
 /*
@@ -541,19 +542,55 @@ typedef struct idetape_packet_command_s {
  *	Capabilities and Mechanical Status Page
  */
 typedef struct {
-	unsigned	page_code	:6;	/* Page code - Should be 0x2a */
-	unsigned	reserved1_67	:2;
+#if defined(__BIG_ENDIAN_BITFIELD)
+	u8	reserved1_67	:2;
+	u8	page_code	:6;	/* Page code - Should be 0x2a */
+#elif defined(__LITTLE_ENDIAN_BITFIELD)
+	u8	page_code	:6;	/* Page code - Should be 0x2a */
+	u8	reserved1_67	:2;
+#else
+#error "Please fix <asm/byteorder.h>"
+#endif
 	u8		page_length;		/* Page Length - Should be 0x12 */
 	u8		reserved2, reserved3;
+
+#if defined(__BIG_ENDIAN_BITFIELD)
+	unsigned	reserved4_67	:2;
+	unsigned	sprev		:1;	/* Supports SPACE in the reverse direction */
+	unsigned	reserved4_1234	:4;
+	unsigned	ro		:1;	/* Read Only Mode */
+
+	unsigned	reserved5_67	:2;
+	unsigned	qfa		:1;	/* Supports the QFA two partition formats */
+	unsigned	reserved5_4	:1;
+	unsigned	efmt		:1;	/* Supports ERASE command initiated formatting */
+	unsigned	reserved5_012	:3;
+
+	unsigned	cmprs		:1;	/* Supports data compression */
+	unsigned	ecc		:1;	/* Supports error correction */
+	unsigned	reserved6_45	:2;	/* Reserved */	
+	unsigned	eject		:1;	/* The device can eject the volume */
+	unsigned	prevent		:1;	/* The device defaults in the prevent state after power up */	
+	unsigned	locked		:1;	/* The volume is locked */
+	unsigned	lock		:1;	/* Supports locking the volume */
+
+	unsigned	slowb		:1;	/* The device restricts the byte count for PIO */
+	unsigned	reserved7_3_6	:4;
+	unsigned	blk1024		:1;	/* Supports 1024 bytes block size */
+	unsigned	blk512		:1;	/* Supports 512 bytes block size */
+	unsigned	reserved7_0	:1;
+#elif defined(__LITTLE_ENDIAN_BITFIELD)
 	unsigned	ro		:1;	/* Read Only Mode */
 	unsigned	reserved4_1234	:4;
 	unsigned	sprev		:1;	/* Supports SPACE in the reverse direction */
 	unsigned	reserved4_67	:2;
+
 	unsigned	reserved5_012	:3;
 	unsigned	efmt		:1;	/* Supports ERASE command initiated formatting */
 	unsigned	reserved5_4	:1;
 	unsigned	qfa		:1;	/* Supports the QFA two partition formats */
 	unsigned	reserved5_67	:2;
+
 	unsigned	lock		:1;	/* Supports locking the volume */
 	unsigned	locked		:1;	/* The volume is locked */
 	unsigned	prevent		:1;	/* The device defaults in the prevent state after power up */	
@@ -561,11 +598,13 @@ typedef struct {
 	unsigned	reserved6_45	:2;	/* Reserved */	
 	unsigned	ecc		:1;	/* Supports error correction */
 	unsigned	cmprs		:1;	/* Supports data compression */
+
 	unsigned	reserved7_0	:1;
 	unsigned	blk512		:1;	/* Supports 512 bytes block size */
 	unsigned	blk1024		:1;	/* Supports 1024 bytes block size */
 	unsigned	reserved7_3_6	:4;
 	unsigned	slowb		:1;	/* The device restricts the byte count for PIO */
+#endif
 						/* transfers for slow buffer memory ??? */
 	u16		max_speed;		/* Maximum speed supported in KBps */
 	u8		reserved10, reserved11;
@@ -695,7 +734,7 @@ typedef struct {
 	int pages_per_stage;
 	int excess_bh_size;			/* Wasted space in each stage */
 
-	unsigned int flags;			/* Status/Action flags */
+	unsigned long flags;			/* Status/Action flags */
 	spinlock_t spinlock;			/* protects the ide-tape queue */
 } idetape_tape_t;
 
@@ -787,6 +826,16 @@ typedef struct {
 typedef union {
 	unsigned all			:8;
 	struct {
+#if defined(__BIG_ENDIAN_BITFIELD)
+		unsigned bsy		:1;	/* The device has access to the command block */
+		unsigned drdy		:1;	/* Ignored for ATAPI commands (ready to accept ATA command) */
+		unsigned reserved5	:1;	/* Reserved */
+		unsigned dsc		:1;	/* Buffer availability / Media access command finished */
+		unsigned drq		:1;	/* Data is request by the device */
+		unsigned corr		:1;	/* Correctable error occurred */
+		unsigned idx		:1;	/* Reserved */
+		unsigned check		:1;	/* Error occurred */
+#elif defined(__LITTLE_ENDIAN_BITFIELD)
 		unsigned check		:1;	/* Error occurred */
 		unsigned idx		:1;	/* Reserved */
 		unsigned corr		:1;	/* Correctable error occurred */
@@ -795,6 +844,7 @@ typedef union {
 		unsigned reserved5	:1;	/* Reserved */
 		unsigned drdy		:1;	/* Ignored for ATAPI commands (ready to accept ATA command) */
 		unsigned bsy		:1;	/* The device has access to the command block */
+#endif
 	} b;
 } idetape_status_reg_t;
 
@@ -804,11 +854,19 @@ typedef union {
 typedef union {
 	unsigned all			:8;
 	struct {
+#if defined(__BIG_ENDIAN_BITFIELD)
+		unsigned sense_key	:4;	/* Sense key of the last failed packet command */
+		unsigned mcr		:1;	/* Media Change Requested - As defined by ATA */
+		unsigned abrt		:1;	/* Aborted command - As defined by ATA */
+		unsigned eom		:1;	/* End Of Media Detected */
+		unsigned ili		:1;	/* Illegal Length Indication */
+#elif defined(__LITTLE_ENDIAN_BITFIELD)
 		unsigned ili		:1;	/* Illegal Length Indication */
 		unsigned eom		:1;	/* End Of Media Detected */
 		unsigned abrt		:1;	/* Aborted command - As defined by ATA */
 		unsigned mcr		:1;	/* Media Change Requested - As defined by ATA */
 		unsigned sense_key	:4;	/* Sense key of the last failed packet command */
+#endif
 	} b;
 } idetape_error_reg_t;
 
@@ -818,10 +876,17 @@ typedef union {
 typedef union {
 	unsigned all			:8;
 	struct {
+#if defined(__BIG_ENDIAN_BITFIELD)
+		unsigned reserved7	:1;	/* Reserved */
+		unsigned reserved654	:3;	/* Reserved (Tag Type) */
+		unsigned reserved321	:3;	/* Reserved */
+		unsigned dma		:1;	/* Using DMA of PIO */
+#elif defined(__LITTLE_ENDIAN_BITFIELD)
 		unsigned dma		:1;	/* Using DMA of PIO */
 		unsigned reserved321	:3;	/* Reserved */
 		unsigned reserved654	:3;	/* Reserved (Tag Type) */
 		unsigned reserved7	:1;	/* Reserved */
+#endif
 	} b;
 } idetape_feature_reg_t;
 
@@ -831,8 +896,13 @@ typedef union {
 typedef union {
 	unsigned all			:16;
 	struct {
+#if defined(__BIG_ENDIAN_BITFIELD)
+		unsigned high		:8;	/* MSB */
+		unsigned low		:8;	/* LSB */
+#elif defined(__LITTLE_ENDIAN_BITFIELD)
 		unsigned low		:8;	/* LSB */
 		unsigned high		:8;	/* MSB */
+#endif
 	} b;
 } idetape_bcount_reg_t;
 
@@ -842,9 +912,15 @@ typedef union {
 typedef union {
 	unsigned all			:8;
 	struct {
+#if defined(__BIG_ENDIAN_BITFIELD)
+		unsigned reserved	:6;	/* Reserved */
+		unsigned io		:1;	/* The device requests us to read (1) or write (0) */
+		unsigned cod		:1;	/* Information transferred is command (1) or data (0) */
+#elif defined(__LITTLE_ENDIAN_BITFIELD)
 		unsigned cod		:1;	/* Information transferred is command (1) or data (0) */
 		unsigned io		:1;	/* The device requests us to read (1) or write (0) */
 		unsigned reserved	:6;	/* Reserved */
+#endif
 	} b;
 } idetape_ireason_reg_t;
 
@@ -854,11 +930,19 @@ typedef union {
 typedef union {	
 	unsigned all			:8;
 	struct {
+#if defined(__BIG_ENDIAN_BITFIELD)
+		unsigned one7		:1;	/* Should be set to 1 */
+		unsigned reserved6	:1;	/* Reserved */
+		unsigned one5		:1;	/* Should be set to 1 */
+		unsigned drv		:1;	/* The responding drive will be drive 0 (0) or drive 1 (1) */
+		unsigned sam_lun	:4;	/* Should be zero with ATAPI (not used) */
+#elif defined(__LITTLE_ENDIAN_BITFIELD)
 		unsigned sam_lun	:4;	/* Should be zero with ATAPI (not used) */
 		unsigned drv		:1;	/* The responding drive will be drive 0 (0) or drive 1 (1) */
 		unsigned one5		:1;	/* Should be set to 1 */
 		unsigned reserved6	:1;	/* Reserved */
 		unsigned one7		:1;	/* Should be set to 1 */
+#endif
 	} b;
 } idetape_drivesel_reg_t;
 
@@ -868,11 +952,19 @@ typedef union {
 typedef union {			
 	unsigned all			:8;
 	struct {
+#if defined(__BIG_ENDIAN_BITFIELD)
+		unsigned reserved4567	:4;	/* Reserved */
+		unsigned one3		:1;	/* Should be set to 1 */
+		unsigned srst		:1;	/* ATA software reset. ATAPI devices should use the new ATAPI srst. */
+		unsigned nien		:1;	/* Device interrupt is disabled (1) or enabled (0) */
+		unsigned zero0		:1;	/* Should be set to zero */
+#elif defined(__LITTLE_ENDIAN_BITFIELD)
 		unsigned zero0		:1;	/* Should be set to zero */
 		unsigned nien		:1;	/* Device interrupt is disabled (1) or enabled (0) */
 		unsigned srst		:1;	/* ATA software reset. ATAPI devices should use the new ATAPI srst. */
 		unsigned one3		:1;	/* Should be set to 1 */
 		unsigned reserved4567	:4;	/* Reserved */
+#endif
 	} b;
 } idetape_control_reg_t;
 
@@ -890,6 +982,15 @@ typedef struct {
  *	the ATAPI IDENTIFY DEVICE command.
  */
 struct idetape_id_gcw {	
+#if defined(__BIG_ENDIAN_BITFIELD)
+	unsigned protocol		:2;	/* Protocol type */
+	unsigned reserved13		:1;	/* Reserved */
+	unsigned device_type		:5;	/* Device type */
+	unsigned removable		:1;	/* Removable media */
+	unsigned drq_type		:2;	/* Command packet DRQ type */
+	unsigned reserved234		:3;	/* Reserved */
+	unsigned packet_size		:2;	/* Packet Size */
+#elif defined(__LITTLE_ENDIAN_BITFIELD)
 	unsigned packet_size		:2;	/* Packet Size */
 	unsigned reserved234		:3;	/* Reserved */
 	unsigned drq_type		:2;	/* Command packet DRQ type */
@@ -897,23 +998,50 @@ struct idetape_id_gcw {
 	unsigned device_type		:5;	/* Device type */
 	unsigned reserved13		:1;	/* Reserved */
 	unsigned protocol		:2;	/* Protocol type */
+#endif
 };
 
 /*
  *	INQUIRY packet command - Data Format (From Table 6-8 of QIC-157C)
  */
 typedef struct {
+#if defined(__BIG_ENDIAN_BITFIELD)
+	unsigned	reserved0_765	:3;	/* Peripheral Qualifier - Reserved */
+	unsigned	device_type	:5;	/* Peripheral Device Type */
+#elif defined(__LITTLE_ENDIAN_BITFIELD)
 	unsigned	device_type	:5;	/* Peripheral Device Type */
 	unsigned	reserved0_765	:3;	/* Peripheral Qualifier - Reserved */
+#endif
+
+#if defined(__BIG_ENDIAN_BITFIELD)
+	unsigned	rmb		:1;	/* Removable Medium Bit */
+	unsigned	reserved1_6t0	:7;	/* Reserved */
+#elif defined(__LITTLE_ENDIAN_BITFIELD)
 	unsigned	reserved1_6t0	:7;	/* Reserved */
 	unsigned	rmb		:1;	/* Removable Medium Bit */
+#endif
+
+#if defined(__BIG_ENDIAN_BITFIELD)
+	unsigned	iso_version	:2;	/* ISO Version */
+	unsigned	ecma_version	:3;	/* ECMA Version */
+	unsigned	ansi_version	:3;	/* ANSI Version */
+#elif defined(__LITTLE_ENDIAN_BITFIELD)
 	unsigned	ansi_version	:3;	/* ANSI Version */
 	unsigned	ecma_version	:3;	/* ECMA Version */
 	unsigned	iso_version	:2;	/* ISO Version */
+#endif
+
+#if defined(__BIG_ENDIAN_BITFIELD)
+	unsigned	reserved3_7	:1;	/* AENC - Reserved */
+	unsigned	reserved3_6	:1;	/* TrmIOP - Reserved */
+	unsigned	reserved3_45	:2;	/* Reserved */
+	unsigned	response_format :4;	/* Response Data Format */
+#elif defined(__LITTLE_ENDIAN_BITFIELD)
 	unsigned	response_format :4;	/* Response Data Format */
 	unsigned	reserved3_45	:2;	/* Reserved */
 	unsigned	reserved3_6	:1;	/* TrmIOP - Reserved */
 	unsigned	reserved3_7	:1;	/* AENC - Reserved */
+#endif
 	u8		additional_length;	/* Additional Length (total_length-4) */
 	u8		rsv5, rsv6, rsv7;	/* Reserved */
 	u8		vendor_id[8];		/* Vendor Identification */
@@ -928,11 +1056,19 @@ typedef struct {
  *	READ POSITION packet command - Data Format (From Table 6-57)
  */
 typedef struct {
+#if defined(__BIG_ENDIAN_BITFIELD)
+	unsigned	bop		:1;	/* Beginning Of Partition */
+	unsigned	eop		:1;	/* End Of Partition */
+	unsigned	reserved0_543	:3;	/* Reserved */
+	unsigned	bpu		:1;	/* Block Position Unknown */	
+	unsigned	reserved0_10	:2;	/* Reserved */
+#elif defined(__LITTLE_ENDIAN_BITFIELD)
 	unsigned	reserved0_10	:2;	/* Reserved */
 	unsigned	bpu		:1;	/* Block Position Unknown */	
 	unsigned	reserved0_543	:3;	/* Reserved */
 	unsigned	eop		:1;	/* End Of Partition */
 	unsigned	bop		:1;	/* Beginning Of Partition */
+#endif
 	u8		partition;		/* Partition Number */
 	u8		reserved2, reserved3;	/* Reserved */
 	u32		first_block;		/* First Block Location */
@@ -946,22 +1082,41 @@ typedef struct {
  *	REQUEST SENSE packet command result - Data Format.
  */
 typedef struct {
+#if defined(__BIG_ENDIAN_BITFIELD)
+	unsigned	valid		:1;	/* The information field conforms to QIC-157C */
+	unsigned	error_code	:7;	/* Current of deferred errors */
+#elif defined(__LITTLE_ENDIAN_BITFIELD)
 	unsigned	error_code	:7;	/* Current of deferred errors */
 	unsigned	valid		:1;	/* The information field conforms to QIC-157C */
+#endif
+
 	u8		reserved1	:8;	/* Segment Number - Reserved */
+#if defined(__BIG_ENDIAN_BITFIELD)
+	unsigned	filemark 	:1;	/* Filemark */
+	unsigned	eom		:1;	/* End Of Medium */
+	unsigned	ili		:1;	/* Incorrect Length Indicator */
+	unsigned	reserved2_4	:1;	/* Reserved */
+	unsigned	sense_key	:4;	/* Sense Key */
+#elif defined(__LITTLE_ENDIAN_BITFIELD)
 	unsigned	sense_key	:4;	/* Sense Key */
 	unsigned	reserved2_4	:1;	/* Reserved */
 	unsigned	ili		:1;	/* Incorrect Length Indicator */
 	unsigned	eom		:1;	/* End Of Medium */
 	unsigned	filemark 	:1;	/* Filemark */
+#endif
 	u32		information __attribute__ ((packed));
 	u8		asl;			/* Additional sense length (n-7) */
 	u32		command_specific;	/* Additional command specific information */
 	u8		asc;			/* Additional Sense Code */
 	u8		ascq;			/* Additional Sense Code Qualifier */
 	u8		replaceable_unit_code;	/* Field Replaceable Unit Code */
+#if defined(__BIG_ENDIAN_BITFIELD)
+	unsigned	sksv		:1;	/* Sense Key Specific information is valid */
+	unsigned	sk_specific1 	:7;	/* Sense Key Specific */
+#elif defined(__LITTLE_ENDIAN_BITFIELD)
 	unsigned	sk_specific1 	:7;	/* Sense Key Specific */
 	unsigned	sksv		:1;	/* Sense Key Specific information is valid */
+#endif
 	u8		sk_specific2;		/* Sense Key Specific */
 	u8		sk_specific3;		/* Sense Key Specific */
 	u8		pad[2];			/* Padding to 20 bytes */
@@ -1000,16 +1155,35 @@ typedef struct {
  *	The Data Compression Page, as returned by the MODE SENSE packet command.
  */
 typedef struct {
+#if defined(__BIG_ENDIAN_BITFIELD)
+	unsigned	ps		:1;
+	unsigned	reserved0	:1;	/* Reserved */
+	unsigned	page_code	:6;	/* Page Code - Should be 0xf */
+#elif defined(__LITTLE_ENDIAN_BITFIELD)
 	unsigned	page_code	:6;	/* Page Code - Should be 0xf */
 	unsigned	reserved0	:1;	/* Reserved */
 	unsigned	ps		:1;
+#endif
 	u8		page_length;		/* Page Length - Should be 14 */
+#if defined(__BIG_ENDIAN_BITFIELD)
+	unsigned	dce		:1;	/* Data Compression Enable */
+	unsigned	dcc		:1;	/* Data Compression Capable */
+	unsigned	reserved2	:6;	/* Reserved */
+#elif defined(__LITTLE_ENDIAN_BITFIELD)
 	unsigned	reserved2	:6;	/* Reserved */
 	unsigned	dcc		:1;	/* Data Compression Capable */
 	unsigned	dce		:1;	/* Data Compression Enable */
+#endif
+
+#if defined(__BIG_ENDIAN_BITFIELD)
+	unsigned	dde		:1;	/* Data Decompression Enable */
+	unsigned	red		:2;	/* Report Exception on Decompression */
+	unsigned	reserved3	:5;	/* Reserved */
+#elif defined(__LITTLE_ENDIAN_BITFIELD)
 	unsigned	reserved3	:5;	/* Reserved */
 	unsigned	red		:2;	/* Report Exception on Decompression */
 	unsigned	dde		:1;	/* Data Decompression Enable */
+#endif
 	u32		ca;			/* Compression Algorithm */
 	u32		da;			/* Decompression Algorithm */
 	u8		reserved[4];		/* Reserved */
@@ -1019,17 +1193,31 @@ typedef struct {
  *	The Medium Partition Page, as returned by the MODE SENSE packet command.
  */
 typedef struct {
+#if defined(__BIG_ENDIAN_BITFIELD)
+	unsigned	ps		:1;
+	unsigned	reserved1_6	:1;	/* Reserved */
+	unsigned	page_code	:6;	/* Page Code - Should be 0x11 */
+#elif defined(__LITTLE_ENDIAN_BITFIELD)
 	unsigned	page_code	:6;	/* Page Code - Should be 0x11 */
 	unsigned	reserved1_6	:1;	/* Reserved */
 	unsigned	ps		:1;
+#endif
 	u8		page_length;		/* Page Length - Should be 6 */
 	u8		map;			/* Maximum Additional Partitions - Should be 0 */
 	u8		apd;			/* Additional Partitions Defined - Should be 0 */
+#if defined(__BIG_ENDIAN_BITFIELD)
+	unsigned	fdp		:1;	/* Fixed Data Partitions */
+	unsigned	sdp		:1;	/* Should be 0 */
+	unsigned	idp		:1;	/* Should be 0 */
+	unsigned	psum		:2;	/* Should be 0 */
+	unsigned	reserved4_012	:3;	/* Reserved */
+#elif defined(__LITTLE_ENDIAN_BITFIELD)
 	unsigned	reserved4_012	:3;	/* Reserved */
 	unsigned	psum		:2;	/* Should be 0 */
 	unsigned	idp		:1;	/* Should be 0 */
 	unsigned	sdp		:1;	/* Should be 0 */
 	unsigned	fdp		:1;	/* Fixed Data Partitions */
+#endif
 	u8		mfr;			/* Medium Format Recognition */
 	u8		reserved[2];		/* Reserved */
 } idetape_medium_partition_page_t;
@@ -1656,7 +1844,7 @@ static void idetape_analyze_error (ide_drive_t *drive,idetape_request_sense_resu
 	}
 }
 
-static void idetape_request_sense_callback (ide_drive_t *drive)
+static ide_startstop_t idetape_request_sense_callback (ide_drive_t *drive)
 {
 	idetape_tape_t *tape = drive->driver_data;
 
@@ -1670,6 +1858,7 @@ static void idetape_request_sense_callback (ide_drive_t *drive)
 		printk (KERN_ERR "Error in REQUEST SENSE itself - Aborting request!\n");
 		idetape_end_request (0,HWGROUP (drive));
 	}
+	return ide_stopped;
 }
 
 /*
@@ -1701,7 +1890,7 @@ static void idetape_create_request_sense_cmd (idetape_pc_t *pc)
  *	last packet command. We queue a request sense packet command in
  *	the head of the request list.
  */
-static void idetape_retry_pc (ide_drive_t *drive)
+static ide_startstop_t idetape_retry_pc (ide_drive_t *drive)
 {
 	idetape_tape_t *tape = drive->driver_data;
 	idetape_pc_t *pc;
@@ -1714,6 +1903,7 @@ static void idetape_retry_pc (ide_drive_t *drive)
 	idetape_create_request_sense_cmd (pc);
 	set_bit (IDETAPE_IGNORE_DSC, &tape->flags);
 	idetape_queue_pc_head (drive, pc, rq);
+	return ide_stopped;
 }
 
 /*
@@ -1724,7 +1914,7 @@ static void idetape_retry_pc (ide_drive_t *drive)
  *	algorithm described before idetape_issue_packet_command.
  *
  */
-static void idetape_pc_intr (ide_drive_t *drive)
+static ide_startstop_t idetape_pc_intr (ide_drive_t *drive)
 {
 	idetape_tape_t *tape = drive->driver_data;
 	idetape_status_reg_t status;
@@ -1780,11 +1970,9 @@ static void idetape_pc_intr (ide_drive_t *drive)
 #endif /* IDETAPE_DEBUG_LOG */
 			if (pc->c[0] == IDETAPE_REQUEST_SENSE_CMD) {
 				printk (KERN_ERR "ide-tape: I/O error in request sense command\n");
-				ide_do_reset (drive);
-				return;
+				return ide_do_reset (drive);
 			}
-			idetape_retry_pc (drive);				/* Retry operation */
-			return;
+			return idetape_retry_pc (drive);		/* Retry operation */
 		}
 		pc->error = 0;
 		if (test_bit (PC_WAIT_FOR_DSC, &pc->flags) && !status.b.dsc) {	/* Media access command */
@@ -1792,20 +1980,18 @@ static void idetape_pc_intr (ide_drive_t *drive)
 			tape->dsc_polling_frequency = IDETAPE_DSC_MA_FAST;
 			tape->dsc_timeout = jiffies + IDETAPE_DSC_MA_TIMEOUT;
 			idetape_postpone_request (drive);		/* Allow ide.c to handle other requests */
-			return;
+			return ide_stopped;
 		}
 		if (tape->failed_pc == pc)
 			tape->failed_pc=NULL;
-		pc->callback(drive);			/* Command finished - Call the callback function */
-		return;
+		return pc->callback(drive);			/* Command finished - Call the callback function */
 	}
 #ifdef CONFIG_BLK_DEV_IDEDMA
 	if (test_and_clear_bit (PC_DMA_IN_PROGRESS, &pc->flags)) {
 		printk (KERN_ERR "ide-tape: The tape wants to issue more interrupts in DMA mode\n");
 		printk (KERN_ERR "ide-tape: DMA disabled, reverting to PIO\n");
 		(void) HWIF(drive)->dmaproc(ide_dma_off, drive);
-		ide_do_reset (drive);
-		return;
+		return ide_do_reset (drive);
 	}
 #endif /* CONFIG_BLK_DEV_IDEDMA */
 	bcount.b.high=IN_BYTE (IDE_BCOUNTH_REG);			/* Get the number of bytes to transfer */
@@ -1814,14 +2000,12 @@ static void idetape_pc_intr (ide_drive_t *drive)
 
 	if (ireason.b.cod) {
 		printk (KERN_ERR "ide-tape: CoD != 0 in idetape_pc_intr\n");
-		ide_do_reset (drive);
-		return;
+		return ide_do_reset (drive);
 	}
 	if (ireason.b.io == test_bit (PC_WRITING, &pc->flags)) {	/* Hopefully, we will never get here */
 		printk (KERN_ERR "ide-tape: We wanted to %s, ", ireason.b.io ? "Write":"Read");
 		printk (KERN_ERR "but the tape wants us to %s !\n",ireason.b.io ? "Read":"Write");
-		ide_do_reset (drive);
-		return;
+		return ide_do_reset (drive);
 	}
 	if (!test_bit (PC_WRITING, &pc->flags)) {			/* Reading - Check that we have enough space */
 		temp = pc->actually_transferred + bcount.all;
@@ -1830,7 +2014,7 @@ static void idetape_pc_intr (ide_drive_t *drive)
 				printk (KERN_ERR "ide-tape: The tape wants to send us more data than expected - discarding data\n");
 				idetape_discard_data (drive,bcount.all);
 				ide_set_handler (drive,&idetape_pc_intr,IDETAPE_WAIT_CMD);
-				return;
+				return ide_started;
 			}
 #if IDETAPE_DEBUG_LOG
 			printk (KERN_NOTICE "ide-tape: The tape wants to send us more data than expected - allowing transfer\n");
@@ -1852,6 +2036,7 @@ static void idetape_pc_intr (ide_drive_t *drive)
 	pc->current_position+=bcount.all;
 
 	ide_set_handler (drive,&idetape_pc_intr,IDETAPE_WAIT_CMD);		/* And set the interrupt handler again */
+	return ide_started;
 }
 
 /*
@@ -1897,16 +2082,17 @@ static void idetape_pc_intr (ide_drive_t *drive)
  *
  */
 
-static void idetape_transfer_pc(ide_drive_t *drive)
+static ide_startstop_t idetape_transfer_pc(ide_drive_t *drive)
 {
 	idetape_tape_t *tape = drive->driver_data;
 	idetape_pc_t *pc = tape->pc;
 	idetape_ireason_reg_t ireason;
 	int retries = 100;
+	ide_startstop_t startstop;
 
-	if (ide_wait_stat (drive,DRQ_STAT,BUSY_STAT,WAIT_READY)) {
+	if (ide_wait_stat(&startstop,drive,DRQ_STAT,BUSY_STAT,WAIT_READY)) {
 		printk (KERN_ERR "ide-tape: Strange, packet command initiated yet DRQ isn't asserted\n");
-		return;
+		return startstop;
 	}
 	ireason.all=IN_BYTE (IDE_IREASON_REG);
 	while (retries-- && (!ireason.b.cod || ireason.b.io)) {
@@ -1921,14 +2107,14 @@ static void idetape_transfer_pc(ide_drive_t *drive)
 	}
 	if (!ireason.b.cod || ireason.b.io) {
 		printk (KERN_ERR "ide-tape: (IO,CoD) != (0,1) while issuing a packet command\n");
-		ide_do_reset (drive);
-		return;
+		return ide_do_reset (drive);
 	}
 	ide_set_handler(drive, &idetape_pc_intr, IDETAPE_WAIT_CMD);	/* Set the interrupt routine */
 	atapi_output_bytes (drive,pc->c,12);			/* Send the actual packet */
+	return ide_started;
 }
 
-static void idetape_issue_packet_command (ide_drive_t *drive, idetape_pc_t *pc)
+static ide_startstop_t idetape_issue_packet_command (ide_drive_t *drive, idetape_pc_t *pc)
 {
 	idetape_tape_t *tape = drive->driver_data;
 	idetape_bcount_reg_t bcount;
@@ -1957,8 +2143,7 @@ static void idetape_issue_packet_command (ide_drive_t *drive, idetape_pc_t *pc)
 			pc->error = IDETAPE_ERROR_GENERAL;		/* Giving up */
 		}
 		tape->failed_pc=NULL;
-		pc->callback(drive);
-		return;
+		return pc->callback(drive);
 	}
 #if IDETAPE_DEBUG_LOG
 	printk (KERN_INFO "Retry number - %d\n",pc->retries);
@@ -1992,13 +2177,14 @@ static void idetape_issue_packet_command (ide_drive_t *drive, idetape_pc_t *pc)
 	if (test_bit(IDETAPE_DRQ_INTERRUPT, &tape->flags)) {
 		ide_set_handler(drive, &idetape_transfer_pc, IDETAPE_WAIT_CMD);
 		OUT_BYTE(WIN_PACKETCMD, IDE_COMMAND_REG);
+		return ide_started;
 	} else {
 		OUT_BYTE(WIN_PACKETCMD, IDE_COMMAND_REG);
-		idetape_transfer_pc(drive);
+		return idetape_transfer_pc(drive);
 	}
 }
 
-static void idetape_media_access_finished (ide_drive_t *drive)
+static ide_startstop_t idetape_media_access_finished (ide_drive_t *drive)
 {
 	idetape_tape_t *tape = drive->driver_data;
 	idetape_pc_t *pc = tape->pc;
@@ -2008,8 +2194,7 @@ static void idetape_media_access_finished (ide_drive_t *drive)
 	if (status.b.dsc) {
 		if (status.b.check) {					/* Error detected */
 			printk (KERN_ERR "ide-tape: %s: I/O error, ",tape->name);
-			idetape_retry_pc (drive);			/* Retry operation */
-			return;
+			return idetape_retry_pc (drive);		/* Retry operation */
 		}
 		pc->error = 0;
 		if (tape->failed_pc == pc)
@@ -2018,13 +2203,13 @@ static void idetape_media_access_finished (ide_drive_t *drive)
 		pc->error = IDETAPE_ERROR_GENERAL;
 		tape->failed_pc = NULL;
 	}
-	pc->callback (drive);
+	return pc->callback (drive);
 }
 
 /*
  *	General packet command callback function.
  */
-static void idetape_pc_callback (ide_drive_t *drive)
+static ide_startstop_t idetape_pc_callback (ide_drive_t *drive)
 {
 	idetape_tape_t *tape = drive->driver_data;
 	
@@ -2033,9 +2218,10 @@ static void idetape_pc_callback (ide_drive_t *drive)
 #endif /* IDETAPE_DEBUG_LOG */
 
 	idetape_end_request (tape->pc->error ? 0:1, HWGROUP(drive));
+	return ide_stopped;
 }
 
-static void idetape_rw_callback (ide_drive_t *drive)
+static ide_startstop_t idetape_rw_callback (ide_drive_t *drive)
 {
 	idetape_tape_t *tape = drive->driver_data;
 	struct request *rq = HWGROUP(drive)->rq;
@@ -2052,6 +2238,7 @@ static void idetape_rw_callback (ide_drive_t *drive)
 		idetape_end_request (1, HWGROUP (drive));
 	else
 		idetape_end_request (tape->pc->error, HWGROUP (drive));
+	return ide_stopped;
 }
 
 static void idetape_create_locate_cmd (idetape_pc_t *pc, unsigned int block, byte partition)
@@ -2170,7 +2357,7 @@ static void idetape_create_write_cmd (idetape_tape_t *tape, idetape_pc_t *pc, un
 		set_bit (PC_DMA_RECOMMENDED, &pc->flags);
 }
 
-static void idetape_read_position_callback (ide_drive_t *drive)
+static ide_startstop_t idetape_read_position_callback (ide_drive_t *drive)
 {
 	idetape_tape_t *tape = drive->driver_data;
 	idetape_read_position_result_t *result;
@@ -2200,6 +2387,7 @@ static void idetape_read_position_callback (ide_drive_t *drive)
 		}
 	} else
 		idetape_end_request (0,HWGROUP (drive));
+	return ide_stopped;
 }
 
 static void idetape_create_read_position_cmd (idetape_pc_t *pc)
@@ -2213,7 +2401,7 @@ static void idetape_create_read_position_cmd (idetape_pc_t *pc)
 /*
  *	idetape_do_request is our request handling function.	
  */
-static void idetape_do_request (ide_drive_t *drive, struct request *rq, unsigned long block)
+static ide_startstop_t idetape_do_request (ide_drive_t *drive, struct request *rq, unsigned long block)
 {
 	idetape_tape_t *tape = drive->driver_data;
 	idetape_pc_t *pc;
@@ -2229,24 +2417,23 @@ static void idetape_do_request (ide_drive_t *drive, struct request *rq, unsigned
 		/*
 		 *	We do not support buffer cache originated requests.
 		 */
-		printk (KERN_NOTICE "ide-tape: %s: Unsupported command in request queue\n", drive->name);
+		printk (KERN_NOTICE "ide-tape: %s: Unsupported command in request queue (%d)\n", drive->name, rq->cmd);
 		ide_end_request (0,HWGROUP (drive));			/* Let the common code handle it */
-		return;
+		return ide_stopped;
 	}
 
 	/*
 	 *	Retry a failed packet command
 	 */
 	if (tape->failed_pc != NULL && tape->pc->c[0] == IDETAPE_REQUEST_SENSE_CMD) {
-		idetape_issue_packet_command (drive, tape->failed_pc);
-		return;
+		return idetape_issue_packet_command (drive, tape->failed_pc);
 	}
 #if IDETAPE_DEBUG_BUGS
 	if (postponed_rq != NULL)
 		if (rq != postponed_rq) {
 			printk (KERN_ERR "ide-tape: ide-tape.c bug - Two DSC requests were queued\n");
 			idetape_end_request (0,HWGROUP (drive));
-			return;
+			return ide_stopped;
 		}
 #endif /* IDETAPE_DEBUG_BUGS */
 
@@ -2266,15 +2453,16 @@ static void idetape_do_request (ide_drive_t *drive, struct request *rq, unsigned
 			tape->dsc_timeout = jiffies + IDETAPE_DSC_RW_TIMEOUT;
 		} else if ((signed long) (jiffies - tape->dsc_timeout) > 0) {
 			printk (KERN_ERR "ide-tape: %s: DSC timeout\n", tape->name);
-			if (rq->cmd == IDETAPE_PC_RQ2)
+			if (rq->cmd == IDETAPE_PC_RQ2) {
 				idetape_media_access_finished (drive);
-			else
-				ide_do_reset (drive);
-			return;
+				return ide_stopped;
+			} else {
+				return ide_do_reset (drive);
+			}
 		} else if (jiffies - tape->dsc_polling_start > IDETAPE_DSC_MA_THRESHOLD)
 			tape->dsc_polling_frequency = IDETAPE_DSC_MA_SLOW;
 		idetape_postpone_request (drive);
-		return;
+		return ide_stopped;
 	}
 	switch (rq->cmd) {
 		case IDETAPE_READ_RQ:
@@ -2289,20 +2477,20 @@ static void idetape_do_request (ide_drive_t *drive, struct request *rq, unsigned
 			rq->cmd = IDETAPE_WRITE_RQ;
 			rq->errors = IDETAPE_ERROR_EOD;
 			idetape_end_request (1, HWGROUP(drive));
-			return;
+			return ide_stopped;
 		case IDETAPE_PC_RQ1:
 			pc=(idetape_pc_t *) rq->buffer;
 			rq->cmd = IDETAPE_PC_RQ2;
 			break;
 		case IDETAPE_PC_RQ2:
 			idetape_media_access_finished (drive);
-			return;
+			return ide_stopped;
 		default:
 			printk (KERN_ERR "ide-tape: bug in IDETAPE_RQ_CMD macro\n");
 			idetape_end_request (0,HWGROUP (drive));
-			return;
+			return ide_stopped;
 	}
-	idetape_issue_packet_command (drive, pc);
+	return idetape_issue_packet_command (drive, pc);
 }
 
 /*

@@ -94,7 +94,8 @@ __initfunc(void smp_store_cpu_info(int id))
 	cpu_data[id].udelay_val			= loops_per_sec;
 
 	cpu_data[id].pgcache_size		= 0;
-	cpu_data[id].pte_cache			= NULL;
+	cpu_data[id].pte_cache[0]		= NULL;
+	cpu_data[id].pte_cache[1]		= NULL;
 	cpu_data[id].pgdcache_size		= 0;
 	cpu_data[id].pgd_cache			= NULL;
 	cpu_data[id].idle_volume		= 1;
@@ -180,7 +181,7 @@ void cpu_panic(void)
 
 extern struct prom_cpuinfo linux_cpus[64];
 
-extern unsigned long smp_trampoline;
+extern unsigned long sparc64_cpu_startup;
 
 /* The OBP cpu startup callback truncates the 3rd arg cookie to
  * 32-bits (I think) so to be safe we have it read the pointer
@@ -206,15 +207,13 @@ __initfunc(void smp_boot_cpus(void))
 			continue;
 
 		if(cpu_present_map & (1UL << i)) {
-			unsigned long entry = (unsigned long)(&smp_trampoline);
+			unsigned long entry = (unsigned long)(&sparc64_cpu_startup);
 			unsigned long cookie = (unsigned long)(&cpu_new_task);
 			struct task_struct *p;
 			int timeout;
 			int no;
-			extern unsigned long phys_base;
 
-			entry += phys_base - KERNBASE;
-			cookie += phys_base - KERNBASE;
+			prom_printf("Starting CPU %d... ", i);
 			kernel_thread(start_secondary, NULL, CLONE_PID);
 			p = task[++cpucount];
 			p->processor = i;
@@ -235,9 +234,11 @@ __initfunc(void smp_boot_cpus(void))
 				cpu_number_map[i] = cpucount;
 				__cpu_logical_map[cpucount] = i;
 				prom_cpu_nodes[i] = linux_cpus[no].prom_node;
+				prom_printf("OK\n");
 			} else {
 				cpucount--;
 				printk("Processor %d is stuck.\n", i);
+				prom_printf("FAILED\n");
 			}
 		}
 		if(!callin_flag) {
@@ -536,14 +537,31 @@ void smp_release(void)
 /* Imprisoned penguins run with %pil == 15, but PSTATE_IE set, so they
  * can service tlb flush xcalls...
  */
+extern void prom_world(int);
+extern void save_alternate_globals(unsigned long *);
+extern void restore_alternate_globals(unsigned long *);
 void smp_penguin_jailcell(void)
 {
-	flushw_user();
+	unsigned long global_save[24];
+
+	__asm__ __volatile__("flushw");
+	save_alternate_globals(global_save);
+	prom_world(1);
 	atomic_inc(&smp_capture_registry);
 	membar("#StoreLoad | #StoreStore");
 	while(penguins_are_doing_time)
 		membar("#LoadLoad");
+	restore_alternate_globals(global_save);
 	atomic_dec(&smp_capture_registry);
+	prom_world(0);
+}
+
+extern unsigned long xcall_promstop;
+
+void smp_promstop_others(void)
+{
+	if (smp_processors_ready)
+		smp_cross_call(&xcall_promstop, 0, 0, 0);
 }
 
 static inline void sparc64_do_profile(unsigned long pc)
@@ -774,7 +792,8 @@ __initfunc(static void smp_tune_scheduling (void))
 	       (int) cacheflush_time);
 }
 
-int __init setup_profiling_timer(unsigned int multiplier)
+/* /proc/profile writes can call this, don't __init it please. */
+int setup_profiling_timer(unsigned int multiplier)
 {
 	unsigned long flags;
 	int i;

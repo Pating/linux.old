@@ -395,13 +395,14 @@ static inline int nfs_dentry_force_reval(struct dentry *dentry, int flags)
  * If mtime is close to present time, we revalidate
  * more often.
  */
+#define NFS_REVALIDATE_NEGATIVE (1 * HZ)
 static inline int nfs_neg_need_reval(struct dentry *dentry)
 {
-	unsigned long timeout = 30 * HZ;
+	unsigned long timeout = NFS_ATTRTIMEO(dentry->d_parent->d_inode);
 	long diff = CURRENT_TIME - dentry->d_parent->d_inode->i_mtime;
 
-	if (diff < 5*60)
-		timeout = 1 * HZ;
+	if (diff < 5*60 && timeout > NFS_REVALIDATE_NEGATIVE)
+		timeout = NFS_REVALIDATE_NEGATIVE;
 
 	return time_after(jiffies, dentry->d_time + timeout);
 }
@@ -462,12 +463,8 @@ static int nfs_lookup_revalidate(struct dentry * dentry, int flags)
 		goto out_bad;
 
 	/* Filehandle matches? */
-	if (memcmp(dentry->d_fsdata, &fhandle, sizeof(struct nfs_fh))) {
-		if (!list_empty(&dentry->d_subdirs))
-			shrink_dcache_parent(dentry);
-		if (dentry->d_count < 2)
-			goto out_bad;
-	}
+	if (memcmp(dentry->d_fsdata, &fhandle, sizeof(struct nfs_fh)))
+		goto out_bad;
 
 	/* Ok, remeber that we successfully checked it.. */
 	nfs_renew_times(dentry);
@@ -476,6 +473,12 @@ static int nfs_lookup_revalidate(struct dentry * dentry, int flags)
 out_valid:
 	return 1;
 out_bad:
+	if (!list_empty(&dentry->d_subdirs))
+		shrink_dcache_parent(dentry);
+	/* If we have submounts, don't unhash ! */
+	if (have_submounts(dentry))
+		goto out_valid;
+	d_drop(dentry);
 	if (dentry->d_parent->d_inode)
 		nfs_invalidate_dircache(dentry->d_parent->d_inode);
 	if (inode && S_ISDIR(inode->i_mode))
@@ -525,29 +528,6 @@ struct dentry_operations nfs_dentry_operations = {
 	nfs_dentry_release,	/* d_release(struct dentry *) */
 	NULL			/* d_iput */
 };
-
-#ifdef NFS_PARANOIA
-/*
- * Display all dentries holding the specified inode.
- */
-static void show_dentry(struct list_head * dlist)
-{
-	struct list_head *tmp = dlist;
-
-	while ((tmp = tmp->next) != dlist) {
-		struct dentry * dentry = list_entry(tmp, struct dentry, d_alias);
-		const char * unhashed = "";
-
-		if (list_empty(&dentry->d_hash))
-			unhashed = "(unhashed)";
-
-		printk("show_dentry: %s/%s, d_count=%d%s\n",
-			dentry->d_parent->d_name.name,
-			dentry->d_name.name, dentry->d_count,
-			unhashed);
-	}
-}
-#endif
 
 static struct dentry *nfs_lookup(struct inode *dir, struct dentry * dentry)
 {
@@ -697,6 +677,8 @@ static int nfs_mkdir(struct inode *dir, struct dentry *dentry, int mode)
 	nfs_invalidate_dircache(dir);
 	error = nfs_proc_mkdir(NFS_DSERVER(dentry), NFS_FH(dentry->d_parent),
 				dentry->d_name.name, &sattr, &fhandle, &fattr);
+	if (!error)
+		dir->i_nlink++;
 	return error;
 }
 
@@ -714,8 +696,8 @@ static int nfs_rmdir(struct inode *dir, struct dentry *dentry)
 	/* Update i_nlink and invalidate dentry. */
 	if (!error) {
 		d_drop(dentry);
-		if (dentry->d_inode->i_nlink)
-			dentry->d_inode->i_nlink --;
+		if (dir->i_nlink)
+			dir->i_nlink--;
 	}
 
 	return error;

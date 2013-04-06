@@ -137,12 +137,9 @@ S: Notre Dame, Indiana
 S: USA
 
 N: James Banks
-E: james.banks@caldera.com
+E: james@sovereign.org
 D: TLAN network driver
-S: Caldera, Inc.
-S: 633 South 550 East
-S: Provo, Utah 84606
-S: USA
+D: Logitech Busmouse driver
 
 N: Paul Barton-Davis
 E: pbd@op.net
@@ -299,6 +296,10 @@ D: random Linux hacker
 S: Bessemerstraat 21
 S: Amsterdam
 S: The Netherlands
+
+N: Zach Brown
+E: zab@zabbo.net
+D: maestro pci sound
 
 N: Ray Burr
 E: ryb@nightmare.com
@@ -789,12 +790,12 @@ E: ajh@primag.co.uk
 D: Selection mechanism
 
 N: Jochen Hein
-E: jochen.hein@delphi.central.de
+E: jochen@jochen.org
 P: 1024/4A27F015 25 72 FB E3 85 9F DE 3B  CB 0A DA DA 40 77 05 6C
 D: National Language Support
 D: Linux Internationalization Project
 D: German Localization for Linux and GNU software
-S: Frankenstraße
+S: Frankenstraße 33
 S: 34131 Kassel
 S: Germany
 
@@ -866,7 +867,7 @@ S: CV5 8BZ
 S: United Kingdom
 
 N: Ron Holt
-E: ron@caldera.com
+E: ron@sovereign.org
 W: http://www.holt.org/
 P: 1024/1FD44539 DF 4B EB 9F 5B 68 38 9A  40 E3 FB 71 D1 C8 0B 56
 D: Kernel development
@@ -942,12 +943,12 @@ S: RG6 2NU
 S: United Kingdom
 
 N: Jakub Jelinek
-E: jj@sunsite.mff.cuni.cz
+E: jakub@redhat.com
 W: http://sunsite.mff.cuni.cz/~jj
 P: 1024/0F7623C5 53 95 71 3C EB 73 99 97  02 49 40 47 F9 19 68 20
 D: Sparc hacker, SILO, mc
 D: Maintain sunsite.mff.cuni.cz
-S: Na Orechovce 7
+S: K osmidomkum 723
 S: 160 00 Praha 6
 S: Czech Republic
 
@@ -977,12 +978,14 @@ S: USA
 
 N: Dave Jones
 E: dave@powertweak.com
+E: djones2@glam.ac.uk
 W: http://linux.powertweak.com
-D: Centaur/IDT Winchip/Winchip 2 tweaks
+D: Userspace PCI bridge tuning (Powertweak).
+D: Centaur/IDT Winchip/Winchip 2 tweaks.
 D: Misc clean ups and other random hacking.
-S: 40, Heol Edward Lewis,
-S: Gelligaer, Hengoed,
-S: Mid Glamorgan, CF82 8EJ,
+S: 28 Laura Street,
+S: Treforest, Pontypridd,
+S: Mid Glamorgan, CF37 1NW,
 S: Wales, United Kingdom
 
 N: Bernhard Kaindl
@@ -997,6 +1000,7 @@ S: Austria
 
 N: Jan Kara
 E: jack@atrey.karlin.mff.cuni.cz
+E: jack@suse.cz
 D: Quota fixes for 2.2 kernel
 D: Few other fixes in filesystem area (isofs, loopback)
 W: http://atrey.karlin.mff.cuni.cz/~jack/
@@ -1282,11 +1286,11 @@ S: 198 00 Praha 9
 S: Czech Republic
 
 N: Paul Mackerras
-E: paulus@cs.anu.edu.au
+E: paulus@linuxcare.com
 D: Linux port for PCI Power Macintosh
-S: Dept. of Computer Science
-S: Australian National University
-S: Canberra  ACT  0200
+S: Linuxcare, Inc.
+S: 24 Marcus Clarke Street
+S: Canberra ACT 2601
 S: Australia
 
 N: Pat Mackinlay
@@ -1535,7 +1539,7 @@ S: Perth, Western Australia
 S: Australia
 
 N: Greg Page
-E: greg@caldera.com
+E: gpage@sovereign.org
 D: IPX development and support
 
 N: David Parsons
@@ -1543,10 +1547,11 @@ E: orc@pell.chi.il.us
 D: improved memory detection code.
 
 N: Vojtech Pavlik
-E: vojtech@ucw.cz
+E: vojtech@suse.cz
 D: Joystick driver
 D: arcnet-hardware readme
 D: Minor ARCnet hacking
+D: USB development
 S: Ucitelska 1576
 S: Prague 8
 S: 182 00 Czech Republic
@@ -1713,8 +1718,8 @@ S: 7000 Stuttgart 50
 S: Germany
 
 N: Stephen Rothwell
-E: Stephen.Rothwell@canb.auug.org.au
-W: http://www.canb.auug.org.au/~sfr
+E: sfr@linuxcare.com
+W: http://linuxcare.com.au/sfr
 P: 1024/BD8C7805 CD A4 9D 01 10 6E 7E 3B  91 88 FA D9 C8 40 AA 02
 D: Boot/setup/build work for setup > 2K
 D: Author, APM driver
@@ -1963,7 +1968,8 @@ S: Kanata, Ontario
 S: Canada K2L 1S2
 
 N: Andrew Tridgell
-E: Andrew.Tridgell@anu.edu.au
+E: tridge@samba.org
+W: http://linuxcare.com.au/tridge/
 D: dosemu, networking, samba
 S: 3 Ballow Crescent
 S: MacGregor A.C.T 2615
@@ -2122,9 +2128,10 @@ S: The Netherlands
 N: Tim Waugh
 E: tim@cyberelk.demon.co.uk
 D: Co-architect of the parallel-port sharing system
-S: 4 Fox Close
-S: Bishopstoke
-S: SO50 8NB
+S: 34 Bladon Close
+S: GUILDFORD
+S: Surrey
+S: GU1 1TY
 S: United Kingdom
 
 N: Juergen Weigert

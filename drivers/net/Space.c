@@ -103,6 +103,7 @@ extern int pamsnet_probe(struct device *);
 extern int tlan_probe(struct device *);
 extern int mace_probe(struct device *);
 extern int bmac_probe(struct device *);
+extern int ncr885e_probe(struct device *);
 extern int cs89x0_probe(struct device *dev);
 extern int ethertap_probe(struct device *dev);
 extern int ether1_probe (struct device *dev);
@@ -124,6 +125,8 @@ extern int dmfe_reg_board(struct device *);
 /* Gigabit Ethernet adapters */
 extern int yellowfin_probe(struct device *dev);
 extern int acenic_probe(struct device *dev);
+extern int skge_probe(struct device *dev);
+
 
 /* Detachable devices ("pocket adaptors") */
 extern int atp_init(struct device *);
@@ -198,7 +201,7 @@ struct devprobe pci_probes[] __initdata = {
 #ifdef CONFIG_EEXPRESS_PRO100	/* Intel EtherExpress Pro/100 */
 	{eepro100_probe, 0},
 #endif
-#ifdef CONFIG_DEC_ELCP 
+#if defined(CONFIG_DEC_ELCP) || defined(CONFIG_DEC_ELCP_OLD)
 	{tulip_probe, 0},
 #endif
 #ifdef CONFIG_DE4X5             /* DEC DE425, DE434, DE435 adapters */
@@ -226,6 +229,9 @@ struct devprobe pci_probes[] __initdata = {
 #endif
 #ifdef CONFIG_ACENIC
 	{acenic_probe, 0},
+#endif
+#ifdef CONFIG_SK98LIN
+	{skge_probe, 0},
 #endif
 #ifdef CONFIG_VIA_RHINE
 	{via_rhine_probe, 0},
@@ -453,6 +459,9 @@ struct devprobe ppc_probes[] __initdata = {
 #endif
 #ifdef CONFIG_BMAC
 	{bmac_probe, 0},
+#endif
+#ifdef CONFIG_NCR885E
+	{ncr885e_probe, 0},
 #endif
 	{NULL, 0},
 };
@@ -898,6 +907,47 @@ static struct device tr0_dev = {
 #   define      NEXT_DEV        (&sb1000_dev)
 #endif
 	
+/* S/390 channels */
+#ifdef CONFIG_CTC
+    extern int ctc_probe(struct device *dev);
+    static struct device ctc7_dev =
+       {"ctc7", 0, 0, 0, 0, 0, 0, 0, 0, 0, NEXT_DEV,  ctc_probe};
+    static struct device ctc6_dev =
+       {"ctc6", 0, 0, 0, 0, 0, 0, 0, 0, 0, &ctc7_dev, ctc_probe};
+    static struct device ctc5_dev =
+       {"ctc5", 0, 0, 0, 0, 0, 0, 0, 0, 0, &ctc6_dev, ctc_probe};
+    static struct device ctc4_dev =
+       {"ctc4", 0, 0, 0, 0, 0, 0, 0, 0, 0, &ctc5_dev, ctc_probe};
+    static struct device ctc3_dev =
+       {"ctc3", 0, 0, 0, 0, 0, 0, 0, 0, 0, &ctc4_dev, ctc_probe};
+    static struct device ctc2_dev =
+       {"ctc2", 0, 0, 0, 0, 0, 0, 0, 0, 0, &ctc3_dev, ctc_probe};
+    static struct device ctc1_dev =
+       {"ctc1", 0, 0, 0, 0, 0, 0, 0, 0, 0, &ctc2_dev, ctc_probe};
+    static struct device ctc0_dev =
+       {"ctc0", 0, 0, 0, 0, 0, 0, 0, 0, 0, &ctc1_dev, ctc_probe}; 
+
+    static struct device escon7_dev =
+       {"escon7", 0, 0, 0, 0, 0, 0, 0, 0, 0, &ctc0_dev,   ctc_probe};
+    static struct device escon6_dev =
+       {"escon6", 0, 0, 0, 0, 0, 0, 0, 0, 0, &escon7_dev, ctc_probe};
+    static struct device escon5_dev =
+       {"escon5", 0, 0, 0, 0, 0, 0, 0, 0, 0, &escon6_dev, ctc_probe};
+    static struct device escon4_dev =
+       {"escon4", 0, 0, 0, 0, 0, 0, 0, 0, 0, &escon5_dev, ctc_probe};
+    static struct device escon3_dev =
+       {"escon3", 0, 0, 0, 0, 0, 0, 0, 0, 0, &escon4_dev, ctc_probe};
+    static struct device escon2_dev =
+       {"escon2", 0, 0, 0, 0, 0, 0, 0, 0, 0, &escon3_dev, ctc_probe};
+    static struct device escon1_dev =
+       {"escon1", 0, 0, 0, 0, 0, 0, 0, 0, 0, &escon2_dev, ctc_probe};
+    static struct device escon0_dev =
+       {"escon0", 0, 0, 0, 0, 0, 0, 0, 0, 0, &escon1_dev, ctc_probe}; 
+
+#undef  NEXT_DEV
+#define NEXT_DEV        (&escon0_dev)                                  
+#endif  
+        
 extern int loopback_init(struct device *dev);
 struct device loopback_dev = {
 	"lo",			/* Software Loopback interface		*/

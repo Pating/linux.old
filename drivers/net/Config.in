@@ -46,6 +46,7 @@ if [ "$CONFIG_NET_ETHERNET" = "y" ]; then
   if [ "$CONFIG_PPC" = "y" ]; then
     tristate 'MACE (Power Mac ethernet) support' CONFIG_MACE
     tristate 'BMAC (G3 ethernet) support' CONFIG_BMAC
+    tristate 'Symbios 53c885 (Synergy ethernet) support' CONFIG_NCR885E
   fi
   if [ "$CONFIG_ZORRO" = "y" ]; then
     tristate 'Ariadne support' CONFIG_ARIADNE
@@ -93,8 +94,6 @@ if [ "$CONFIG_NET_ETHERNET" = "y" ]; then
   fi
   if [ "$CONFIG_EXPERIMENTAL" = "y" ]; then
       tristate 'RealTek 8129/8139 (not 8019/8029!) support' CONFIG_RTL8139
-      tristate 'SiS 900 PCI Fast Ethernet Adapter support' CONFIG_SIS900
-      tristate 'Packet Engines Yellowfin Gigabit-NIC support' CONFIG_YELLOWFIN
   fi
   bool 'Other ISA cards' CONFIG_NET_ISA
   if [ "$CONFIG_NET_ISA" = "y" ]; then
@@ -125,15 +124,16 @@ if [ "$CONFIG_NET_ETHERNET" = "y" ]; then
   if [ "$CONFIG_NET_EISA" = "y" ]; then
     tristate 'AMD PCnet32 (VLB and PCI) support' CONFIG_PCNET32
     if [ "$CONFIG_EXPERIMENTAL" = "y" ]; then
-      tristate 'Alteon AceNIC/3Com 3C985/NetGear GA620 Gigabit support' CONFIG_ACENIC
       tristate 'Ansel Communications EISA 3200 support (EXPERIMENTAL)' CONFIG_AC3200
     fi
-
     tristate 'Apricot Xen-II on board Ethernet' CONFIG_APRICOT
     tristate 'CS89x0 support' CONFIG_CS89x0
     tristate 'DM9102 PCI Fast Ethernet Adapter support (EXPERIMENTAL)' CONFIG_DM9102
     tristate 'Generic DECchip & DIGITAL EtherWORKS PCI/EISA' CONFIG_DE4X5
     tristate 'DECchip Tulip (dc21x4x) PCI support' CONFIG_DEC_ELCP
+    if [ "$CONFIG_DEC_ELCP" != "y" ]; then
+      tristate 'Old DECchip Tulip (dc21x4x) PCI support' CONFIG_DEC_ELCP_OLD
+    fi
     tristate 'Digi Intl. RightSwitch SE-X support' CONFIG_DGRS
     tristate 'EtherExpressPro/100 support' CONFIG_EEXPRESS_PRO100
     if [ "$CONFIG_EXPERIMENTAL" = "y" ]; then
@@ -143,6 +143,7 @@ if [ "$CONFIG_NET_ETHERNET" = "y" ]; then
     tristate 'PCI NE2000 support' CONFIG_NE2K_PCI
     tristate 'TI ThunderLAN support' CONFIG_TLAN
     tristate 'VIA Rhine support' CONFIG_VIA_RHINE
+    tristate 'SiS 900/7016 PCI Fast Ethernet Adapter support' CONFIG_SIS900
     if [ "$CONFIG_EXPERIMENTAL" = "y" ]; then
       tristate 'Racal-Interlan EISA ES3210 support (EXPERIMENTAL)' CONFIG_ES3210
       tristate 'SMC EtherPower II (EXPERIMENTAL)' CONFIG_EPIC100
@@ -159,13 +160,29 @@ fi
 
 endmenu
 
+#
+#	Gigabit Ethernet
+#
+
+mainmenu_option next_comment
+comment 'Ethernet (1000 Mbit)'
+
+    if [ "$CONFIG_EXPERIMENTAL" = "y" ]; then
+      tristate 'Alteon AceNIC/3Com 3C985/NetGear GA620 Gigabit support' CONFIG_ACENIC
+      tristate 'Packet Engines Yellowfin Gigabit-NIC support' CONFIG_YELLOWFIN
+    fi
+    tristate 'SysKonnect SK-98xx support' CONFIG_SK98LIN
+endmenu
+
 bool 'FDDI driver support' CONFIG_FDDI
 if [ "$CONFIG_FDDI" = "y" ]; then
   bool 'Digital DEFEA and DEFPA adapter support' CONFIG_DEFXX
 fi
 
 if [ "$CONFIG_EXPERIMENTAL" = "y" ]; then
-  bool 'HIPPI driver support (EXPERIMENTAL)' CONFIG_HIPPI
+  if [ "$CONFIG_INET" = "y" ]; then
+    bool 'HIPPI driver support (EXPERIMENTAL)' CONFIG_HIPPI
+  fi
   if [ "$CONFIG_HIPPI" = "y" ]; then
     tristate 'Essential RoadRunner HIPPI PCI adapter support' CONFIG_ROADRUNNER
     if [ "$CONFIG_ROADRUNNER" != "n" ]; then
@@ -234,7 +251,7 @@ endmenu
 
 bool 'Fibre Channel driver support' CONFIG_NET_FC
 if [ "$CONFIG_NET_FC" = "y" ]; then
-  tristate 'Interphase 5526 Tachyon chipset based adaptor support' CONFIG_IPHASE5526
+  dep_tristate 'Interphase 5526 Tachyon chipset based adaptor support' CONFIG_IPHASE5526 $CONFIG_SCSI
 fi
 
 if [ "$CONFIG_EXPERIMENTAL" = "y" ]; then
@@ -262,6 +279,27 @@ dep_tristate 'COSA/SRP sync serial boards support' CONFIG_COSA m
 #
 dep_tristate 'Sealevel Systems 4021 support' CONFIG_SEALEVEL_4021 m
 
+#
+# COMX drivers
+#
+
+tristate 'MultiGate (COMX) synchronous serial boards support' CONFIG_COMX
+   if [ "$CONFIG_COMX" != "n" ]; then
+   if [ "$CONFIG_EXPERIMENTAL" = "y" ]; then
+      dep_tristate '  Support for COMX/CMX/HiCOMX boards' CONFIG_COMX_HW_COMX $CONFIG_COMX
+   fi
+   dep_tristate '  Support for LoCOMX board' CONFIG_COMX_HW_LOCOMX $CONFIG_COMX
+   dep_tristate '  Support for MixCOM board' CONFIG_COMX_HW_MIXCOM $CONFIG_COMX
+   dep_tristate '  Support for HDLC and syncPPP protocols on MultiGate boards' CONFIG_COMX_PROTO_PPP $CONFIG_COMX
+   if [ "$CONFIG_LAPB" = "y" ]; then
+      dep_tristate '  Support for LAPB protocol on MultiGate boards' CONFIG_COMX_PROTO_LAPB $CONFIG_COMX
+   fi
+   if [ "$CONFIG_LAPB" = "m" ]; then
+      dep_tristate '  Support for LAPB protocol on MultiGate boards' CONFIG_COMX_PROTO_LAPB $CONFIG_LAPB
+   fi
+   dep_tristate '  Support for Frame Relay on MultiGate boards' CONFIG_COMX_PROTO_FR $CONFIG_COMX
+fi
+
 tristate 'Frame relay DLCI support' CONFIG_DLCI
 if [ "$CONFIG_DLCI" != "n" ]; then
   int '  Max open DLCI' CONFIG_DLCI_COUNT 24
@@ -274,21 +312,20 @@ fi
 #
 
 if [ "$CONFIG_WAN_ROUTER" != "n" ]; then
-  bool 'WAN drivers' CONFIG_WAN_DRIVERS
+  bool 'WAN drivers' CONFIG_WAN_DRIVERS 
   if [ "$CONFIG_WAN_DRIVERS" = "y" ]; then
-    dep_tristate 'Sangoma WANPIPE(tm) multiprotocol cards' CONFIG_VENDOR_SANGOMA $CONFIG_WAN_DRIVERS
+    dep_tristate 'Sangoma WANPIPE(tm) multi-prot cards: (select M not Y !)' CONFIG_VENDOR_SANGOMA $CONFIG_WAN_DRIVERS 
     if [ "$CONFIG_VENDOR_SANGOMA" != "n" ]; then
       int  '  Maximum number of cards' CONFIG_WANPIPE_CARDS 1
-      bool '  WANPIPE X.25 support' CONFIG_WANPIPE_X25
+      #bool '  WANPIPE X.25 support' CONFIG_WANPIPE_X25
       bool '  WANPIPE Frame Relay support' CONFIG_WANPIPE_FR
       bool '  WANPIPE PPP support' CONFIG_WANPIPE_PPP
-  #    bool '  WANPIPE Cisco HDLC support' CONFIG_WANPIPE_CHDLC
+      bool '  WANPIPE Cisco HDLC support' CONFIG_WANPIPE_CHDLC
     fi
   fi
 fi
 
 endmenu
-
 
 #
 # X.25 network drivers

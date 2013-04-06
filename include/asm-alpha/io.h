@@ -146,6 +146,8 @@ extern void _sethae (unsigned long addr);	/* cached version */
 # include <asm/core_polaris.h>
 #elif defined(CONFIG_ALPHA_LX164)
 # include <asm/core_pyxis.h>
+#elif defined(CONFIG_ALPHA_IRONGATE)
+# include <asm/core_irongate.h>
 #else
 #error "What system is this?"
 #endif
@@ -260,6 +262,8 @@ static inline void * ioremap(unsigned long offset, unsigned long size)
 static inline void iounmap(void *addr)
 {
 }
+
+#define ioremap_nocache(offset, size) ioremap((offset),(size))
 
 #ifndef readb
 # define readb(a)	_readb((unsigned long)(a))

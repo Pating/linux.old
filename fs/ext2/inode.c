@@ -51,6 +51,10 @@ void ext2_delete_inode (struct inode * inode)
 	    inode->i_ino == EXT2_ACL_DATA_INO)
 		return;
 	inode->u.ext2_i.i_dtime	= CURRENT_TIME;
+	/* When we delete an inode, we increment its i_version. If it
+	   is ever read in from disk again, it will have a different
+	   i_version. */
+	inode->u.ext2_i.i_version++;
 	mark_inode_dirty(inode);
 	ext2_update_inode(inode, IS_SYNC(inode));
 	inode->i_size = 0;
@@ -121,6 +125,8 @@ static int ext2_alloc_block (struct inode * inode, unsigned long goal, int * err
 				    "cannot get block %lu", result);
 			return 0;
 		}
+		if (!buffer_uptodate(bh))
+			wait_on_buffer(bh);
 		memset(bh->b_data, 0, inode->i_sb->s_blocksize);
 		mark_buffer_uptodate(bh, 1);
 		mark_buffer_dirty(bh, 1);
@@ -515,7 +521,7 @@ void ext2_read_inode (struct inode * inode)
 	inode->u.ext2_i.i_dtime = le32_to_cpu(raw_inode->i_dtime);
 	inode->i_blksize = PAGE_SIZE;	/* This is the optimal IO size (for stat), not the fs block size */
 	inode->i_blocks = le32_to_cpu(raw_inode->i_blocks);
-	inode->i_version = ++event;
+	inode->i_version = ++global_event;
 	inode->u.ext2_i.i_new_inode = 0;
 	inode->u.ext2_i.i_flags = le32_to_cpu(raw_inode->i_flags);
 	inode->u.ext2_i.i_faddr = le32_to_cpu(raw_inode->i_faddr);
@@ -538,6 +544,7 @@ void ext2_read_inode (struct inode * inode)
 #endif
 	}
 	inode->u.ext2_i.i_version = le32_to_cpu(raw_inode->i_version);
+	inode->i_generation = inode->u.ext2_i.i_version;
 	inode->u.ext2_i.i_block_group = block_group;
 	inode->u.ext2_i.i_next_alloc_block = 0;
 	inode->u.ext2_i.i_next_alloc_goal = 0;

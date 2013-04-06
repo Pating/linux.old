@@ -296,6 +296,8 @@ static unsigned long * create_aout_tables(char * p, struct linux_binprm * bprm)
 	return sp;
 }
 
+static int warnings = 0;
+
 /*
  * These are the functions used to load a.out style executables and shared
  * libraries.  There is no binary dependent code anywhere else.
@@ -321,6 +323,14 @@ static inline int do_load_aout_binary(struct linux_binprm * bprm, struct pt_regs
 	}
 
 	fd_offset = N_TXTOFF(ex);
+
+#ifdef __i386__
+	if (N_MAGIC(ex) == ZMAGIC && fd_offset != BLOCK_SIZE) {
+		if(warnings++<10)
+			printk(KERN_NOTICE "N_TXTOFF != BLOCK_SIZE. See a.out.h.\n");
+		return -ENOEXEC;
+	}
+#endif
 
 	/* Check initial limits. This avoids letting people circumvent
 	 * size limits imposed on them by creating programs with large
@@ -389,30 +399,22 @@ static inline int do_load_aout_binary(struct linux_binprm * bprm, struct pt_regs
 		flush_icache_range((unsigned long) 0,
 				   (unsigned long) ex.a_text+ex.a_data);
 	} else {
-		static unsigned long error_time, error_time2;
 		if ((ex.a_text & 0xfff || ex.a_data & 0xfff) &&
-		    (N_MAGIC(ex) != NMAGIC) && (jiffies-error_time2) > 5*HZ)
-		{
-			printk(KERN_NOTICE "executable not page aligned\n");
-			error_time2 = jiffies;
-		}
+		    (N_MAGIC(ex) != NMAGIC))
+			if(warnings++<10)
+				printk(KERN_NOTICE "executable not page aligned\n");
 
 		fd = open_dentry(bprm->dentry, O_RDONLY);
 		if (fd < 0)
 			return fd;
 		file = fget(fd);
 
-		if ((fd_offset & ~PAGE_MASK) != 0 &&
-		    (jiffies-error_time) > 5*HZ)
-		{
-			printk(KERN_WARNING 
-			       "fd_offset is not page aligned. Please convert program: %s\n",
-			       file->f_dentry->d_name.name
-			       );
-			error_time = jiffies;
-		}
-
-		if (!file->f_op || !file->f_op->mmap || ((fd_offset & ~PAGE_MASK) != 0)) {
+		if (!file->f_op || !file->f_op->mmap ||
+		    fd_offset & (bprm->dentry->d_inode->i_sb->s_blocksize-1)) {
+			if (warnings++<10)
+				printk(KERN_NOTICE
+				       "fd_offset is not blocksize aligned. Loading %s in anonymous memory.\n",
+				       file->f_dentry->d_name.name);
 			fput(file);
 			sys_close(fd);
 			do_mmap(NULL, N_TXTADDR(ex), ex.a_text+ex.a_data,
@@ -530,16 +532,11 @@ do_load_aout_library(int fd)
 
 	start_addr =  ex.a_entry & 0xfffff000;
 
-	if ((N_TXTOFF(ex) & ~PAGE_MASK) != 0) {
-		static unsigned long error_time;
-
-		if ((jiffies-error_time) > 5*HZ)
-		{
-			printk(KERN_WARNING 
-			       "N_TXTOFF is not page aligned. Please convert library: %s\n",
+	if (N_TXTOFF(ex) & (inode->i_sb->s_blocksize-1)) {
+		if (warnings++<10)
+			printk(KERN_NOTICE
+			       "N_TXTOFF is not blocksize aligned. Loading library %s in anonymous memory.\n",
 			       file->f_dentry->d_name.name);
-			error_time = jiffies;
-		}
 		do_mmap(NULL, start_addr, ex.a_text + ex.a_data,
 			PROT_READ | PROT_WRITE | PROT_EXEC,
 			MAP_FIXED| MAP_PRIVATE, 0);
@@ -547,8 +544,7 @@ do_load_aout_library(int fd)
 			  (char *)start_addr, ex.a_text + ex.a_data, 0);
 		flush_icache_range((unsigned long) start_addr,
 				   (unsigned long) start_addr + ex.a_text + ex.a_data);
-		retval = 0;
-		goto out_putf;
+		goto map_bss;
 	}
 	/* Now use mmap to map the library into memory. */
 	error = do_mmap(file, start_addr, ex.a_text + ex.a_data,
@@ -559,6 +555,7 @@ do_load_aout_library(int fd)
 	if (error != start_addr)
 		goto out_putf;
 
+ map_bss:
 	len = PAGE_ALIGN(ex.a_text + ex.a_data);
 	bss = ex.a_text + ex.a_data + ex.a_bss;
 	if (bss > len) {

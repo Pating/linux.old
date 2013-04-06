@@ -1,21 +1,18 @@
 #
-# Makefile for math-emulator files...
+# Makefile for the FPU instruction emulation.
 #
+# Note! Dependencies are done automagically by 'make dep', which also
+# removes any old dependencies. DON'T put your own dependencies here
+# unless it's something special (ie not a .c file).
+#
+# Note 2! The CFLAGS definition is now in the main makefile...
 
-O_TARGET :=	math-emu.o
-O_OBJS   :=	fp-emul.o udivmodti4.o
-
-LINKS	:=	double.h op-common.h op-1.h op-2.h op-4.h single.h \
-		soft-fp.h udivmodti4.c
+O_TARGET := math-emu.o
+O_OBJS   := math.o
+CFLAGS += -I. -I$(TOPDIR)/include/math-emu -w
 
 ifeq ($(CONFIG_MATHEMU),m)
 M_OBJS   := $(O_TARGET)
 endif
 
 include $(TOPDIR)/Rules.make
-
-symlinks:
-	ln -sf $(patsubst %,../../sparc64/math-emu/%,$(LINKS)) .
-
-cleansymlinks:
-	rm -f $(LINKS)

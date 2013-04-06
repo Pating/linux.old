@@ -5,10 +5,14 @@
 
 SUB_DIRS     := 
 MOD_SUB_DIRS := $(SUB_DIRS)
-ALL_SUB_DIRS := $(SUB_DIRS) hamradio irda fc
+ALL_SUB_DIRS := $(SUB_DIRS) hamradio irda fc sk98lin
 
 L_TARGET := net.a
-L_OBJS   := auto_irq.o
+L_OBJS   :=
+ifneq ($(ARCH),s390)  
+L_OBJS   += auto_irq.o
+endif
+
 M_OBJS   :=
 MOD_LIST_NAME := NET_MODULES
 
@@ -599,6 +603,16 @@ else
   endif
 endif
 
+ifeq ($(CONFIG_SK98LIN),y)
+  SUB_DIRS += sk98lin
+  MOD_IN_SUB_DIRS += sk98lin
+  L_OBJS += sk98lin/sk98lin.o
+else
+  ifeq ($(CONFIG_SK98LIN),m)
+    MOD_IN_SUB_DIRS += sk98lin
+  endif
+endif
+
 ifeq ($(CONFIG_WAVELAN),y)
 L_OBJS += wavelan.o
 else
@@ -737,6 +751,14 @@ else
   endif
 endif
 
+ifeq ($(CONFIG_DEC_ELCP_OLD),y)
+L_OBJS += old_tulip.o
+else
+  ifeq ($(CONFIG_DEC_ELCP_OLD),m)
+  M_OBJS += old_tulip.o
+  endif
+endif
+
 ifeq ($(CONFIG_ARCNET),y)
 LX_OBJS += arcnet.o
 else
@@ -836,14 +858,66 @@ else
   endif
 endif
 
-# If anything built-in uses syncppp, then build it into the kernel also.
-# If not, but a module uses it, build as a module.
+#
+# COMX drivers
+#
+ifeq ($(CONFIG_COMX),y)
+LX_OBJS += comx.o
+else 
+  ifeq ($(CONFIG_COMX),m)
+  MX_OBJS += comx.o
+  endif
+endif
 
-ifdef CONFIG_SYNCPPP_BUILTIN
-LX_OBJS += syncppp.o
-else
-  ifdef CONFIG_SYNCPPP_MODULE
-  MX_OBJS += syncppp.o
+ifeq ($(CONFIG_COMX_HW_COMX),y)
+L_OBJS += comx-hw-comx.o
+else 
+  ifeq ($(CONFIG_COMX_HW_COMX),m)
+  M_OBJS += comx-hw-comx.o
+  endif
+endif
+
+ifeq ($(CONFIG_COMX_HW_LOCOMX),y)
+L_OBJS += comx-hw-locomx.o
+CONFIG_85230_BUILTIN=y
+else 
+  ifeq ($(CONFIG_COMX_HW_LOCOMX),m)
+  M_OBJS += comx-hw-locomx.o
+  CONFIG_85230_MODULE=y
+  endif
+endif
+
+ifeq ($(CONFIG_COMX_HW_MIXCOM),y)
+L_OBJS += comx-hw-mixcom.o
+else 
+  ifeq ($(CONFIG_COMX_HW_MIXCOM),m)
+  M_OBJS += comx-hw-mixcom.o
+  endif
+endif
+
+ifeq ($(CONFIG_COMX_PROTO_PPP),y)
+L_OBJS += comx-proto-ppp.o
+CONFIG_SYNCPPP_BUILTIN = y
+else 
+  ifeq ($(CONFIG_COMX_PROTO_PPP),m)
+  M_OBJS += comx-proto-ppp.o
+  CONFIG_SYNCPPP_MODULE = y
+  endif
+endif
+
+ifeq ($(CONFIG_COMX_PROTO_LAPB),y)
+L_OBJS += comx-proto-lapb.o
+else 
+  ifeq ($(CONFIG_COMX_PROTO_LAPB),m)
+  M_OBJS += comx-proto-lapb.o
+  endif
+endif
+
+ifeq ($(CONFIG_COMX_PROTO_FR),y)
+L_OBJS += comx-proto-fr.o
+else 
+  ifeq ($(CONFIG_COMX_PROTO_FR),m)
+  M_OBJS += comx-proto-fr.o
   endif
 endif
 
@@ -852,9 +926,22 @@ endif
 
 ifdef CONFIG_85230_BUILTIN
 LX_OBJS += z85230.o
+CONFIG_SYNCPPP_BUILTIN=y
 else
   ifdef CONFIG_85230_MODULE
   MX_OBJS += z85230.o
+  CONFIG_SYNCPPP_MODULE=y
+  endif
+endif
+
+# If anything built-in uses syncppp, then build it into the kernel also.
+# If not, but a module uses it, build as a module.
+
+ifdef CONFIG_SYNCPPP_BUILTIN
+LX_OBJS += syncppp.o
+else
+  ifdef CONFIG_SYNCPPP_MODULE
+  MX_OBJS += syncppp.o
   endif
 endif
 
@@ -1089,11 +1176,20 @@ else
   endif
 endif
 
+ifeq ($(CONFIG_NCR885E),y)
+L_OBJS += ncr885e.o
+else
+  ifeq ($(CONFIG_NCR885E),m)
+  M_OBJS += ncr885e.o
+  endif
+endif
+
 ifeq ($(CONFIG_VENDOR_SANGOMA),y)
   LX_OBJS += sdladrv.o
   L_OBJS += sdlamain.o
   ifeq ($(CONFIG_WANPIPE_X25),y)
     L_OBJS += sdla_x25.o
+    L_OBJS += sdla_x25api.o
   endif
   ifeq ($(CONFIG_WANPIPE_FR),y)
     L_OBJS += sdla_fr.o
@@ -1101,6 +1197,9 @@ ifeq ($(CONFIG_VENDOR_SANGOMA),y)
   ifeq ($(CONFIG_WANPIPE_PPP),y)
     L_OBJS += sdla_ppp.o
   endif
+  ifeq ($(CONFIG_WANPIPE_CHDLC),y)
+    L_OBJS += sdla_chdlc.o
+  endif    
 endif
 
 ifeq ($(CONFIG_VENDOR_SANGOMA),m)
@@ -1109,6 +1208,7 @@ ifeq ($(CONFIG_VENDOR_SANGOMA),m)
   WANPIPE_OBJS = sdlamain.o
   ifeq ($(CONFIG_WANPIPE_X25),y)
     WANPIPE_OBJS += sdla_x25.o
+    WANPIPE_OBJS += sdla_x25api.o
   endif
   ifeq ($(CONFIG_WANPIPE_FR),y)
     WANPIPE_OBJS += sdla_fr.o
@@ -1116,6 +1216,9 @@ ifeq ($(CONFIG_VENDOR_SANGOMA),m)
   ifeq ($(CONFIG_WANPIPE_PPP),y)
     WANPIPE_OBJS += sdla_ppp.o
   endif
+  ifeq ($(CONFIG_WANPIPE_CHDLC),y)
+    WANPIPE_OBJS += sdla_chdlc.o
+  endif    
 endif
 
 ifeq ($(CONFIG_X25_ASY),y)

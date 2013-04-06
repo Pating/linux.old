@@ -17,6 +17,12 @@
  *
  *  IDT Winchip tweaks, misc clean ups.
  *	Dave Jones <dave@powertweak.com>, August 1999
+ *
+ *	Added proper L2 cache detection for Coppermine
+ *	Dragan Stancevic <visitor@valinux.com>, October 1999
+ *
+ *	Improved Intel cache detection.
+ *	Dave Jones <dave@powertweak.com>, October 1999
  */
 
 /*
@@ -366,7 +372,7 @@ __initfunc(void setup_arch(char **cmdline_p,
 			/* Zero is valid according to the BIOS weenies */
 			if(i386_endbase)
 			{
-				printk(KERN_NOTICE "Ignoring bogus EBDA pointer %X\n", 
+				printk(KERN_NOTICE "Ignoring bogus EBDA pointer %lX\n", 
 					i386_endbase);
 			}
 			i386_endbase = BIOS_ENDBASE;
@@ -755,8 +761,8 @@ static struct cpu_model_info cpu_models[] __initdata = {
 	{ X86_VENDOR_INTEL,	6,
 	  { "Pentium Pro A-step", "Pentium Pro", NULL, "Pentium II (Klamath)", 
 	    NULL, "Pentium II (Deschutes)", "Mobile Pentium II", 
-            "Pentium III (Katmai)", "Pentium III (Coppermine)", NULL, NULL, 
-            NULL, NULL, NULL, NULL }},
+	    "Pentium III (Katmai)", "Pentium III (Coppermine)", NULL, NULL, 
+	    NULL, NULL, NULL, NULL, NULL }},
 	{ X86_VENDOR_AMD,	4,
 	  { NULL, NULL, NULL, "486 DX/2", NULL, NULL, NULL, "486 DX/2-WB",
 	    "486 DX/4", "486 DX/4-WB", NULL, NULL, NULL, NULL, "Am5x86-WT",
@@ -818,49 +824,48 @@ __initfunc(void identify_cpu(struct cpuinfo_x86 *c))
 		}
 	}
 
-	for (i = 0; i < sizeof(cpu_models)/sizeof(struct cpu_model_info); i++) {
-		if (c->cpuid_level > 1) {
-			/* supports eax=2  call */
-			int edx, cache_size, dummy;
+	if (c->cpuid_level > 1) {
+		/* supports eax=2  call */
+		int edx, dummy;
 			
-			cpuid(2, &dummy, &dummy, &dummy, &edx);
+		cpuid(2, &dummy, &dummy, &dummy, &edx);
 
-			/* We need only the LSB */
-			edx &= 0xff;
+		/* We need only the LSB */
+		edx &= 0xff;
 
-			switch (edx) {
-				case 0x40:
-					cache_size = 0;
-					break;
+		switch (edx) {
+			case 0x40:
+				c->x86_cache_size = 0;
+				break;
 
-				case 0x41:
-					cache_size = 128;
-					break;
+			case 0x41:
+				c->x86_cache_size = 128;
+				break;
 
-				case 0x42:
-					cache_size = 256;
-					break;
+			case 0x42:
+			case 0x82: /*Detect 256-Kbyte cache on Coppermine*/ 
+				c->x86_cache_size = 256;
+				break;
 
-				case 0x43:
-					cache_size = 512;
-					break;
+			case 0x43:
+				c->x86_cache_size = 512;
+				break;
 
-				case 0x44:
-					cache_size = 1024;
-					break;
+			case 0x44:
+				c->x86_cache_size = 1024;
+				break;
 
-				case 0x45:
-					cache_size = 2048;
-					break;
+			case 0x45:
+				c->x86_cache_size = 2048;
+				break;
 
-				default:
-					cache_size = 0;
-					break;
-			}
-
-			c->x86_cache_size = cache_size; 
+			default:
+				c->x86_cache_size = 0;
+				break;
 		}
+	}
 
+	for (i = 0; i < sizeof(cpu_models)/sizeof(struct cpu_model_info); i++) {
 		if (cpu_models[i].vendor == c->x86_vendor &&
 		    cpu_models[i].x86 == c->x86) {
 			if (c->x86_model <= 16)
@@ -1019,8 +1024,9 @@ int get_cpuinfo(char * buffer)
 			x86_cap_flags[14] = "mca";
 			x86_cap_flags[16] = "pat";
 			x86_cap_flags[17] = "pse36";
-			x86_cap_flags[18] = "psn";
-			x86_cap_flags[24] = "osfxsr";
+			x86_cap_flags[18] = "pn";
+			x86_cap_flags[24] = "fxsr";
+			x86_cap_flags[25] = "xmm";
 			break;
 
 		    case X86_VENDOR_CENTAUR:

@@ -1,11 +1,17 @@
 /*
- * $Id: capidrv.c,v 1.27 1999/09/16 15:13:04 calle Exp $
+ * $Id: capidrv.c,v 1.29 1999/12/06 17:13:06 calle Exp $
  *
  * ISDN4Linux Driver, using capi20 interface (kernelcapi)
  *
  * Copyright 1997 by Carsten Paeth (calle@calle.in-berlin.de)
  *
  * $Log: capidrv.c,v $
+ * Revision 1.29  1999/12/06 17:13:06  calle
+ * Added controller watchdog.
+ *
+ * Revision 1.28  1999/11/05 16:22:37  calle
+ * Bugfix: Missing break in switch on ISDN_CMD_HANGUP.
+ *
  * Revision 1.27  1999/09/16 15:13:04  calle
  * forgot to change paramter type of contr for lower_callback ...
  *
@@ -165,7 +171,7 @@
 #include "capicmd.h"
 #include "capidrv.h"
 
-static char *revision = "$Revision: 1.27 $";
+static char *revision = "$Revision: 1.29 $";
 int debugmode = 0;
 
 MODULE_AUTHOR("Carsten Paeth <calle@calle.in-berlin.de>");
@@ -193,6 +199,7 @@ struct capidrv_contr {
 	int state;
 	__u32 cipmask;
 	__u32 cipmask2;
+        struct timer_list listentimer;
 
 	/*
 	 * ID of capi message sent
@@ -716,8 +723,6 @@ static struct plcistatechange plcitable[] =
   /* P-0.1 */
   {ST_PLCI_OUTGOING, ST_PLCI_NONE, EV_PLCI_CONNECT_CONF_ERROR, p0},
   {ST_PLCI_OUTGOING, ST_PLCI_ALLOCATED, EV_PLCI_CONNECT_CONF_OK, 0},
-  {ST_PLCI_OUTGOING, ST_PLCI_DISCONNECTING, EV_PLCI_DISCONNECT_REQ, 0},
-  {ST_PLCI_OUTGOING, ST_PLCI_DISCONNECTING, EV_PLCI_FACILITY_IND_DOWN, 0},
   /* P-1 */
   {ST_PLCI_ALLOCATED, ST_PLCI_ACTIVE, EV_PLCI_CONNECT_ACTIVE_IND, 0},
   {ST_PLCI_ALLOCATED, ST_PLCI_DISCONNECTING, EV_PLCI_DISCONNECT_REQ, 0},
@@ -1857,14 +1862,19 @@ static int capidrv_command(isdn_ctrl * c, capidrv_contr * card)
 			);
 			ncci_change_state(card, bchan->nccip, EV_NCCI_DISCONNECT_B3_REQ);
 			send_message(card, &cmdcmsg);
+			return 0;
 		} else if (bchan->plcip) {
-			bchan->disconnecting = 1;
 			if (bchan->plcip->state == ST_PLCI_INCOMING) {
-				/* just ignore, we a called from isdn_status_callback(),
-				 * which will return 0 or 2, this is handled by the
-				 * CONNECT_IND handler
+				/*
+				 * just ignore, we a called from
+				 * isdn_status_callback(),
+				 * which will return 0 or 2, this is handled
+				 * by the CONNECT_IND handler
 				 */
-			} else {
+				bchan->disconnecting = 1;
+				return 0;
+			} else if (bchan->plcip->plci) {
+				bchan->disconnecting = 1;
 				capi_fill_DISCONNECT_REQ(&cmdcmsg,
 							 global.appid,
 							 card->msgid++,
@@ -1876,8 +1886,18 @@ static int capidrv_command(isdn_ctrl * c, capidrv_contr * card)
 				);
 				plci_change_state(card, bchan->plcip, EV_PLCI_DISCONNECT_REQ);
 				send_message(card, &cmdcmsg);
+				return 0;
+			} else {
+				printk(KERN_ERR "capidrv-%d: chan %ld disconnect request while waiting for CONNECT_CONF\n",
+				       card->contrnr,
+				       c->arg);
+				return -EINVAL;
 			}
 		}
+		printk(KERN_ERR "capidrv-%d: chan %ld disconnect request on free channel\n",
+				       card->contrnr,
+				       c->arg);
+		return -EINVAL;
 /* ready */
 
 	case ISDN_CMD_SETL2:
@@ -2172,6 +2192,29 @@ static void disable_dchannel_trace(capidrv_contr *card)
 	send_message(card, &cmdcmsg);
 }
 
+static void send_listen(capidrv_contr *card)
+{
+	capi_fill_LISTEN_REQ(&cmdcmsg, global.appid,
+			     card->msgid++,
+			     card->contrnr, /* controller */
+			     1 << 6,	/* Infomask */
+			     card->cipmask,
+			     card->cipmask2,
+			     0, 0);
+	send_message(card, &cmdcmsg);
+	listen_change_state(card, EV_LISTEN_REQ);
+}
+
+static void listentimerfunc(unsigned long x)
+{
+	capidrv_contr *card = (capidrv_contr *)x;
+	if (card->state != ST_LISTEN_NONE && card->state != ST_LISTEN_ACTIVE)
+		printk(KERN_ERR "%s: controller dead ??\n", card->name);
+        send_listen(card);
+	mod_timer(&card->listentimer, jiffies + 60*HZ);
+}
+
+
 static int capidrv_addcontr(__u16 contr, struct capi_profile *profp)
 {
 	capidrv_contr *card;
@@ -2186,6 +2229,7 @@ static int capidrv_addcontr(__u16 contr, struct capi_profile *profp)
 		return -1;
 	}
 	memset(card, 0, sizeof(capidrv_contr));
+	init_timer(&card->listentimer);
 	strcpy(card->name, id);
 	card->contrnr = contr;
 	card->nbchan = profp->nbchannel;
@@ -2242,15 +2286,11 @@ static int capidrv_addcontr(__u16 contr, struct capi_profile *profp)
 	card->cipmask = 0x1FFF03FF;	/* any */
 	card->cipmask2 = 0;
 
-	capi_fill_LISTEN_REQ(&cmdcmsg, global.appid,
-			     card->msgid++,
-			     contr,	/* controller */
-			     1 << 6,	/* Infomask */
-			     card->cipmask,
-			     card->cipmask2,
-			     0, 0);
-	send_message(card, &cmdcmsg);
-	listen_change_state(card, EV_LISTEN_REQ);
+	send_listen(card);
+
+	card->listentimer.data = (unsigned long)card;
+	card->listentimer.function = listentimerfunc;
+	mod_timer(&card->listentimer, jiffies + 60*HZ);
 
 	printk(KERN_INFO "%s: now up (%d B channels)\n",
 		card->name, card->nbchan);
@@ -2296,6 +2336,7 @@ static int capidrv_delcontr(__u16 contr)
 			printk(KERN_ERR "capidrv: bug in free_plci()\n");
 	}
 	kfree(card->bchans);
+	del_timer(&card->listentimer);
 
 	printk(KERN_INFO "%s: now down.\n", card->name);
 

@@ -59,7 +59,9 @@ ifdef CONFIG_VT
 LX_OBJS += keyboard.o
 endif
  ifneq ($(ARCH),m68k)
+  ifneq ($(ARCH),s390)
    L_OBJS += pc_keyb.o defkeymap.o
+ endif
  endif
 else
 ifdef CONFIG_PCI
@@ -89,6 +91,22 @@ L_OBJS += rocket.o
 else
   ifeq ($(CONFIG_ROCKETPORT),m)
   M_OBJS += rocket.o
+  endif
+endif
+
+ifeq ($(CONFIG_MOXA_SMARTIO),y)
+L_OBJS += mxser.o
+else
+  ifeq ($(CONFIG_MOXA_SMARTIO),m)
+  M_OBJS += mxser.o
+  endif
+endif
+
+ifeq ($(CONFIG_MOXA_INTELLIO),y)
+L_OBJS += moxa.o
+else
+  ifeq ($(CONFIG_MOXA_INTELLIO),m)
+  M_OBJS += moxa.o
   endif
 endif
 
@@ -270,6 +288,14 @@ else
   endif
 endif
 
+ifeq ($(CONFIG_MIXCOMWD),y)
+L_OBJS += mixcomwd.o
+else
+  ifeq ($(CONFIG_MIXCOMWD),m)
+  M_OBJS += mixcomwd.o
+  endif
+endif
+
 ifeq ($(CONFIG_AMIGAMOUSE),y)
 L_OBJS += amigamouse.o
 else
@@ -343,11 +369,21 @@ else
 endif
 
 ifeq ($(CONFIG_VIDEO_BT848),y)
-L_OBJS += bttv.o msp3400.o tuner.o
+L_OBJS += bttv.o tuner.o
 L_I2C=y
 else
   ifeq ($(CONFIG_VIDEO_BT848),m)
-    M_OBJS += bttv.o msp3400.o tuner.o
+    M_OBJS += bttv.o tuner.o
+    M_I2C=y
+  endif
+endif
+
+ifeq ($(CONFIG_VIDEO_MSP3400),y)
+L_OBJS += msp3400.o 
+L_I2C=y
+else
+  ifeq ($(CONFIG_VIDEO_MSP3400),m)
+    M_OBJS += msp3400.o
     M_I2C=y
   endif
 endif
@@ -380,9 +416,11 @@ endif
 
 ifeq ($(CONFIG_VIDEO_ZORAN),y)
 L_OBJS += buz.o
+L_I2C=y
 else
   ifeq ($(CONFIG_VIDEO_ZORAN),m)
     M_OBJS += buz.o
+    M_I2C=y
   endif
 endif
 

@@ -46,6 +46,10 @@
 #include <linux/apm_bios.h>
 #endif
 
+#ifdef CONFIG_DASD
+#include "../drivers/s390/block/dasd.h"
+#endif
+
 #ifdef CONFIG_MAC
 extern void nubus_init(void);
 #endif
@@ -113,20 +117,29 @@ extern void js_am_setup(char *str, int *ints);
 #ifdef CONFIG_JOY_ANALOG
 extern void js_an_setup(char *str, int *ints);
 #endif
-#ifdef CONFIG_JOY_ASSASIN
+#ifdef CONFIG_JOY_ASSASSIN
 extern void js_as_setup(char *str, int *ints);
 #endif
 #ifdef CONFIG_JOY_CONSOLE
 extern void js_console_setup(char *str, int *ints);
+extern void js_console_setup_2(char *str, int *ints);
+extern void js_console_setup_3(char *str, int *ints);
 #endif
 #ifdef CONFIG_JOY_DB9
 extern void js_db9_setup(char *str, int *ints);
+extern void js_db9_setup_2(char *str, int *ints);
+extern void js_db9_setup_3(char *str, int *ints);
 #endif
 #ifdef CONFIG_JOY_TURBOGRAFX
 extern void js_tg_setup(char *str, int *ints);
+extern void js_tg_setup_2(char *str, int *ints);
+extern void js_tg_setup_3(char *str, int *ints);
 #endif
 #ifdef CONFIG_JOY_LIGHTNING
 extern void js_l4_setup(char *str, int *ints);
+#endif
+#ifdef CONFIG_JOY_PCI
+extern void js_pci_setup(char *str, int *ints);
 #endif
 extern void eth_setup(char *str, int *ints);
 #ifdef CONFIG_ARCNET_COM20020
@@ -134,6 +147,9 @@ extern void com20020_setup(char *str, int *ints);
 #endif
 #ifdef CONFIG_ARCNET_RIM_I
 extern void arcrimi_setup(char *str, int *ints);
+#endif
+#ifdef CONFIG_CTC  
+extern void ctc_setup(char *str, int *ints);
 #endif
 #ifdef CONFIG_ARCNET_COM90xxIO
 extern void com90io_setup(char *str, int *ints);
@@ -165,6 +181,12 @@ extern void pg_setup(char *str, int *ints);
 #endif
 #ifdef CONFIG_PARIDE_PCD
 extern void pcd_setup(char *str, int *ints);
+#endif
+#ifdef CONFIG_MDISK
+extern void mdisk_setup(char *str, int *ints);
+#endif
+#ifdef CONFIG_DASD
+extern void dasd_setup(char *str, int *ints);
 #endif
 extern void floppy_setup(char *str, int *ints);
 extern void st_setup(char *str, int *ints);
@@ -327,6 +349,9 @@ extern void nfs_root_setup(char *str, int *ints);
 #endif
 #ifdef CONFIG_FTAPE
 extern void ftape_setup(char *str, int *ints);
+#endif
+#ifdef CONFIG_3215_CONSOLE
+extern int con3215_activate(void);
 #endif
 #ifdef CONFIG_MDA_CONSOLE
 extern void mdacon_setup(char *str, int *ints);
@@ -525,6 +550,26 @@ static struct dev_name_struct {
 #if CONFIG_DDV
 	{ "ddv", DDV_MAJOR << 8},
 #endif
+#ifdef CONFIG_MDISK
+        { "mnd0", (MDISK_MAJOR << MINORBITS)},
+        { "mnd1", (MDISK_MAJOR << MINORBITS) + 1},
+        { "mnd2", (MDISK_MAJOR << MINORBITS) + 2},
+        { "mnd3", (MDISK_MAJOR << MINORBITS) + 3},
+        { "mnd4", (MDISK_MAJOR << MINORBITS) + 4},
+        { "mnd5", (MDISK_MAJOR << MINORBITS) + 5},
+        { "mnd6", (MDISK_MAJOR << MINORBITS) + 6},
+        { "mnd7", (MDISK_MAJOR << MINORBITS) + 7},
+#endif
+#ifdef CONFIG_DASD
+       { "dasd0", (DASD_MAJOR << MINORBITS) },
+       { "dasd1", (DASD_MAJOR << MINORBITS) + (1 << 2) },
+       { "dasd2", (DASD_MAJOR << MINORBITS) + (2 << 2) },
+       { "dasd3", (DASD_MAJOR << MINORBITS) + (3 << 2) },
+       { "dasd4", (DASD_MAJOR << MINORBITS) + (4 << 2) },
+       { "dasd5", (DASD_MAJOR << MINORBITS) + (5 << 2) },
+       { "dasd6", (DASD_MAJOR << MINORBITS) + (6 << 2) },
+       { "dasd7", (DASD_MAJOR << MINORBITS) + (7 << 2) },
+#endif
 	{ NULL, 0 }
 };
 
@@ -589,7 +634,12 @@ static struct kernel_param cooked_params[] __initdata = {
 #ifdef CONFIG_BLK_DEV_INITRD
 	{ "noinitrd", no_initrd },
 #endif
+
+#ifdef CONFIG_CTC
+        { "ctc=", ctc_setup } ,
 #endif
+#endif
+
 #ifdef CONFIG_FB
 	{ "video=", video_setup },
 #endif
@@ -639,30 +689,33 @@ static struct kernel_param cooked_params[] __initdata = {
 #ifdef CONFIG_JOY_ANALOG
 	{ "js_an=", js_an_setup },
 #endif
-#ifdef CONFIG_JOY_ASSASIN
+#ifdef CONFIG_JOY_ASSASSIN
 	{ "js_as=", js_as_setup },
 #endif
 #ifdef CONFIG_JOY_CONSOLE
 	{ "js_console=", js_console_setup },
-	{ "js_console2=", js_console_setup },
-	{ "js_console3=", js_console_setup },
+	{ "js_console2=", js_console_setup_2 },
+	{ "js_console3=", js_console_setup_3 },
 #endif
 #ifdef CONFIG_JOY_DB9
 	{ "js_db9=", js_db9_setup },
-	{ "js_db9_2=", js_db9_setup },
-	{ "js_db9_3=", js_db9_setup },
+	{ "js_db9_2=", js_db9_setup_2 },
+	{ "js_db9_3=", js_db9_setup_3 },
 #endif
 #ifdef CONFIG_JOY_TURBOGRAFX
 	{ "js_tg=", js_tg_setup },
-	{ "js_tg_2=", js_tg_setup },
-	{ "js_tg_3=", js_tg_setup },
+	{ "js_tg_2=", js_tg_setup_2 },
+	{ "js_tg_3=", js_tg_setup_3 },
+#endif
+#ifdef CONFIG_JOY_LIGHTNING
+	{ "js_l4=", js_l4_setup },
+#endif
+#ifdef CONFIG_JOY_PCI
+	{ "js_pci=", js_pci_setup },
 #endif
 #ifdef CONFIG_SCSI
 	{ "max_scsi_luns=", scsi_luns_setup },
 	{ "scsi_logging=", scsi_logging_setup },
-#endif
-#ifdef CONFIG_JOY_LIGHTNING
-	{ "js_l4=", js_l4_setup },
 #endif
 #ifdef CONFIG_SCSI_ADVANSYS
 	{ "advansys=", advansys_setup },
@@ -927,6 +980,12 @@ static struct kernel_param raw_params[] __initdata = {
 #endif
 #ifdef CONFIG_APM
 	{ "apm=", apm_setup },
+#endif
+#ifdef CONFIG_MDISK
+        { "mdisk=", mdisk_setup },
+#endif
+#ifdef CONFIG_DASD
+        { "dasd=", dasd_setup },
 #endif
 	{ 0, 0 }
 };
@@ -1203,6 +1262,9 @@ asmlinkage void __init start_kernel(void)
 #endif
 	mem_init(memory_start,memory_end);
 	kmem_cache_sizes_init();
+#ifdef CONFIG_3215_CONSOLE
+        con3215_activate();
+#endif
 #ifdef CONFIG_PROC_FS
 	proc_root_init();
 #endif
@@ -1211,6 +1273,7 @@ asmlinkage void __init start_kernel(void)
 	dcache_init();
 	vma_init();
 	buffer_init(memory_end-memory_start);
+ 	page_cache_init(memory_end-memory_start);
 	signals_init();
 	inode_init();
 	file_table_init();

@@ -20,6 +20,7 @@
 #include <linux/file.h>
 #include <linux/swapctl.h>
 #include <linux/slab.h>
+#include <linux/init.h>
 
 #include <asm/pgtable.h>
 #include <asm/uaccess.h>
@@ -32,7 +33,8 @@
  */
 
 unsigned long page_cache_size = 0;
-struct page * page_hash_table[PAGE_HASH_SIZE];
+unsigned int page_hash_bits, page_hash_mask;
+struct page **page_hash_table;
 
 /* 
  * Define a request structure for outstanding page write requests
@@ -985,7 +987,7 @@ found_page:
 	if (no_share && !new_page) {
 		new_page = page_cache_alloc();
 		if (!new_page)
-			goto failure;
+			goto release_and_oom;
 	}
 
 	if (PageLocked(page))
@@ -1033,7 +1035,7 @@ no_cached_page:
 	if (!new_page)
 		new_page = page_cache_alloc();
 	if (!new_page)
-		goto no_page;
+		goto oom;
 
 	/*
 	 * During getting the above page we might have slept,
@@ -1087,6 +1089,11 @@ failure:
 		page_cache_free(new_page);
 no_page:
 	return 0;
+
+release_and_oom:
+	page_cache_release(page);
+oom:
+	return -1;
 }
 
 /*
@@ -1756,4 +1763,35 @@ int kpiod(void * unused)
 			kmem_cache_free(pio_request_cache, p);
 		}
 	}
+}
+
+void __init page_cache_init(unsigned long memory_size)
+{
+	unsigned long htable_size;
+	long order;
+
+	htable_size  = memory_size >> PAGE_SHIFT;
+	htable_size *= sizeof(struct page *);
+	for(order = 0; (PAGE_SIZE << order) < htable_size; order++)
+		;
+
+	do {
+		unsigned long tmp = (PAGE_SIZE << order) / sizeof(struct page *);
+
+		page_hash_mask = (tmp - 1UL);
+
+		page_hash_bits = 0;
+		while((tmp >>= 1UL) != 0UL)
+			page_hash_bits++;
+
+		page_hash_table = (struct page **)
+			__get_free_pages(GFP_ATOMIC, order);
+	} while(page_hash_table == NULL && --order >= 0L);
+
+	printk("Page cache hash table entries: %d (order %ld, %ldk)\n",
+	       (1 << page_hash_bits), order, (1UL << order) * PAGE_SIZE / 1024);
+	if (!page_hash_table)
+		panic("Failed to allocate page hash table\n");
+	memset(page_hash_table, 0,
+	       (PAGE_HASH_MASK + 1UL) * sizeof(struct page *));
 }

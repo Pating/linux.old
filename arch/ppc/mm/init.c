@@ -1,5 +1,5 @@
 /*
- *  $Id: init.c,v 1.164.2.5 1999/09/07 00:59:22 paulus Exp $
+ *  $Id: init.c,v 1.164.2.7 1999/10/19 04:32:39 paulus Exp $
  *
  *  PowerPC version 
  *    Copyright (C) 1995-1996 Gary Thomas (gdt@linuxppc.org)
@@ -54,6 +54,7 @@
 #include <asm/setup.h>
 #include <asm/amigahw.h>
 /* END APUS includes */
+#include <asm/gemini.h>
 
 int prom_trashed;
 atomic_t next_mmu_context;
@@ -83,6 +84,7 @@ static void *MMU_get_page(void);
 unsigned long *prep_find_end_of_memory(void);
 unsigned long *pmac_find_end_of_memory(void);
 unsigned long *apus_find_end_of_memory(void);
+unsigned long *gemini_find_end_of_memory(void);
 extern unsigned long *find_end_of_memory(void);
 #ifdef CONFIG_MBX
 unsigned long *mbx_find_end_of_memory(void);
@@ -114,6 +116,7 @@ static void print_mem_pieces(struct mem_pieces *);
 static void append_mem_piece(struct mem_pieces *, unsigned, unsigned);
 
 extern struct task_struct *current_set[NR_CPUS];
+unsigned long cpu_invalidate_tlb[NR_CPUS];
 
 PTE *Hash, *Hash_end;
 unsigned long Hash_size, Hash_mask;
@@ -148,6 +151,9 @@ unsigned long inline p_mapped_by_bats(unsigned long);
  * -- Cort
  */
 int __map_without_bats = 0;
+
+/* max amount of RAM to use */
+unsigned long __max_memory;
 
 /* optimization for 603 to load the tlb directly from the linux table -- Cort */
 #define NO_RELOAD_HTAB 1 /* change in kernel/head.S too! */
@@ -492,6 +498,9 @@ local_flush_tlb_all(void)
 #ifndef CONFIG_8xx
 	__clear_user(Hash, Hash_size);
 	_tlbia();
+#ifdef __SMP__
+	smp_send_tlb_invalidate(0);
+#endif	
 #else
 	asm volatile ("tlbia" : : );
 #endif
@@ -509,6 +518,9 @@ local_flush_tlb_mm(struct mm_struct *mm)
 	mm->context = NO_CONTEXT;
 	if (mm == current->mm)
 		activate_context(current);
+#ifdef __SMP__
+	smp_send_tlb_invalidate(0);
+#endif	
 #else
 	asm volatile ("tlbia" : : );
 #endif
@@ -522,6 +534,9 @@ local_flush_tlb_page(struct vm_area_struct *vma, unsigned long vmaddr)
 		flush_hash_page(vma->vm_mm->context, vmaddr);
 	else
 		flush_hash_page(0, vmaddr);
+#ifdef __SMP__
+	smp_send_tlb_invalidate(0);
+#endif	
 #else
 	asm volatile ("tlbia" : : );
 #endif
@@ -551,6 +566,9 @@ local_flush_tlb_range(struct mm_struct *mm, unsigned long start, unsigned long e
 	{
 		flush_hash_page(mm->context, start);
 	}
+#ifdef __SMP__
+	smp_send_tlb_invalidate(0);
+#endif	
 #else
 	asm volatile ("tlbia" : : );
 #endif
@@ -576,6 +594,9 @@ mmu_context_overflow(void)
 	}
 	read_unlock(&tasklist_lock);
 	flush_hash_segments(0x10, 0xffffff);
+#ifdef __SMP__
+	smp_send_tlb_invalidate(0);
+#endif	
 	atomic_set(&next_mmu_context, 0);
 	/* make sure current always has a context */
 	current->mm->context = MUNGE_CONTEXT(atomic_inc_return(&next_mmu_context));
@@ -984,6 +1005,10 @@ __initfunc(void free_initmem(void))
 		FREESEC(__pmac_begin,__pmac_end,num_pmac_pages);
 		FREESEC(__prep_begin,__prep_end,num_prep_pages);
 		break;
+	case _MACH_gemini:
+		FREESEC(__pmac_begin,__pmac_end,num_pmac_pages);
+		FREESEC(__prep_begin,__prep_end,num_prep_pages);
+		break;
 	}
 
 	if ( !have_of )
@@ -1021,9 +1046,13 @@ __initfunc(void MMU_init(void))
 	else if (_machine == _MACH_apus )
 		end_of_DRAM = apus_find_end_of_memory();
 #endif
+#ifdef CONFIG_GEMINI	
+	else if ( _machine == _MACH_gemini )
+		end_of_DRAM = gemini_find_end_of_memory();
+#endif /* CONFIG_GEMINI	*/
 	else /* prep */
 		end_of_DRAM = prep_find_end_of_memory();
-
+*(unsigned long *)(KERNELBASE) = 0xdeadbeef;	
         hash_init();
         _SDR1 = __pa(Hash) | (Hash_mask >> 10);
 	ioremap_base = 0xf8000000;
@@ -1065,6 +1094,10 @@ __initfunc(void MMU_init(void))
 		/* Note: a temporary hack in arch/ppc/amiga/setup.c
 		   (kernel_map) remaps individual IO regions to
 		   0x90000000. */
+		break;
+	case _MACH_gemini:
+		setbat(0, 0xf0000000, 0xf0000000, 0x10000000, IO_PAGE);
+		setbat(1, 0x80000000, 0x80000000, 0x10000000, IO_PAGE);
 		break;
 	}
 	ioremap_bot = ioremap_base;
@@ -1296,7 +1329,7 @@ __initfunc(unsigned long *pmac_find_end_of_memory(void))
 	int i;
 	
 	/* max amount of RAM we allow -- Cort */
-#define RAM_LIMIT (256<<20)
+#define RAM_LIMIT (768<<20)
 
 	memory_node = find_devices("memory");
 	if (memory_node == NULL) {
@@ -1329,8 +1362,12 @@ __initfunc(unsigned long *pmac_find_end_of_memory(void))
 	 * to our nearest IO area.
 	 * -- Cort
 	 */
-	if ( phys_mem.regions[0].size >= RAM_LIMIT )
-		phys_mem.regions[0].size = RAM_LIMIT;
+	if (__max_memory == 0 || __max_memory > RAM_LIMIT)
+		__max_memory = RAM_LIMIT;
+	if (phys_mem.regions[0].size >= __max_memory) {
+		phys_mem.regions[0].size = __max_memory;
+		phys_mem.n_regions = 1;
+	}
 	total = phys_mem.regions[0].size;
 	
 	if (phys_mem.n_regions > 1) {
@@ -1343,20 +1380,15 @@ __initfunc(unsigned long *pmac_find_end_of_memory(void))
 	if (boot_infos == 0) {
 		/* record which bits the prom is using */
 		get_mem_prop("available", &phys_avail);
+		prom_mem = phys_mem;
+		for (i = 0; i < phys_avail.n_regions; ++i)
+			remove_mem_piece(&prom_mem,
+					 phys_avail.regions[i].address,
+					 phys_avail.regions[i].size, 0);
 	} else {
 		/* booted from BootX - it's all available (after klimit) */
 		phys_avail = phys_mem;
-	}
-	prom_mem = phys_mem;
-	for (i = 0; i < phys_avail.n_regions; ++i)
-	{
-		if ( phys_avail.regions[i].address >= RAM_LIMIT )
-			continue;
-		if ( (phys_avail.regions[i].address+phys_avail.regions[i].size)
-		     >= RAM_LIMIT )
-			phys_avail.regions[i].size = RAM_LIMIT - phys_avail.regions[i].address;
-		remove_mem_piece(&prom_mem, phys_avail.regions[i].address,
-				 phys_avail.regions[i].size, 1);
+		prom_mem.n_regions = 0;
 	}
 
 	/*
@@ -1406,6 +1438,32 @@ __initfunc(unsigned long *prep_find_end_of_memory(void))
 
 	return (__va(total));
 }
+
+#if defined(CONFIG_GEMINI)
+unsigned long __init *gemini_find_end_of_memory(void)
+{
+	unsigned long total, kstart, ksize, *ret;
+	unsigned char reg;
+*(unsigned long *)(KERNELBASE) = 0x1;
+	reg = readb(GEMINI_MEMCFG);
+*(unsigned long *)(KERNELBASE) = 0x2;
+	total = ((1<<((reg & 0x7) - 1)) *
+		 (8<<((reg >> 3) & 0x7)));
+	total *= (1024*1024);
+	phys_mem.regions[0].address = 0;
+	phys_mem.regions[0].size = total;
+	phys_mem.n_regions = 1;
+	
+	ret = __va(phys_mem.regions[0].size);
+	phys_avail = phys_mem;
+	kstart = __pa(_stext);
+	ksize = PAGE_ALIGN( _end - _stext );
+*(unsigned long *)(KERNELBASE) = 0x3;
+	remove_mem_piece( &phys_avail, kstart, ksize, 0 );
+*(unsigned long *)(KERNELBASE) = 0x4;
+	return ret;
+}
+#endif /* defined(CONFIG_GEMINI) */
 
 #ifdef CONFIG_APUS
 #define HARDWARE_MAPPED_SIZE (512*1024)

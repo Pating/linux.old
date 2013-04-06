@@ -135,6 +135,12 @@ unsigned int              scsi_need_isa_buffer = 0;
 static unsigned char   ** dma_malloc_pages = NULL;
 
 /*
+ * get rid of callers having to aquire the io_request_lock before
+ * calling scsi_malloc and scsi_free
+ */
+spinlock_t		  scsi_malloc_lock = SPIN_LOCK_UNLOCKED;
+
+/*
  * Note - the initial logging level can be set here to log events at boot time.
  * After the system is up, you may enable logging via the /proc interface.
  */
@@ -258,6 +264,7 @@ static struct dev_info device_list[] =
 {"TEAC","CD-ROM","1.06", BLIST_NOLUN},          /* causes failed REQUEST SENSE on lun 1
 						 * for seagate controller, which causes
 						 * SCSI code to reset bus.*/
+	{"TEAC", "MT-2ST/45S2-27", "RV M", BLIST_NOLUN},	/* Responds to all lun */
 {"TEXEL","CD-ROM","1.06", BLIST_NOLUN},         /* causes failed REQUEST SENSE on lun 1
 						 * for seagate controller, which causes
 						 * SCSI code to reset bus.*/
@@ -268,7 +275,8 @@ static struct dev_info device_list[] =
 {"HP", "C1750A", "3226", BLIST_NOLUN},          /* scanjet iic */
 {"HP", "C1790A", "", BLIST_NOLUN},              /* scanjet iip */
 {"HP", "C2500A", "", BLIST_NOLUN},              /* scanjet iicx */
-{"YAMAHA", "CDR102", "1.00", BLIST_NOLUN},	/* extra reset */
+{"YAMAHA","CDR100","1.00", BLIST_NOLUN},	/* Locks up if polled for lun != 0 */
+{"YAMAHA","CDR102","1.00", BLIST_NOLUN},	/* Locks up if polled for lun != 0 */
 {"RELISYS", "Scorpio", "*", BLIST_NOLUN},	/* responds to all LUN */
 
 /*
@@ -292,12 +300,13 @@ static struct dev_info device_list[] =
 {"nCipher","Fastness Crypto","*", BLIST_FORCELUN},
 {"NEC","PD-1 ODX654P","*", BLIST_FORCELUN | BLIST_SINGLELUN},
 {"MATSHITA","PD-1","*", BLIST_FORCELUN | BLIST_SINGLELUN},
-{"YAMAHA","CDR100","1.00", BLIST_NOLUN},	/* Locks up if polled for lun != 0 */
-{"YAMAHA","CDR102","1.00", BLIST_NOLUN},	/* Locks up if polled for lun != 0 */
 {"iomega","jaz 1GB","J.86", BLIST_NOTQ | BLIST_NOLUN},
 {"CREATIVE","DVD-RAM RAM","*", BLIST_GHOST},
 {"MATSHITA","PD-2 LF-D100","*", BLIST_GHOST},
+{"HITACHI","GF-1050","*", BLIST_GHOST},        /* Hitachi SCSI DVD-RAM */
 {"TOSHIBA","CDROM","*", BLIST_ISROM},
+{"TOSHIBA","DVD-RAM SD-W1101","*", BLIST_GHOST},
+{"TOSHIBA","DVD-RAM SD-W1111","*", BLIST_GHOST},
 /*
  * Must be at end of list...
  */
@@ -1887,6 +1896,7 @@ static void scsi_unregister_host(Scsi_Host_Template *);
 void *scsi_malloc(unsigned int len)
 {
     unsigned int nbits, mask;
+    unsigned long flags;
     int i, j;
     if(len % SECTOR_SIZE != 0 || len > PAGE_SIZE)
 	return NULL;
@@ -1894,6 +1904,7 @@ void *scsi_malloc(unsigned int len)
     nbits = len >> 9;
     mask = (1 << nbits) - 1;
 
+    spin_lock_irqsave(&scsi_malloc_lock, flags);
     for(i=0;i < dma_sectors / SECTORS_PER_PAGE; i++)
 	for(j=0; j<=SECTORS_PER_PAGE - nbits; j++){
 	    if ((dma_malloc_freelist[i] & (mask << j)) == 0){
@@ -1903,15 +1914,18 @@ void *scsi_malloc(unsigned int len)
                 SCSI_LOG_MLQUEUE(3,printk("SMalloc: %d %p [From:%p]\n",len, dma_malloc_pages[i] + (j << 9)));
 		printk("SMalloc: %d %p [From:%p]\n",len, dma_malloc_pages[i] + (j << 9));
 #endif
+		spin_unlock_irqrestore(&scsi_malloc_lock, flags);
 		return (void *) ((unsigned long) dma_malloc_pages[i] + (j << 9));
 	    }
 	}
+    spin_unlock_irqrestore(&scsi_malloc_lock, flags);
     return NULL;  /* Nope.  No more */
 }
 
 int scsi_free(void *obj, unsigned int len)
 {
     unsigned int page, sector, nbits, mask;
+    unsigned long flags;
 
 #ifdef DEBUG
     unsigned long ret = 0;
@@ -1925,6 +1939,7 @@ int scsi_free(void *obj, unsigned int len)
     SCSI_LOG_MLQUEUE(3,printk("SFree: %p %d\n",obj, len));
 #endif
 
+    spin_lock_irqsave(&scsi_malloc_lock, flags);
     for (page = 0; page < dma_sectors / SECTORS_PER_PAGE; page++) {
         unsigned long page_addr = (unsigned long) dma_malloc_pages[page];
         if ((unsigned long) obj >= page_addr &&
@@ -1948,9 +1963,11 @@ int scsi_free(void *obj, unsigned int len)
             }
             scsi_dma_free_sectors += nbits;
             dma_malloc_freelist[page] &= ~(mask << sector);
+	    spin_unlock_irqrestore(&scsi_malloc_lock, flags);
             return 0;
 	}
     }
+    spin_unlock_irqrestore(&scsi_malloc_lock, flags);
     panic("scsi_free:Bad offset");
 }
 

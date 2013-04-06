@@ -225,7 +225,6 @@ EXPORT_SYMBOL(br_ioctl);
 EXPORT_SYMBOL(inet_add_protocol);
 EXPORT_SYMBOL(inet_del_protocol);
 EXPORT_SYMBOL(rarp_ioctl_hook);
-EXPORT_SYMBOL(init_etherdev);
 EXPORT_SYMBOL(ip_route_output);
 EXPORT_SYMBOL(icmp_send);
 EXPORT_SYMBOL(ip_options_compile);
@@ -277,9 +276,11 @@ EXPORT_SYMBOL(inet_sendmsg);
 EXPORT_SYMBOL(inet_recvmsg);
 
 /* Socket demultiplexing. */
-EXPORT_SYMBOL(tcp_established_hash);
+EXPORT_SYMBOL(tcp_ehash_size);
+EXPORT_SYMBOL(tcp_ehash);
 EXPORT_SYMBOL(tcp_listening_hash);
-EXPORT_SYMBOL(tcp_bound_hash);
+EXPORT_SYMBOL(tcp_bhash_size);
+EXPORT_SYMBOL(tcp_bhash);
 EXPORT_SYMBOL(udp_hash);
 
 EXPORT_SYMBOL(destroy_sock);
@@ -381,9 +382,6 @@ EXPORT_SYMBOL(neigh_add);
 EXPORT_SYMBOL(neigh_dump_info);
 #endif
 
-EXPORT_SYMBOL(dev_set_allmulti);
-EXPORT_SYMBOL(dev_set_promiscuity);
-EXPORT_SYMBOL(sklist_remove_socket);
 EXPORT_SYMBOL(rtnl_wait);
 EXPORT_SYMBOL(rtnl_rlockct);
 EXPORT_SYMBOL(rtnl_lock);
@@ -453,6 +451,10 @@ EXPORT_SYMBOL(ether_setup);
 EXPORT_SYMBOL(dev_new_index);
 EXPORT_SYMBOL(dev_get_by_index);
 EXPORT_SYMBOL(eth_type_trans);
+EXPORT_SYMBOL(init_etherdev);
+EXPORT_SYMBOL(dev_set_allmulti);
+EXPORT_SYMBOL(dev_set_promiscuity);
+EXPORT_SYMBOL(sklist_remove_socket);
 #ifdef CONFIG_FDDI
 EXPORT_SYMBOL(fddi_type_trans);
 EXPORT_SYMBOL(fddi_setup);
@@ -496,8 +498,10 @@ EXPORT_SYMBOL(init_hippi_dev);
 EXPORT_SYMBOL(unregister_hipdev);
 #endif
 
+#ifdef CONFIG_INET
 EXPORT_SYMBOL(sysctl_wmem_max);
 EXPORT_SYMBOL(sysctl_rmem_max);
+#endif
 
 #if defined(CONFIG_ATALK) || defined(CONFIG_ATALK_MODULE) 
 #include<linux/if_ltalk.h>

@@ -1,10 +1,17 @@
-/* $Id: isurf.c,v 1.6 1999/09/04 06:20:06 keil Exp $
+/* $Id: isurf.c,v 1.8 1999/12/19 13:09:42 keil Exp $
 
  * isurf.c  low level stuff for Siemens I-Surf/I-Talk cards
  *
  * Author     Karsten Keil (keil@isdn4linux.de)
  *
  * $Log: isurf.c,v $
+ * Revision 1.8  1999/12/19 13:09:42  keil
+ * changed TASK_INTERRUPTIBLE into TASK_UNINTERRUPTIBLE for
+ * signal proof delays
+ *
+ * Revision 1.7  1999/11/14 23:37:03  keil
+ * new ISA memory mapped IO
+ *
  * Revision 1.6  1999/09/04 06:20:06  keil
  * Changes from kernel set_current_state()
  *
@@ -37,7 +44,7 @@
 
 extern const char *CardType[];
 
-static const char *ISurf_revision = "$Revision: 1.6 $";
+static const char *ISurf_revision = "$Revision: 1.8 $";
 
 #define byteout(addr,val) outb(val,addr)
 #define bytein(addr) inb(addr)
@@ -50,7 +57,7 @@ static const char *ISurf_revision = "$Revision: 1.6 $";
 
 #define ISURF_ISAR_OFFSET	0
 #define ISURF_ISAC_OFFSET	0x100
-
+#define ISURF_IOMEM_SIZE	0x400
 /* Interface functions */
 
 static u_char
@@ -157,10 +164,10 @@ reset_isurf(struct IsdnCardState *cs, u_char chips)
 	byteout(cs->hw.isurf.reset, chips); /* Reset On */
 	save_flags(flags);
 	sti();
-	current->state = TASK_INTERRUPTIBLE;
+	current->state = TASK_UNINTERRUPTIBLE;
 	schedule_timeout((10*HZ)/1000);
 	byteout(cs->hw.isurf.reset, ISURF_ISAR_EA); /* Reset Off */
-	current->state = TASK_INTERRUPTIBLE;
+	current->state = TASK_UNINTERRUPTIBLE;
 	schedule_timeout((10*HZ)/1000);
 	restore_flags(flags);
 }
@@ -223,8 +230,7 @@ setup_isurf(struct IsdnCard *card))
  		return(0);
 	if (card->para[1] && card->para[2]) {
 		cs->hw.isurf.reset = card->para[1];
-		cs->hw.isurf.isar = card->para[2] + ISURF_ISAR_OFFSET;
-		cs->hw.isurf.isac = card->para[2] + ISURF_ISAC_OFFSET;
+		cs->hw.isurf.phymem = card->para[2];
 		cs->irq = card->para[0];
 	} else {
 		printk(KERN_WARNING "HiSax: %s port/mem not set\n",
@@ -240,11 +246,12 @@ setup_isurf(struct IsdnCard *card))
 	} else {
 		request_region(cs->hw.isurf.reset, 1, "isurf isdn");
 	}
-
+	cs->hw.isurf.isar = cs->hw.isurf.phymem + ISURF_ISAR_OFFSET;
+	cs->hw.isurf.isac = cs->hw.isurf.phymem + ISURF_ISAC_OFFSET;
 	printk(KERN_INFO
-	       "ISurf: defined at 0x%x 0x%x IRQ %d\n",
+	       "ISurf: defined at 0x%x 0x%lx IRQ %d\n",
 	       cs->hw.isurf.reset,
-	       cs->hw.isurf.isar,
+	       cs->hw.isurf.phymem,
 	       cs->irq);
 
 	cs->cardmsg = &ISurf_card_msg;
