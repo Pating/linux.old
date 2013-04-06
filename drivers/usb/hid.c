@@ -1233,6 +1233,19 @@ static void hid_init_input(struct hid_device *hid)
 	}
 }
 
+#define USB_VENDOR_ID_WACOM		0x056a
+#define USB_DEVICE_ID_WACOM_GRAPHIRE	0x0010
+#define USB_DEVICE_ID_WACOM_INTUOS	0x0021
+
+struct hid_blacklist {
+	__u16 idVendor;
+	__u16 idProduct;
+} hid_blacklist[] = {
+	{ USB_VENDOR_ID_WACOM, USB_DEVICE_ID_WACOM_INTUOS },
+	{ USB_VENDOR_ID_WACOM, USB_DEVICE_ID_WACOM_GRAPHIRE },
+	{ 0, 0 }
+};
+
 static struct hid_device *usb_hid_configure(struct usb_device *dev, int ifnum)
 {
 	struct usb_interface_descriptor *interface = dev->actconfig->interface[ifnum].altsetting + 0;
@@ -1240,6 +1253,10 @@ static struct hid_device *usb_hid_configure(struct usb_device *dev, int ifnum)
 	struct hid_device *hid;
 	unsigned rsize = 0;
 	int n;
+
+	for (n = 0; hid_blacklist[n].idVendor; n++)
+		if ((hid_blacklist[n].idVendor == dev->descriptor.idVendor) &&
+			(hid_blacklist[n].idProduct == dev->descriptor.idProduct)) return NULL;
 
 	if (interface->bInterfaceClass != USB_INTERFACE_CLASS_HID)
 		return NULL;
@@ -1346,7 +1363,7 @@ static void* hid_probe(struct usb_device *dev, unsigned int ifnum)
 	hid_init_input(hid);
 	input_register_device(&hid->input);
 
-	printk(KERN_INFO "input%d: USB HID v%d.%d %s\n",
+	printk(KERN_INFO "input%d: USB HID v%x.%02x %s\n",
 		hid->input.number, hid->version >> 8, hid->version & 0xff,
 		(hid->application & 0xffff) <= 8 ? hid_name[hid->application & 0xffff] : "device");
 

@@ -14,6 +14,8 @@
  *
  * Fixed do_loop_request() re-entrancy - Vincent.Renardias@waw.com Mar 20, 1997
  *
+ * Added devfs support - Richard Gooch <rgooch@atnf.csiro.au> 16-Jan-1998
+ *
  * Handle sparse backing files correctly - Kenn Humborg, Jun 28, 1998
  *
  * Loadable modules and other fixes by AK, 1998
@@ -56,6 +58,7 @@
 #include <linux/major.h>
 
 #include <linux/init.h>
+#include <linux/devfs_fs_kernel.h>
 
 #include <asm/uaccess.h>
 
@@ -77,6 +80,7 @@ static int max_loop = 8;
 static struct loop_device *loop_dev;
 static int *loop_sizes;
 static int *loop_blksizes;
+static devfs_handle_t devfs_handle = NULL;      /*  For the directory        */
 
 #define FALSE 0
 #define TRUE (!FALSE)
@@ -198,8 +202,6 @@ static int lo_send(struct loop_device *lo, char *data, int len, loff_t pos,
 		offset = 0;
 		index++;
 		pos += size;
-		if (pos > lo->lo_dentry->d_inode->i_size)
-			lo->lo_dentry->d_inode->i_size = pos;
 		UnlockPage(page);
 		page_cache_release(page);
 	}
@@ -277,7 +279,7 @@ static void do_lo_request(request_queue_t * q)
 repeat:
 	INIT_REQUEST;
 	current_request=CURRENT;
-	CURRENT=current_request->next;
+	blkdev_dequeue_request(current_request);
 	if (MINOR(current_request->rq_dev) >= max_loop)
 		goto error_out;
 	lo = &loop_dev[MINOR(current_request->rq_dev)];
@@ -375,15 +377,13 @@ done:
 	spin_lock_irq(&io_request_lock);
 	current_request->sector += current_request->current_nr_sectors;
 	current_request->nr_sectors -= current_request->current_nr_sectors;
-	current_request->next=CURRENT;
-	CURRENT=current_request;
+	list_add(&current_request->queue, &current_request->q->queue_head);
 	end_request(1);
 	goto repeat;
 error_out_lock:
 	spin_lock_irq(&io_request_lock);
 error_out:
-	current_request->next=CURRENT;
-	CURRENT=current_request;
+	list_add(&current_request->queue, &current_request->q->queue_head);
 	end_request(0);
 	goto repeat;
 }
@@ -453,7 +453,7 @@ static int loop_set_fd(struct loop_device *lo, kdev_t dev, unsigned int arg)
 				lo->lo_backing_file = NULL;
 			}
 		}
-		aops = lo->lo_dentry->d_inode->i_mapping->a_ops;
+		aops = inode->i_mapping->a_ops;
 		/*
 		 * If we can't read - sorry. If we only can't write - well,
 		 * it's going to be read-only.
@@ -754,11 +754,16 @@ int __init loop_init(void)
 {
 	int	i;
 
-	if (register_blkdev(MAJOR_NR, "loop", &lo_fops)) {
+	if (devfs_register_blkdev(MAJOR_NR, "loop", &lo_fops)) {
 		printk(KERN_WARNING "Unable to get major number %d for loop device\n",
 		       MAJOR_NR);
 		return -EIO;
 	}
+	devfs_handle = devfs_mk_dir (NULL, "loop", 0, NULL);
+	devfs_register_series (devfs_handle, "%u", max_loop, DEVFS_FL_DEFAULT,
+			       MAJOR_NR, 0,
+			       S_IFBLK | S_IRUSR | S_IWUSR | S_IRGRP, 0, 0,
+			       &lo_fops, NULL);
 
 	if ((max_loop < 1) || (max_loop > 255)) {
 		printk (KERN_WARNING "loop: invalid max_loop (must be between 1 and 255), using default (8)\n");
@@ -790,6 +795,7 @@ int __init loop_init(void)
 	}		
 
 	blk_init_queue(BLK_DEFAULT_QUEUE(MAJOR_NR), DEVICE_REQUEST);
+	blk_queue_headactive(BLK_DEFAULT_QUEUE(MAJOR_NR), 0);
 	for (i=0; i < max_loop; i++) {
 		memset(&loop_dev[i], 0, sizeof(struct loop_device));
 		loop_dev[i].lo_number = i;
@@ -807,7 +813,8 @@ int __init loop_init(void)
 #ifdef MODULE
 void cleanup_module(void) 
 {
-	if (unregister_blkdev(MAJOR_NR, "loop") != 0)
+	devfs_unregister (devfs_handle);
+	if (devfs_unregister_blkdev(MAJOR_NR, "loop") != 0)
 		printk(KERN_WARNING "loop: cannot unregister blkdev\n");
 
 	kfree (loop_dev);
