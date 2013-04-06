@@ -1,4 +1,4 @@
-/* $Id: eicon.h,v 1.1.4.1 2001/11/20 14:19:35 kai Exp $
+/* $Id: eicon.h,v 1.23.6.5 2001/09/23 22:24:37 kai Exp $
  *
  * ISDN low-level module for Eicon active ISDN-Cards.
  *
@@ -348,19 +348,19 @@ extern eicon_card *cards;
 extern char *eicon_ctype_name[];
 
 
-static inline void eicon_schedule_tx(eicon_card *card)
+extern __inline__ void eicon_schedule_tx(eicon_card *card)
 {
         queue_task(&card->snd_tq, &tq_immediate);
         mark_bh(IMMEDIATE_BH);
 }
 
-static inline void eicon_schedule_rx(eicon_card *card)
+extern __inline__ void eicon_schedule_rx(eicon_card *card)
 {
         queue_task(&card->rcv_tq, &tq_immediate);
         mark_bh(IMMEDIATE_BH);
 }
 
-static inline void eicon_schedule_ack(eicon_card *card)
+extern __inline__ void eicon_schedule_ack(eicon_card *card)
 {
         queue_task(&card->ack_tq, &tq_immediate);
         mark_bh(IMMEDIATE_BH);

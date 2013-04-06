@@ -53,13 +53,8 @@ static int ext2_commit_chunk(struct page *page, unsigned from, unsigned to)
 	int err = 0;
 	dir->i_version = ++event;
 	page->mapping->a_ops->commit_write(NULL, page, from, to);
-	if (IS_SYNC(dir)) {
-		int err2;
-		err = writeout_one_page(page);
-		err2 = waitfor_one_page(page);
-		if (err == 0)
-			err = err2;
-	}
+	if (IS_SYNC(dir))
+		err = waitfor_one_page(page);
 	return err;
 }
 
@@ -390,7 +385,6 @@ void ext2_set_link(struct inode *dir, struct ext2_dir_entry_2 *de,
 	UnlockPage(page);
 	ext2_put_page(page);
 	dir->i_mtime = dir->i_ctime = CURRENT_TIME;
-	dir->u.ext2_i.i_flags &= ~EXT2_BTREE_FL;
 	mark_inode_dirty(dir);
 }
 
@@ -457,7 +451,6 @@ got_it:
 	ext2_set_de_type (de, inode);
 	err = ext2_commit_chunk(page, from, to);
 	dir->i_mtime = dir->i_ctime = CURRENT_TIME;
-	dir->u.ext2_i.i_flags &= ~EXT2_BTREE_FL;
 	mark_inode_dirty(dir);
 	/* OFFSET_CACHE */
 out_unlock:
@@ -500,7 +493,6 @@ int ext2_delete_entry (struct ext2_dir_entry_2 * dir, struct page * page )
 	UnlockPage(page);
 	ext2_put_page(page);
 	inode->i_ctime = inode->i_mtime = CURRENT_TIME;
-	inode->u.ext2_i.i_flags &= ~EXT2_BTREE_FL;
 	mark_inode_dirty(inode);
 	return err;
 }
@@ -524,8 +516,7 @@ int ext2_make_empty(struct inode *inode, struct inode *parent)
 		goto fail;
 
 	base = page_address(page);
-	
-	memset(base, 0, chunk_size); 
+
 	de = (struct ext2_dir_entry_2 *) base;
 	de->name_len = 1;
 	de->rec_len = cpu_to_le16(EXT2_DIR_REC_LEN(1));

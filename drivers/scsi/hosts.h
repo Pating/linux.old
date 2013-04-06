@@ -292,11 +292,6 @@ typedef struct	SHT
     unsigned emulated:1;
 
     /*
-     * True for drivers that can do I/O from highmem
-     */
-    unsigned highmem_io:1;
-
-    /*
      * Name of proc directory
      */
     char *proc_name;
@@ -395,8 +390,6 @@ struct Scsi_Host
     unsigned in_recovery:1;
     unsigned unchecked_isa_dma:1;
     unsigned use_clustering:1;
-    unsigned highmem_io:1;
-
     /*
      * True if this host was loaded as a loadable module
      */
@@ -533,7 +526,6 @@ struct Scsi_Device_Template
 void  scsi_initialize_queue(Scsi_Device * SDpnt, struct Scsi_Host * SHpnt);
 
 int scsi_register_device(struct Scsi_Device_Template * sdpnt);
-void scsi_deregister_device(struct Scsi_Device_Template * tpnt);
 
 /* These are used by loadable modules */
 extern int scsi_register_module(int, void *);

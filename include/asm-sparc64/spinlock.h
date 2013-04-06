@@ -6,13 +6,11 @@
 #ifndef __SPARC64_SPINLOCK_H
 #define __SPARC64_SPINLOCK_H
 
-#include <linux/config.h>
-
 #ifndef __ASSEMBLY__
 
 /* To get debugging spinlocks which detect and catch
- * deadlock situations, set CONFIG_DEBUG_SPINLOCK
- * and rebuild your kernel.
+ * deadlock situations, set DEBUG_SPINLOCKS in the sparc64
+ * specific makefile and rebuild your kernel.
  */
 
 /* All of these locking primitives are expected to work properly
@@ -28,7 +26,7 @@
  * must be pre-V9 branches.
  */
 
-#ifndef CONFIG_DEBUG_SPINLOCK
+#ifndef SPIN_LOCK_DEBUG
 
 typedef unsigned char spinlock_t;
 #define SPIN_LOCK_UNLOCKED	0
@@ -77,7 +75,7 @@ extern __inline__ void spin_unlock(spinlock_t *lock)
 			     : "memory");
 }
 
-#else /* !(CONFIG_DEBUG_SPINLOCK) */
+#else /* !(SPIN_LOCK_DEBUG) */
 
 typedef struct {
 	unsigned char lock;
@@ -103,11 +101,11 @@ extern int _spin_trylock (spinlock_t *lock);
 #define spin_lock(lock)		_do_spin_lock(lock, "spin_lock")
 #define spin_unlock(lock)	_do_spin_unlock(lock)
 
-#endif /* CONFIG_DEBUG_SPINLOCK */
+#endif /* SPIN_LOCK_DEBUG */
 
 /* Multi-reader locks, these are much saner than the 32-bit Sparc ones... */
 
-#ifndef CONFIG_DEBUG_SPINLOCK
+#ifndef SPIN_LOCK_DEBUG
 
 typedef unsigned int rwlock_t;
 #define RW_LOCK_UNLOCKED	0
@@ -123,7 +121,7 @@ extern void __write_unlock(rwlock_t *);
 #define write_lock(p)	__write_lock(p)
 #define write_unlock(p)	__write_unlock(p)
 
-#else /* !(CONFIG_DEBUG_SPINLOCK) */
+#else /* !(SPIN_LOCK_DEBUG) */
 
 typedef struct {
 	unsigned long lock;
@@ -166,7 +164,7 @@ do {	unsigned long flags; \
 	__restore_flags(flags); \
 } while(0)
 
-#endif /* CONFIG_DEBUG_SPINLOCK */
+#endif /* SPIN_LOCK_DEBUG */
 
 #endif /* !(__ASSEMBLY__) */
 

@@ -42,14 +42,26 @@ struct i2c_msg;
 
 /* --- Includes and compatibility declarations ------------------------ */
 
+#include <linux/version.h>
+#ifndef KERNEL_VERSION
+#define KERNEL_VERSION(a,b,c) (((a) << 16) | ((b) << 8) | (c))
+#endif
+
+#include <asm/page.h>			/* for 2.2.xx 			*/
+#if LINUX_VERSION_CODE < KERNEL_VERSION(2,0,25)
+#include <linux/sched.h>
+#else
 #include <asm/semaphore.h>
+#endif
 #include <linux/config.h>
 
 /* --- General options ------------------------------------------------	*/
 
-#define I2C_ADAP_MAX	16		/* control memory consumption	*/
+#define I2C_ALGO_MAX	4		/* control memory consumption	*/
+#define I2C_ADAP_MAX	16
 #define I2C_DRIVER_MAX	16
 #define I2C_CLIENT_MAX	32
+#define I2C_DUMMY_MAX 4
 
 struct i2c_algorithm;
 struct i2c_adapter;
@@ -193,7 +205,7 @@ struct i2c_algorithm {
 	char name[32];				/* textual description 	*/
 	unsigned int id;
 
-	/* If an adapter algorithm can't do I2C-level access, set master_xfer
+	/* If an adapter algorithm can't to I2C-level access, set master_xfer
 	   to NULL. If an adapter algorithm can do SMBus access, set 
 	   smbus_xfer. If set to NULL, the SMBus protocol is simulated
 	   using common I2C messages */
@@ -213,6 +225,10 @@ struct i2c_algorithm {
 	/* To determine what the adapter supports */
 	u32 (*functionality) (struct i2c_adapter *);
 };
+
+#if LINUX_VERSION_CODE < KERNEL_VERSION(2,1,29)
+struct proc_dir_entry;
+#endif
 
 /*
  * i2c_adapter is the structure used to identify a physical i2c bus along
@@ -251,6 +267,9 @@ struct i2c_adapter {
 #ifdef CONFIG_PROC_FS 
 	/* No need to set this when you initialize the adapter          */
 	int inode;
+#if LINUX_VERSION_CODE < KERNEL_VERSION(2,1,29)
+	struct proc_dir_entry *proc_entry;
+#endif
 #endif /* def CONFIG_PROC_FS */
 };
 
@@ -363,13 +382,13 @@ extern int i2c_check_functionality (struct i2c_adapter *adap, u32 func);
  */
 struct i2c_msg {
 	__u16 addr;	/* slave address			*/
-	__u16 flags;		
+	unsigned short flags;		
 #define I2C_M_TEN	0x10	/* we have a ten bit chip address	*/
 #define I2C_M_RD	0x01
 #define I2C_M_NOSTART	0x4000
 #define I2C_M_REV_DIR_ADDR	0x2000
-	__u16 len;		/* msg length				*/
-	__u8 *buf;		/* pointer to msg data			*/
+	short len;		/* msg length				*/
+	char *buf;		/* pointer to msg data			*/
 };
 
 /* To determine what functionality is present */
@@ -390,34 +409,31 @@ struct i2c_msg {
 #define I2C_FUNC_SMBUS_READ_I2C_BLOCK	0x04000000 /* New I2C-like block */
 #define I2C_FUNC_SMBUS_WRITE_I2C_BLOCK	0x08000000 /* transfer */
 
-#define I2C_FUNC_SMBUS_BYTE (I2C_FUNC_SMBUS_READ_BYTE | \
-                             I2C_FUNC_SMBUS_WRITE_BYTE)
-#define I2C_FUNC_SMBUS_BYTE_DATA (I2C_FUNC_SMBUS_READ_BYTE_DATA | \
-                                  I2C_FUNC_SMBUS_WRITE_BYTE_DATA)
-#define I2C_FUNC_SMBUS_WORD_DATA (I2C_FUNC_SMBUS_READ_WORD_DATA | \
-                                  I2C_FUNC_SMBUS_WRITE_WORD_DATA)
-#define I2C_FUNC_SMBUS_BLOCK_DATA (I2C_FUNC_SMBUS_READ_BLOCK_DATA | \
-                                   I2C_FUNC_SMBUS_WRITE_BLOCK_DATA)
-#define I2C_FUNC_SMBUS_I2C_BLOCK (I2C_FUNC_SMBUS_READ_I2C_BLOCK | \
-                                  I2C_FUNC_SMBUS_WRITE_I2C_BLOCK)
+#define I2C_FUNC_SMBUS_BYTE I2C_FUNC_SMBUS_READ_BYTE | \
+                            I2C_FUNC_SMBUS_WRITE_BYTE
+#define I2C_FUNC_SMBUS_BYTE_DATA I2C_FUNC_SMBUS_READ_BYTE_DATA | \
+                                 I2C_FUNC_SMBUS_WRITE_BYTE_DATA
+#define I2C_FUNC_SMBUS_WORD_DATA I2C_FUNC_SMBUS_READ_WORD_DATA | \
+                                 I2C_FUNC_SMBUS_WRITE_WORD_DATA
+#define I2C_FUNC_SMBUS_BLOCK_DATA I2C_FUNC_SMBUS_READ_BLOCK_DATA | \
+                                  I2C_FUNC_SMBUS_WRITE_BLOCK_DATA
+#define I2C_FUNC_SMBUS_I2C_BLOCK I2C_FUNC_SMBUS_READ_I2C_BLOCK | \
+                                  I2C_FUNC_SMBUS_WRITE_I2C_BLOCK
 
-#define I2C_FUNC_SMBUS_EMUL (I2C_FUNC_SMBUS_QUICK | \
-                             I2C_FUNC_SMBUS_BYTE | \
-                             I2C_FUNC_SMBUS_BYTE_DATA | \
-                             I2C_FUNC_SMBUS_WORD_DATA | \
-                             I2C_FUNC_SMBUS_PROC_CALL | \
-                             I2C_FUNC_SMBUS_WRITE_BLOCK_DATA)
+#define I2C_FUNC_SMBUS_EMUL I2C_FUNC_SMBUS_QUICK | \
+                            I2C_FUNC_SMBUS_BYTE | \
+                            I2C_FUNC_SMBUS_BYTE_DATA | \
+                            I2C_FUNC_SMBUS_WORD_DATA | \
+                            I2C_FUNC_SMBUS_PROC_CALL | \
+                            I2C_FUNC_SMBUS_WRITE_BLOCK_DATA
 
 /* 
  * Data for SMBus Messages 
  */
-#define I2C_SMBUS_BLOCK_MAX	32	/* As specified in SMBus standard */	
-#define I2C_SMBUS_I2C_BLOCK_MAX	32	/* Not specified but we use same structure */
 union i2c_smbus_data {
 	__u8 byte;
 	__u16 word;
-	__u8 block[I2C_SMBUS_BLOCK_MAX + 2]; /* block[0] is used for length */
-	                  /* one more for read length in block process call */
+	__u8 block[33]; /* block[0] is used for length */
 };
 
 /* smbus_access read or write markers */

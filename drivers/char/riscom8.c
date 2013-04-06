@@ -1200,7 +1200,8 @@ static void rc_close(struct tty_struct * tty, struct file * filp)
 	rc_shutdown_port(bp, port);
 	if (tty->driver.flush_buffer)
 		tty->driver.flush_buffer(tty);
-	tty_ldisc_flush(tty);
+	if (tty->ldisc.flush_buffer)
+		tty->ldisc.flush_buffer(tty);
 	tty->closing = 0;
 	port->event = 0;
 	port->tty = 0;
@@ -1374,7 +1375,9 @@ static void rc_flush_buffer(struct tty_struct *tty)
 	restore_flags(flags);
 	
 	wake_up_interruptible(&tty->write_wait);
-	tty_wakeup(tty);
+	if ((tty->flags & (1 << TTY_DO_WRITE_WAKEUP)) &&
+	    tty->ldisc.write_wakeup)
+		(tty->ldisc.write_wakeup)(tty);
 }
 
 static int rc_get_modem_info(struct riscom_port * port, unsigned int *value)
@@ -1731,7 +1734,10 @@ static void do_softint(void *private_)
 		return;
 
 	if (test_and_clear_bit(RS_EVENT_WRITE_WAKEUP, &port->event)) {
-		tty_wakeup(tty);
+		if ((tty->flags & (1 << TTY_DO_WRITE_WAKEUP)) &&
+		    tty->ldisc.write_wakeup)
+			(tty->ldisc.write_wakeup)(tty);
+		wake_up_interruptible(&tty->write_wait);
 	}
 }
 

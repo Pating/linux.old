@@ -80,7 +80,7 @@ static __inline__ void clear_bit(int nr, volatile void * addr)
 
 /**
  * __change_bit - Toggle a bit in memory
- * @nr: the bit to change
+ * @nr: the bit to set
  * @addr: the address to start counting from
  *
  * Unlike change_bit(), this function is non-atomic and may be reordered.
@@ -97,7 +97,7 @@ static __inline__ void __change_bit(int nr, volatile void * addr)
 
 /**
  * change_bit - Toggle a bit in memory
- * @nr: Bit to change
+ * @nr: Bit to clear
  * @addr: Address to start counting from
  *
  * change_bit() is atomic and may not be reordered.
@@ -153,7 +153,7 @@ static __inline__ int __test_and_set_bit(int nr, volatile void * addr)
 
 /**
  * test_and_clear_bit - Clear a bit and return its old value
- * @nr: Bit to clear
+ * @nr: Bit to set
  * @addr: Address to count from
  *
  * This operation is atomic and cannot be reordered.  
@@ -172,7 +172,7 @@ static __inline__ int test_and_clear_bit(int nr, volatile void * addr)
 
 /**
  * __test_and_clear_bit - Clear a bit and return its old value
- * @nr: Bit to clear
+ * @nr: Bit to set
  * @addr: Address to count from
  *
  * This operation is non-atomic and can be reordered.  
@@ -204,7 +204,7 @@ static __inline__ int __test_and_change_bit(int nr, volatile void * addr)
 
 /**
  * test_and_change_bit - Change a bit and return its new value
- * @nr: Bit to change
+ * @nr: Bit to set
  * @addr: Address to count from
  *
  * This operation is atomic and cannot be reordered.  
@@ -266,6 +266,7 @@ static __inline__ int find_first_zero_bit(void * addr, unsigned size)
 
 	if (!size)
 		return 0;
+	/* This looks at memory. Mark it volatile to tell gcc not to move it around */
 	__asm__ __volatile__(
 		"movl $-1,%%eax\n\t"
 		"xorl %%edx,%%edx\n\t"
@@ -278,7 +279,7 @@ static __inline__ int find_first_zero_bit(void * addr, unsigned size)
 		"shll $3,%%edi\n\t"
 		"addl %%edi,%%edx"
 		:"=d" (res), "=&c" (d0), "=&D" (d1), "=&a" (d2)
-		:"1" ((size + 31) >> 5), "2" (addr), "b" (addr) : "memory");
+		:"1" ((size + 31) >> 5), "2" (addr), "b" (addr));
 	return res;
 }
 
@@ -346,7 +347,7 @@ static __inline__ int ffs(int x)
 	__asm__("bsfl %1,%0\n\t"
 		"jnz 1f\n\t"
 		"movl $-1,%0\n"
-		"1:" : "=r" (r) : "rm" (x));
+		"1:" : "=r" (r) : "g" (x));
 	return r+1;
 }
 

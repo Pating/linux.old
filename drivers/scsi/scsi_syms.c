@@ -43,7 +43,6 @@ EXPORT_SYMBOL(scsi_allocate_device);
 EXPORT_SYMBOL(scsi_do_cmd);
 EXPORT_SYMBOL(scsi_command_size);
 EXPORT_SYMBOL(scsi_ioctl);
-EXPORT_SYMBOL(scsi_finish_command);
 EXPORT_SYMBOL(print_command);
 EXPORT_SYMBOL(print_sense);
 EXPORT_SYMBOL(print_req_sense);
@@ -83,11 +82,6 @@ EXPORT_SYMBOL(scsi_end_request);
 
 EXPORT_SYMBOL(scsi_register_blocked_host);
 EXPORT_SYMBOL(scsi_deregister_blocked_host);
-
-/*
- * This symbol is for the highlevel drivers (e.g. sg) only.
- */
-EXPORT_SYMBOL(scsi_reset_provider);
 
 /*
  * These are here only while I debug the rest of the scsi stuff.

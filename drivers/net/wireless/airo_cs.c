@@ -15,7 +15,7 @@
 
     In addition this module was derived from dummy_cs.
     The initial developer of dummy_cs is David A. Hinds
-    <dahinds@users.sourceforge.net>.  Portions created by David A. Hinds
+    <dhinds@hyper.stanford.edu>.  Portions created by David A. Hinds
     are Copyright (C) 1999 David A. Hinds.  All Rights Reserved.    
     
 ======================================================================*/
@@ -244,11 +244,6 @@ static dev_link_t *airo_attach(void)
 	
 	/* Allocate space for private device-specific data */
 	local = kmalloc(sizeof(local_info_t), GFP_KERNEL);
-	if (!local) {
-		printk(KERN_ERR "airo_cs: no memory for new device\n");
-		kfree (link);
-		return NULL;
-	}
 	memset(local, 0, sizeof(local_info_t));
 	link->priv = local;
 	

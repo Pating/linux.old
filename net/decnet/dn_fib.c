@@ -50,7 +50,9 @@
 
 #define endfor_nexthops(fi) }
 
+#ifdef CONFIG_RTNETLINK
 extern int dn_cache_dump(struct sk_buff *skb, struct netlink_callback *cb);
+#endif /* CONFIG_RTNETLINK */
 
 
 static struct dn_fib_info *dn_fib_info_list;
@@ -413,6 +415,8 @@ int dn_fib_rt_message(struct sk_buff *skb)
 }
 
 
+#ifdef CONFIG_RTNETLINK
+
 static int dn_fib_check_attr(struct rtmsg *r, struct rtattr **rta)
 {
 	int i;
@@ -493,6 +497,7 @@ int dn_fib_dump(struct sk_buff *skb, struct netlink_callback *cb)
 
 	return skb->len;
 }
+#endif /* CONFIG_RTNETLINK */
 
 int dn_fib_sync_down(dn_address local, struct net_device *dev, int force)
 {

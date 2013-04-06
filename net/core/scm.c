@@ -26,7 +26,11 @@
 #include <asm/system.h>
 #include <asm/uaccess.h>
 
+#include <linux/inet.h>
+#include <net/ip.h>
 #include <net/protocol.h>
+#include <net/tcp.h>
+#include <net/udp.h>
 #include <linux/skbuff.h>
 #include <net/sock.h>
 #include <net/scm.h>
@@ -124,7 +128,9 @@ int __scm_send(struct socket *sock, struct msghdr *msg, struct scm_cookie *p)
 		   for too short ancillary data object at all! Oops.
 		   OK, let's add it...
 		 */
-		if (!CMSG_OK(msg, cmsg))
+		if (cmsg->cmsg_len < sizeof(struct cmsghdr) ||
+		    (unsigned long)(((char*)cmsg - (char*)msg->msg_control)
+				    + cmsg->cmsg_len) > msg->msg_controllen)
 			goto error;
 
 		if (cmsg->cmsg_level != SOL_SOCKET)

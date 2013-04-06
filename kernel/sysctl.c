@@ -30,7 +30,6 @@
 #include <linux/init.h>
 #include <linux/sysrq.h>
 #include <linux/highuid.h>
-#include <linux/swap.h>
 
 #include <asm/uaccess.h>
 
@@ -46,15 +45,10 @@ extern int C_A_D;
 extern int bdf_prm[], bdflush_min[], bdflush_max[];
 extern int sysctl_overcommit_memory;
 extern int max_threads;
-extern atomic_t nr_queued_signals;
-extern int max_queued_signals;
+extern int nr_queued_signals, max_queued_signals;
 extern int sysrq_enabled;
 extern int core_uses_pid;
-extern int core_setuid_ok;
-extern char core_pattern[];
 extern int cad_pid;
-extern int laptop_mode;
-extern int block_dump;
 
 /* this is needed for the proc_dointvec_minmax for [fs_]overflow UID and GID */
 static int maxolduid = 65535;
@@ -79,12 +73,9 @@ extern int msg_ctlmni;
 extern int sem_ctls[];
 #endif
 
-extern int exception_trace;
-
 #ifdef __sparc__
 extern char reboot_command [];
 extern int stop_a_enabled;
-extern int scons_pwroff;
 #endif
 
 #ifdef CONFIG_ARCH_S390
@@ -97,9 +88,7 @@ extern int sysctl_userprocess_debug;
 #ifdef CONFIG_PPC32
 extern unsigned long zero_paged_on, powersave_nap;
 int proc_dol2crvec(ctl_table *table, int write, struct file *filp,
-		void *buffer, size_t *lenp);
-int proc_dol3crvec(ctl_table *table, int write, struct file *filp,
-		void *buffer, size_t *lenp);
+		  void *buffer, size_t *lenp);
 #endif
 
 #ifdef CONFIG_BSD_PROCESS_ACCT
@@ -181,10 +170,6 @@ static ctl_table kern_table[] = {
 	 0644, NULL, &proc_dointvec},
 	{KERN_CORE_USES_PID, "core_uses_pid", &core_uses_pid, sizeof(int),
 	 0644, NULL, &proc_dointvec},
-	{KERN_CORE_SETUID, "core_setuid_ok", &core_setuid_ok, sizeof(int),
-	0644, NULL, &proc_dointvec},
-	{KERN_CORE_PATTERN, "core_pattern", core_pattern, 64,
-	 0644, NULL, &proc_dostring, &sysctl_string},
 	{KERN_TAINTED, "tainted", &tainted, sizeof(int),
 	 0644, NULL, &proc_dointvec},
 	{KERN_CAP_BSET, "cap-bound", &cap_bset, sizeof(kernel_cap_t),
@@ -198,8 +183,6 @@ static ctl_table kern_table[] = {
 	 256, 0644, NULL, &proc_dostring, &sysctl_string },
 	{KERN_SPARC_STOP_A, "stop-a", &stop_a_enabled, sizeof (int),
 	 0644, NULL, &proc_dointvec},
-	{KERN_SPARC_SCONS_PWROFF, "scons-poweroff", &scons_pwroff, sizeof (int),
-	 0644, NULL, &proc_dointvec},
 #endif
 #ifdef CONFIG_PPC32
 	{KERN_PPC_ZEROPAGED, "zero-paged", &zero_paged_on, sizeof(int),
@@ -208,8 +191,6 @@ static ctl_table kern_table[] = {
 	 0644, NULL, &proc_dointvec},
 	{KERN_PPC_L2CR, "l2cr", NULL, 0,
 	 0644, NULL, &proc_dol2crvec},
-	{KERN_PPC_L3CR, "l3cr", NULL, 0,
-	 0644, NULL, &proc_dol3crvec},
 #endif
 	{KERN_CTLALTDEL, "ctrl-alt-del", &C_A_D, sizeof(int),
 	 0644, NULL, &proc_dointvec},
@@ -274,28 +255,10 @@ static ctl_table kern_table[] = {
 	{KERN_S390_USER_DEBUG_LOGGING,"userprocess_debug",
 	 &sysctl_userprocess_debug,sizeof(int),0644,NULL,&proc_dointvec},
 #endif
-#ifdef __x86_64__
-	{KERN_EXCEPTION_TRACE,"exception-trace",
-	 &exception_trace,sizeof(int),0644,NULL,&proc_dointvec},
-#endif	
 	{0}
 };
 
 static ctl_table vm_table[] = {
-	{VM_GFP_DEBUG, "vm_gfp_debug", 
-	 &vm_gfp_debug, sizeof(int), 0644, NULL, &proc_dointvec},
-	{VM_VFS_SCAN_RATIO, "vm_vfs_scan_ratio", 
-	 &vm_vfs_scan_ratio, sizeof(int), 0644, NULL, &proc_dointvec},
-	{VM_CACHE_SCAN_RATIO, "vm_cache_scan_ratio", 
-	 &vm_cache_scan_ratio, sizeof(int), 0644, NULL, &proc_dointvec},
-	{VM_MAPPED_RATIO, "vm_mapped_ratio", 
-	 &vm_mapped_ratio, sizeof(int), 0644, NULL, &proc_dointvec},
-	{VM_ANON_LRU, "vm_anon_lru", 
-	 &vm_anon_lru, sizeof(int), 0644, NULL, &proc_dointvec},
-	{VM_LRU_BALANCE_RATIO, "vm_lru_balance_ratio", 
-	 &vm_lru_balance_ratio, sizeof(int), 0644, NULL, &proc_dointvec},
-	{VM_PASSES, "vm_passes", 
-	 &vm_passes, sizeof(int), 0644, NULL, &proc_dointvec},
 	{VM_BDFLUSH, "bdflush", &bdf_prm, 9*sizeof(int), 0644, NULL,
 	 &proc_dointvec_minmax, &sysctl_intvec, NULL,
 	 &bdflush_min, &bdflush_max},
@@ -307,16 +270,6 @@ static ctl_table vm_table[] = {
 	 &pgt_cache_water, 2*sizeof(int), 0644, NULL, &proc_dointvec},
 	{VM_PAGE_CLUSTER, "page-cluster", 
 	 &page_cluster, sizeof(int), 0644, NULL, &proc_dointvec},
-	{VM_MIN_READAHEAD, "min-readahead",
-	&vm_min_readahead,sizeof(int), 0644, NULL, &proc_dointvec},
-	{VM_MAX_READAHEAD, "max-readahead",
-	&vm_max_readahead,sizeof(int), 0644, NULL, &proc_dointvec},
-	{VM_MAX_MAP_COUNT, "max_map_count",
-	 &max_map_count, sizeof(int), 0644, NULL, &proc_dointvec},
-	{VM_LAPTOP_MODE, "laptop_mode",
-	 &laptop_mode, sizeof(int), 0644, NULL, &proc_dointvec},
-	{VM_BLOCK_DUMP, "block_dump",
-	 &block_dump, sizeof(int), 0644, NULL, &proc_dointvec},
 	{0}
 };
 
@@ -333,6 +286,8 @@ static ctl_table fs_table[] = {
 	 0444, NULL, &proc_dointvec},
 	{FS_MAXFILE, "file-max", &files_stat.max_files, sizeof(int),
 	 0644, NULL, &proc_dointvec},
+	{FS_NRDQUOT, "dquot-nr", &nr_dquots, 2*sizeof(int),
+	 0444, NULL, &proc_dointvec},
 	{FS_DENTRY, "dentry-state", &dentry_stat, 6*sizeof(int),
 	 0444, NULL, &proc_dointvec},
 	{FS_OVERFLOWUID, "overflowuid", &fs_overflowuid, sizeof(int), 0644, NULL,
@@ -379,9 +334,6 @@ int do_sysctl(int *name, int nlen, void *oldval, size_t *oldlenp,
 		int old_len;
 		if (!oldlenp || get_user(old_len, oldlenp))
 			return -EFAULT;
-		/* XXX: insufficient for SMP, but should be redundant anyway */
-		if ((ssize_t)old_len < 0)
-			return -EINVAL;
 	}
 	tmp = &root_table_header.ctl_entry;
 	do {
@@ -504,8 +456,7 @@ int do_sysctl_strategy (ctl_table *table,
 	 * zero, proceed with automatic r/w */
 	if (table->data && table->maxlen) {
 		if (oldval && oldlenp) {
-			if (get_user(len, oldlenp))
-				return -EFAULT;
+			get_user(len, oldlenp);
 			if (len) {
 				if (len > table->maxlen)
 					len = table->maxlen;
@@ -527,11 +478,11 @@ int do_sysctl_strategy (ctl_table *table,
 }
 
 /**
- * register_sysctl_table - register a sysctl hierarchy
+ * register_sysctl_table - register a sysctl heirarchy
  * @table: the top-level table structure
  * @insert_at_head: whether the entry should be inserted in front or at the end
  *
- * Register a sysctl table hierarchy. @table should be a filled in ctl_table
+ * Register a sysctl table heirarchy. @table should be a filled in ctl_table
  * array. An entry with a ctl_name of 0 terminates the table. 
  *
  * The members of the &ctl_table structure are used as follows:
@@ -615,7 +566,7 @@ struct ctl_table_header *register_sysctl_table(ctl_table * table,
 }
 
 /**
- * unregister_sysctl_table - unregister a sysctl table hierarchy
+ * unregister_sysctl_table - unregister a sysctl table heirarchy
  * @header: the header returned from register_sysctl_table
  *
  * Unregisters the sysctl table and all children. proc entries may not
@@ -796,7 +747,7 @@ int proc_dostring(ctl_table *table, int write, struct file *filp,
 		len = 0;
 		p = buffer;
 		while (len < *lenp) {
-			if (get_user(c, p++))
+			if(get_user(c, p++))
 				return -EFAULT;
 			if (c == 0 || c == '\n')
 				break;
@@ -879,12 +830,12 @@ static int do_proc_dointvec(ctl_table *table, int write, struct file *filp,
 		if (write) {
 			while (left) {
 				char c;
-				if (get_user(c, (char *) buffer))
+				if(get_user(c,(char *) buffer))
 					return -EFAULT;
 				if (!isspace(c))
 					break;
 				left--;
-				buffer++;
+				((char *) buffer)++;
 			}
 			if (!left)
 				break;
@@ -945,7 +896,7 @@ static int do_proc_dointvec(ctl_table *table, int write, struct file *filp,
 		p = (char *) buffer;
 		while (left) {
 			char c;
-			if (get_user(c, p++))
+			if(get_user(c, p++))
 				return -EFAULT;
 			if (!isspace(c))
 				break;
@@ -1028,16 +979,16 @@ int proc_dointvec_minmax(ctl_table *table, int write, struct file *filp,
 	vleft = table->maxlen / sizeof(int);
 	left = *lenp;
 	
-	for (; left && vleft--; i++, min++, max++, first=0) {
+	for (; left && vleft--; i++, first=0) {
 		if (write) {
 			while (left) {
 				char c;
-				if (get_user(c, (char *) buffer))
+				if(get_user(c, (char *) buffer))
 					return -EFAULT;
 				if (!isspace(c))
 					break;
 				left--;
-				buffer++;
+				((char *) buffer)++;
 			}
 			if (!left)
 				break;
@@ -1064,7 +1015,9 @@ int proc_dointvec_minmax(ctl_table *table, int write, struct file *filp,
 			buffer += len;
 			left -= len;
 
-			if ((min && val < *min) || (max && val > *max))
+			if (min && val < *min++)
+				continue;
+			if (max && val > *max++)
 				continue;
 			*i = val;
 		} else {
@@ -1091,7 +1044,7 @@ int proc_dointvec_minmax(ctl_table *table, int write, struct file *filp,
 		p = (char *) buffer;
 		while (left) {
 			char c;
-			if (get_user(c, p++))
+			if(get_user(c, p++))
 				return -EFAULT;
 			if (!isspace(c))
 				break;
@@ -1133,12 +1086,12 @@ static int do_proc_doulongvec_minmax(ctl_table *table, int write,
 		if (write) {
 			while (left) {
 				char c;
-				if (get_user(c, (char *) buffer))
+				if(get_user(c, (char *) buffer))
 					return -EFAULT;
 				if (!isspace(c))
 					break;
 				left--;
-				buffer++;
+				((char *) buffer)++;
 			}
 			if (!left)
 				break;
@@ -1196,7 +1149,7 @@ static int do_proc_doulongvec_minmax(ctl_table *table, int write,
 		p = (char *) buffer;
 		while (left) {
 			char c;
-			if (get_user(c, p++))
+			if(get_user(c, p++))
 				return -EFAULT;
 			if (!isspace(c))
 				break;
@@ -1350,7 +1303,7 @@ int sysctl_string(ctl_table *table, int *name, int nlen,
 		return -ENOTDIR;
 	
 	if (oldval && oldlenp) {
-		if (get_user(len, oldlenp))
+		if(get_user(len, oldlenp))
 			return -EFAULT;
 		if (len) {
 			l = strlen(table->data);
@@ -1407,8 +1360,7 @@ int sysctl_intvec(ctl_table *table, int *name, int nlen,
 
 		for (i = 0; i < length; i++) {
 			int value;
-			if (get_user(value, vec + i))
-				return -EFAULT;
+			get_user(value, vec + i);
 			if (min && value < min[i])
 				return -EINVAL;
 			if (max && value > max[i])

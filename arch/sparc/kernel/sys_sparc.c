@@ -123,10 +123,7 @@ asmlinkage int sys_ipc (uint call, int first, int second, int third, void *ptr, 
 	if (call <= SEMCTL)
 		switch (call) {
 		case SEMOP:
-			err = sys_semtimedop (first, (struct sembuf *)ptr, second, NULL);
-			goto out;
-		case SEMTIMEDOP:
-			err = sys_semtimedop (first, (struct sembuf *)ptr, second, (const struct timespec *) fifth);
+			err = sys_semop (first, (struct sembuf *)ptr, second);
 			goto out;
 		case SEMGET:
 			err = sys_semget (first, second, third);
@@ -143,7 +140,7 @@ asmlinkage int sys_ipc (uint call, int first, int second, int third, void *ptr, 
 			goto out;
 			}
 		default:
-			err = -ENOSYS;
+			err = -EINVAL;
 			goto out;
 		}
 	if (call <= MSGCTL) 
@@ -176,7 +173,7 @@ asmlinkage int sys_ipc (uint call, int first, int second, int third, void *ptr, 
 			err = sys_msgctl (first, second, (struct msqid_ds *) ptr);
 			goto out;
 		default:
-			err = -ENOSYS;
+			err = -EINVAL;
 			goto out;
 		}
 	if (call <= SHMCTL) 
@@ -208,11 +205,11 @@ asmlinkage int sys_ipc (uint call, int first, int second, int third, void *ptr, 
 			err = sys_shmctl (first, second, (struct shmid_ds *) ptr);
 			goto out;
 		default:
-			err = -ENOSYS;
+			err = -EINVAL;
 			goto out;
 		}
 	else
-		err = -ENOSYS;
+		err = -EINVAL;
 out:
 	return err;
 }

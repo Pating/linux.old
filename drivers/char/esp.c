@@ -786,7 +786,10 @@ static void do_softint(void *private_)
 		return;
 
 	if (test_and_clear_bit(ESP_EVENT_WRITE_WAKEUP, &info->event)) {
-		tty_wakeup(tty);
+		if ((tty->flags & (1 << TTY_DO_WRITE_WAKEUP)) &&
+		    tty->ldisc.write_wakeup)
+			(tty->ldisc.write_wakeup)(tty);
+		wake_up_interruptible(&tty->write_wait);
 	}
 }
 
@@ -1392,7 +1395,10 @@ static void rs_flush_buffer(struct tty_struct *tty)
 	cli();
 	info->xmit_cnt = info->xmit_head = info->xmit_tail = 0;
 	sti();
-	tty_wakeup(tty);
+	wake_up_interruptible(&tty->write_wait);
+	if ((tty->flags & (1 << TTY_DO_WRITE_WAKEUP)) &&
+	    tty->ldisc.write_wakeup)
+		(tty->ldisc.write_wakeup)(tty);
 }
 
 /*
@@ -2109,7 +2115,8 @@ static void rs_close(struct tty_struct *tty, struct file * filp)
 	shutdown(info);
 	if (tty->driver.flush_buffer)
 		tty->driver.flush_buffer(tty);
-	tty_ldisc_flush(tty);
+	if (tty->ldisc.flush_buffer)
+		tty->ldisc.flush_buffer(tty);
 	tty->closing = 0;
 	info->event = 0;
 	info->tty = 0;
@@ -2155,7 +2162,7 @@ static void rs_wait_until_sent(struct tty_struct *tty, int timeout)
 		if (signal_pending(current))
 			break;
 
-		if (timeout && time_after(jiffies, orig_jiffies + timeout))
+		if (timeout && ((orig_jiffies + timeout) < jiffies))
 			break;
 
 		serial_out(info, UART_ESI_CMD1, ESI_NO_COMMAND);

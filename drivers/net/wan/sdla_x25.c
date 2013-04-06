@@ -1267,10 +1267,12 @@ static int if_open (netdevice_t* dev)
 			connect(card);
 			S508_S514_unlock(card, &smp_flags);
 
-			mod_timer(&card->u.x.x25_timer, jiffies + HZ);
+			del_timer(&card->u.x.x25_timer);
+			card->u.x.x25_timer.expires=jiffies+HZ;
+			add_timer(&card->u.x.x25_timer);
 		}
 	}
-	/* Device is not up until the we are in connected state */
+	/* Device is not up untill the we are in connected state */
 	do_gettimeofday( &tv );
 	chan->router_start_time = tv.tv_sec;
 
@@ -4719,7 +4721,7 @@ static int execute_delayed_cmd (sdla_t* card, netdevice_t *dev, mbox_cmd_t *usr_
 /*===============================================================
  * api_incoming_call 
  *
- *	Pass an incoming call request up the listening
+ *	Pass an incoming call request up the the listening
  *      sock.  If the API sock is not listening reject the
  *      call.
  *
@@ -4754,7 +4756,7 @@ static int api_incoming_call (sdla_t* card, TX25Mbox *mbox, int lcn)
  * send_delayed_cmd_result
  *
  *	Wait commands like PLEACE CALL or CLEAR CALL must wait
- *      until the result arrives. This function passes
+ *      untill the result arrivers. This function passes
  *      the result to a waiting sock. 
  *
  *===============================================================*/

@@ -63,8 +63,6 @@ struct cpuinfo_x86 {
 #define X86_VENDOR_CENTAUR 5
 #define X86_VENDOR_RISE 6
 #define X86_VENDOR_TRANSMETA 7
-#define X86_VENDOR_NSC 8
-#define X86_VENDOR_SIS 9
 #define X86_VENDOR_UNKNOWN 0xff
 
 /*
@@ -81,6 +79,17 @@ extern struct cpuinfo_x86 cpu_data[];
 #define cpu_data (&boot_cpu_data)
 #define current_cpu_data boot_cpu_data
 #endif
+
+#define cpu_has_pge	(test_bit(X86_FEATURE_PGE,  boot_cpu_data.x86_capability))
+#define cpu_has_pse	(test_bit(X86_FEATURE_PSE,  boot_cpu_data.x86_capability))
+#define cpu_has_pae	(test_bit(X86_FEATURE_PAE,  boot_cpu_data.x86_capability))
+#define cpu_has_tsc	(test_bit(X86_FEATURE_TSC,  boot_cpu_data.x86_capability))
+#define cpu_has_de	(test_bit(X86_FEATURE_DE,   boot_cpu_data.x86_capability))
+#define cpu_has_vme	(test_bit(X86_FEATURE_VME,  boot_cpu_data.x86_capability))
+#define cpu_has_fxsr	(test_bit(X86_FEATURE_FXSR, boot_cpu_data.x86_capability))
+#define cpu_has_xmm	(test_bit(X86_FEATURE_XMM,  boot_cpu_data.x86_capability))
+#define cpu_has_fpu	(test_bit(X86_FEATURE_FPU,  boot_cpu_data.x86_capability))
+#define cpu_has_apic	(test_bit(X86_FEATURE_APIC, boot_cpu_data.x86_capability))
 
 extern char ignore_irq13;
 
@@ -181,9 +190,6 @@ static inline unsigned int cpuid_edx(unsigned int op)
 #define X86_CR4_OSFXSR		0x0200	/* enable fast FPU save and restore */
 #define X86_CR4_OSXMMEXCPT	0x0400	/* enable unmasked SSE exceptions */
 
-#define load_cr3(pgdir) \
-	asm volatile("movl %0,%%cr3": :"r" (__pa(pgdir)));
-
 /*
  * Save the cr4 feature set we're using (ie
  * Pentium 4MB enable and PPro Global page
@@ -270,7 +276,6 @@ extern unsigned int mca_pentium_flag;
  * Size of io_bitmap in longwords: 32 is ports 0-0x3ff.
  */
 #define IO_BITMAP_SIZE	32
-#define IO_BITMAP_BYTES (IO_BITMAP_SIZE * 4)
 #define IO_BITMAP_OFFSET offsetof(struct tss_struct,io_bitmap)
 #define INVALID_IO_BITMAP_OFFSET 0x8000
 
@@ -372,7 +377,7 @@ struct thread_struct {
 /* virtual 86 mode info */
 	struct vm86_struct	* vm86_info;
 	unsigned long		screen_bitmap;
-	unsigned long		v86flags, v86mask, saved_esp0;
+	unsigned long		v86flags, v86mask, v86mode, saved_esp0;
 /* IO permissions */
 	int		ioperm;
 	unsigned long	io_bitmap[IO_BITMAP_SIZE+1];
@@ -384,7 +389,7 @@ struct thread_struct {
 	{ [0 ... 7] = 0 },	/* debugging registers */	\
 	0, 0, 0,						\
 	{ { 0, }, },		/* 387 state */			\
-	0,0,0,0,0,						\
+	0,0,0,0,0,0,						\
 	0,{~0,}			/* io permissions */		\
 }
 
@@ -424,14 +429,11 @@ extern void release_thread(struct task_struct *);
 /*
  * create a kernel thread without removing it from tasklists
  */
-extern int arch_kernel_thread(int (*fn)(void *), void * arg, unsigned long flags);
+extern int kernel_thread(int (*fn)(void *), void * arg, unsigned long flags);
 
-/* Copy and release all segment info associated with a VM
- * Unusable due to lack of error handling, use {init_new,destroy}_context
- * instead.
- */
-static inline void copy_segments(struct task_struct *p, struct mm_struct * mm) { }
-static inline void release_segments(struct mm_struct * mm) { }
+/* Copy and release all segment info associated with a VM */
+extern void copy_segments(struct task_struct *p, struct mm_struct * mm);
+extern void release_segments(struct mm_struct * mm);
 
 /*
  * Return saved PC of a blocked thread.
@@ -453,7 +455,7 @@ unsigned long get_wchan(struct task_struct *p);
 #define init_task	(init_task_union.task)
 #define init_stack	(init_task_union.stack)
 
-struct microcode_header {
+struct microcode {
 	unsigned int hdrver;
 	unsigned int rev;
 	unsigned int date;
@@ -461,45 +463,23 @@ struct microcode_header {
 	unsigned int cksum;
 	unsigned int ldrver;
 	unsigned int pf;
-	unsigned int datasize;
-	unsigned int totalsize;
-	unsigned int reserved[3];
+	unsigned int reserved[5];
+	unsigned int bits[500];
 };
 
-struct microcode {
-	struct microcode_header hdr;
-	unsigned int bits[0];
-};
-
-typedef struct microcode microcode_t;
-typedef struct microcode_header microcode_header_t;
-
-/* microcode format is extended from prescott processors */
-struct extended_signature {
-	unsigned int sig;
-	unsigned int pf;
-	unsigned int cksum;
-};
-
-struct extended_sigtable {
-	unsigned int count;
-	unsigned int cksum;
-	unsigned int reserved[3];
-	struct extended_signature sigs[0];
-};
 /* '6' because it used to be for P6 only (but now covers Pentium 4 as well) */
 #define MICROCODE_IOCFREE	_IO('6',0)
 
 /* REP NOP (PAUSE) is a good thing to insert into busy-wait loops. */
 static inline void rep_nop(void)
 {
-	__asm__ __volatile__("rep;nop" ::: "memory");
+	__asm__ __volatile__("rep;nop");
 }
 
 #define cpu_relax()	rep_nop()
 
 /* Prefetch instructions for Pentium III and AMD Athlon */
-#if defined(CONFIG_MPENTIUMIII) || defined (CONFIG_MPENTIUM4)
+#ifdef 	CONFIG_MPENTIUMIII
 
 #define ARCH_HAS_PREFETCH
 extern inline void prefetch(const void *x)
