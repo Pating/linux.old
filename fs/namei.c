@@ -105,18 +105,6 @@ static inline char * get_page(void)
 	return res;
 }
 
-/*
- * Kernel pointers have redundant information, so we can use a
- * scheme where we can return either an error code or a dentry
- * pointer with the same return value.
- *
- * This should be a per-architecture thing, to allow different
- * error and pointer decisions.
- */
-#define ERR_PTR(err)	((void *)((long)(err)))
-#define PTR_ERR(ptr)	((long)(ptr))
-#define IS_ERR(ptr)	((unsigned long)(ptr) > (unsigned long)(-1000))
-
 inline void putname(char * name)
 {
 	if (name) {
@@ -243,15 +231,12 @@ static struct dentry * real_lookup(struct dentry * parent, struct qstr * name)
 	down(&dir->i_sem);
 	result = d_lookup(parent, name);
 	if (!result) {
-		int error;
-		result = d_alloc(parent, name);
-		result->d_count++;
-		error = dir->i_op->lookup(dir, result);
-		result->d_count--;
-		if (error) {
-			d_free(result);
-			result = ERR_PTR(error);
-		}
+		struct dentry * dentry = d_alloc(parent, name);
+		int error = dir->i_op->lookup(dir, dentry);
+		result = ERR_PTR(error);
+		if (!error)
+			result = dget(dentry->d_mounts);
+		dput(dentry);
 	}
 	up(&dir->i_sem);
 	return result;
@@ -271,11 +256,11 @@ static struct dentry * cached_lookup(struct dentry * parent, struct qstr * name)
 	if (dentry && dentry->d_op && dentry->d_op->d_revalidate) {
 		int validated, (*revalidate)(struct dentry *) = dentry->d_op->d_revalidate;
 
-		dentry->d_count++;
 		validated = revalidate(dentry) || d_invalidate(dentry);
-		dput(dentry);
-		if (!validated)
+		if (!validated) {
+			dput(dentry);
 			dentry = NULL;
+		}
 	}
 	return dentry;
 }
@@ -302,28 +287,25 @@ static struct dentry * reserved_lookup(struct dentry * parent, struct qstr * nam
 			result = parent;
 		}
 	}
-	return result;
+	return dget(result);
 }
 
 /* In difference to the former version, lookup() no longer eats the dir. */
-static struct dentry * lookup(struct dentry * dir, struct qstr * name)
+static inline struct dentry * lookup(struct dentry * dir, struct qstr * name)
 {
 	struct dentry * result;
 
 	result = reserved_lookup(dir, name);
 	if (result)
-		goto done_noerror;
+		goto done;
 
 	result = cached_lookup(dir, name);
 	if (result)
-		goto done_noerror;
+		goto done;
 
 	result = real_lookup(dir, name);
 
-	if (!IS_ERR(result)) {
-done_noerror:
-		result = dget(result->d_mounts);
-	}
+done:
 	return result;
 }
 
@@ -538,8 +520,9 @@ struct dentry * open_namei(const char * pathname, int flag, int mode)
 			if (dir->i_sb && dir->i_sb->dq_op)
 				dir->i_sb->dq_op->initialize(dir, -1);
 			error = dir->i_op->create(dir, dentry, mode);
-			/* Don't check for write permission */
+			/* Don't check for write permission, don't truncate */
 			acc_mode = 0;
+			flag &= ~O_TRUNC;
 		}
 		up(&dir->i_sem);
 		if (error)
