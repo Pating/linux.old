@@ -218,15 +218,6 @@ fi
 endmenu
 
 mainmenu_option next_comment
-comment 'Loadable module support'
-bool 'Enable loadable module support' CONFIG_MODULES
-if [ "$CONFIG_MODULES" = "y" ]; then
-   bool '  Set version information on all module symbols' CONFIG_MODVERSIONS
-   bool '  Kernel module loader' CONFIG_KMOD
-fi
-endmenu
-
-mainmenu_option next_comment
 comment 'CPU selection'
 
 choice 'CPU type' \
@@ -334,12 +325,6 @@ source drivers/block/Config.in
 
 source drivers/md/Config.in
 
-if [ "$CONFIG_NET" = "y" ]; then
-   source net/Config.in
-fi
-
-source drivers/telephony/Config.in
-
 if [ "$CONFIG_SGI_IP22" != "y" -a \
      "$CONFIG_DECSTATION" != "y" ]; then
 
@@ -372,6 +357,8 @@ if [ "$CONFIG_DECSTATION" != "y" -a \
 fi
 
 if [ "$CONFIG_NET" = "y" ]; then
+   source net/Config.in
+
    mainmenu_option next_comment
    comment 'Network device support'
 
@@ -390,6 +377,8 @@ source net/ax25/Config.in
 source net/irda/Config.in
 
 source drivers/isdn/Config.in
+
+source drivers/telephony/Config.in
 
 mainmenu_option next_comment
 comment 'Old CD-ROM drivers (not SCSI, not IDE)'
