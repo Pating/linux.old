@@ -88,6 +88,9 @@ extern void sbusfb_setup(char *options, int *ints);
 extern void valkyriefb_init(void);
 extern void valkyriefb_setup(char *options, int *ints);
 extern void g364fb_init(void);
+extern void fm2fb_init(void);
+extern void fm2fb_setup(char *options, int *ints);
+extern void q40fb_init(void);
 
 static struct {
 	const char *name;
@@ -136,6 +139,9 @@ static struct {
 #ifdef CONFIG_APOLLO
 	{ "apollo", dnfb_init, NULL },
 #endif
+#ifdef CONFIG_FB_Q40
+	{ "q40fb", q40fb_init, NULL },
+#endif
 #ifdef CONFIG_FB_S3TRIO
 	{ "s3trio", s3triofb_init, s3triofb_setup },
 #endif 
@@ -160,6 +166,9 @@ static struct {
 #ifdef CONFIG_FB_G364
 	{ "g364", g364fb_init, NULL },
 #endif
+#ifdef CONFIG_FB_FM2
+	{ "fm2fb", fm2fb_init, fm2fb_setup },
+#endif 
 #ifdef CONFIG_GSP_RESOLVER
 	/* Not a real frame buffer device... */
 	{ "resolver", NULL, resolver_video_setup },
@@ -181,6 +190,7 @@ static int num_pref_init_funcs __initdata = 0;
 
 struct fb_info *registered_fb[FB_MAX];
 int num_registered_fb = 0;
+int fbcon_softback_size = 32768;
 
 char con2fb_map[MAX_NR_CONSOLES];
 
@@ -485,8 +495,6 @@ fb_mmap(struct file *file, struct vm_area_struct * vma)
 	if (remap_page_range(vma->vm_start, vma->vm_offset,
 			     vma->vm_end - vma->vm_start, vma->vm_page_prot))
 		return -EAGAIN;
-	vma->vm_file = file;
-	file->f_count++;
 	return 0;
 }
 
@@ -648,6 +656,21 @@ __initfunc(void video_setup(char *options, int *ints))
     if (!options || !*options)
 	    return;
 	    
+    if (!strncmp(options, "scrollback:", 11)) {
+	    options += 11;
+	    if (*options) {
+		fbcon_softback_size = simple_strtoul(options, &options, 0);
+		if (*options == 'k' || *options == 'K') {
+			fbcon_softback_size *= 1024;
+			options++;
+		}
+		if (*options != ',')
+			return;
+		options++;
+	    } else
+	        return;
+    }
+
     if (!strncmp(options, "map:", 4)) {
 	    options += 4;
 	    if (*options)
@@ -658,7 +681,7 @@ __initfunc(void video_setup(char *options, int *ints))
 		    }
 	    return;
     }
-
+    
     if (!strncmp(options, "vc:", 3)) {
 	    options += 3;
 	    if (*options)

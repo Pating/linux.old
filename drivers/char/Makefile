@@ -176,6 +176,14 @@ else
   endif
 endif
 
+ifeq ($(CONFIG_DTLK),y)
+L_OBJS += dtlk.o
+else
+  ifeq ($(CONFIG_DTLK),m)
+  M_OBJS += dtlk.o
+  endif
+endif
+
 ifeq ($(CONFIG_MS_BUSMOUSE),y)
 L_OBJS += msbusmouse.o
 else
@@ -361,6 +369,14 @@ L_OBJS += radio-rtrack2.o
 else
   ifeq ($(CONFIG_RADIO_RTRACK2),m)
   M_OBJS += radio-rtrack2.o
+  endif
+endif                                             
+
+ifeq ($(CONFIG_RADIO_TYPHOON),y)
+L_OBJS += radio-typhoon.o
+else
+  ifeq ($(CONFIG_RADIO_TYPHOON),m)
+  M_OBJS += radio-typhoon.o
   endif
 endif                                             
 

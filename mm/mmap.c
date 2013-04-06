@@ -319,6 +319,8 @@ unsigned long do_mmap(struct file * file, unsigned long addr, unsigned long len,
 			file->f_dentry->d_inode->i_writecount++;
 		if (error)
 			goto unmap_and_free_vma;
+		vma->vm_file = file;
+		file->f_count++;
 	}
 
 	/*
@@ -605,7 +607,7 @@ int do_munmap(unsigned long addr, size_t len)
 		return -EINVAL;
 
 	if ((len = PAGE_ALIGN(len)) == 0)
-		return 0;
+		return -EINVAL;
 
 	/* Check if this memory area is ok - put it on the temporary
 	 * list if so..  The checks here are pretty simple --

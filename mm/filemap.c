@@ -1334,8 +1334,6 @@ int generic_file_mmap(struct file * file, struct vm_area_struct * vma)
 	if (!inode->i_op || !inode->i_op->readpage)
 		return -ENOEXEC;
 	UPDATE_ATIME(inode);
-	vma->vm_file = file;
-	file->f_count++;
 	vma->vm_ops = ops;
 	return 0;
 }
@@ -1455,6 +1453,12 @@ generic_file_write(struct file *file, const char *buf,
 
 	if (!inode->i_op || !inode->i_op->updatepage)
 		return -EIO;
+
+	if (file->f_error) {
+		int error = file->f_error;
+		file->f_error = 0;
+		return error;
+	}
 
 	sync    = file->f_flags & O_SYNC;
 	written = 0;
