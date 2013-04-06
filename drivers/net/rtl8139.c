@@ -96,11 +96,6 @@ static int full_duplex[MAX_UNITS] = {-1, -1, -1, -1, -1, -1, -1, -1};
 #else
 #define PCI_SUPPORT_VER2
 #endif
-#if LINUX_VERSION_CODE < 0x20159
-#define dev_free_skb(skb) dev_kfree_skb(skb, FREE_WRITE);
-#else
-#define dev_free_skb(skb) dev_kfree_skb(skb);
-#endif
 
 /* The I/O extent. */
 #define RTL8129_TOTAL_SIZE 0x80
@@ -1096,7 +1091,7 @@ static void rtl8129_interrupt(int irq, void *dev_instance, struct pt_regs *regs)
 				}
 
 				/* Free the original skb. */
-				dev_free_skb(tp->tx_info[entry].skb);
+				dev_kfree_skb_irq(tp->tx_info[entry].skb);
 				tp->tx_info[entry].skb = NULL;
 				if (tp->tx_full) {
 					/* The ring is no longer full, wake the queue. */
@@ -1322,7 +1317,7 @@ rtl8129_close(struct net_device *dev)
 		if (skb) {
 			if (mapping)
 				pci_unmap_single(tp->pdev, mapping, skb->len);
-			dev_free_skb(skb);
+			dev_kfree_skb(skb);
 		}
 		tp->tx_info[i].skb = NULL;
 		tp->tx_info[i].mapping = 0;

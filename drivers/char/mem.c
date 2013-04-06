@@ -58,9 +58,6 @@ extern void mda_console_init(void);
 #if defined(CONFIG_ADB)
 extern void adbdev_init(void);
 #endif
-#ifdef CONFIG_USB
-extern void usb_init(void);
-#endif
 #ifdef CONFIG_PHONE
 extern void telephony_init(void);
 #endif
@@ -248,14 +245,16 @@ static ssize_t read_kmem(struct file *file, char *buf,
 		if (p < PAGE_SIZE && read > 0) {
 			size_t tmp = PAGE_SIZE - p;
 			if (tmp > read) tmp = read;
-			clear_user(buf, tmp);
+			if (clear_user(buf, tmp))
+				return -EFAULT;
 			buf += tmp;
 			p += tmp;
 			read -= tmp;
 			count -= tmp;
 		}
 #endif
-		copy_to_user(buf, (char *)p, read);
+		if (copy_to_user(buf, (char *)p, read))
+			return -EFAULT;
 		p += read;
 		buf += read;
 		count -= read;
@@ -581,9 +580,6 @@ int __init chr_dev_init(void)
 		printk("unable to get major %d for memory devs\n", MEM_MAJOR);
 	rand_initialize();
 	raw_init();
-#ifdef CONFIG_USB
-	usb_init();
-#endif
 #ifdef CONFIG_I2C
 	i2c_init_all();
 #endif

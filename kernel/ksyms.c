@@ -74,6 +74,7 @@ __attribute__((section("__ksymtab"))) = {
 
 #ifdef CONFIG_KMOD
 EXPORT_SYMBOL(request_module);
+EXPORT_SYMBOL(exec_usermodehelper);
 #endif
 
 #ifdef CONFIG_MODULES
@@ -461,6 +462,7 @@ EXPORT_SYMBOL(strnicmp);
 
 /* software interrupts */
 EXPORT_SYMBOL(tasklet_hi_vec);
+EXPORT_SYMBOL(tasklet_vec);
 EXPORT_SYMBOL(bh_task_vec);
 EXPORT_SYMBOL(init_bh);
 EXPORT_SYMBOL(remove_bh);
