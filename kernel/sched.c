@@ -36,6 +36,7 @@
 #include <asm/uaccess.h>
 #include <asm/pgtable.h>
 #include <asm/mmu_context.h>
+#include <asm/semaphore-helper.h>
 
 #include <linux/timex.h>
 
@@ -463,8 +464,17 @@ void add_timer(struct timer_list *timer)
 	unsigned long flags;
 
 	spin_lock_irqsave(&timerlist_lock, flags);
+	if (timer->prev)
+		goto bug;
 	internal_add_timer(timer);
+out:
 	spin_unlock_irqrestore(&timerlist_lock, flags);
+	return;
+
+bug:
+	printk("bug: kernel timer added twice at %p.\n",
+			__builtin_return_address(0));
+	goto out;
 }
 
 static inline int detach_timer(struct timer_list *timer)
@@ -639,6 +649,8 @@ asmlinkage void schedule(void)
 	struct task_struct * prev, * next;
 	int this_cpu;
 
+	run_task_queue(&tq_scheduler);
+
 	prev = current;
 	this_cpu = prev->processor;
 	/*
@@ -654,7 +666,6 @@ asmlinkage void schedule(void)
 	/* Do "administrative" work here while we don't hold any locks */
 	if (bh_active & bh_mask)
 		do_bottom_half();
-	run_task_queue(&tq_scheduler);
 
 	spin_lock(&scheduler_lock);
 	spin_lock_irq(&runqueue_lock);
@@ -680,8 +691,18 @@ asmlinkage void schedule(void)
 
 	sched_data->prevstate = prev->state;
 
+/* this is the scheduler proper: */
 	{
 		struct task_struct * p = init_task.next_run;
+		int c = -1000;
+
+		/* Default process to select.. */
+		next = idle_task;
+		if (prev->state == TASK_RUNNING) {
+			c = goodness(prev, prev, this_cpu);
+			next = prev;
+		}
+
 		/*
 		 * This is subtle.
 		 * Note how we can enable interrupts here, even
@@ -693,36 +714,27 @@ asmlinkage void schedule(void)
 		 * the scheduler lock
 		 */
 		spin_unlock_irq(&runqueue_lock);
-#ifdef __SMP__
-		prev->has_cpu = 0;
-#endif
-	
 /*
  * Note! there may appear new tasks on the run-queue during this, as
  * interrupts are enabled. However, they will be put on front of the
  * list, so our list starting at "p" is essentially fixed.
  */
-/* this is the scheduler proper: */
-		{
-			int c = -1000;
-			next = idle_task;
-			while (p != &init_task) {
-				if (can_schedule(p)) {
-					int weight = goodness(p, prev, this_cpu);
-					if (weight > c)
-						c = weight, next = p;
-				}
-				p = p->next_run;
+		while (p != &init_task) {
+			if (can_schedule(p)) {
+				int weight = goodness(p, prev, this_cpu);
+				if (weight > c)
+					c = weight, next = p;
 			}
+			p = p->next_run;
+		}
 
-			/* Do we need to re-calculate counters? */
-			if (!c) {
-				struct task_struct *p;
-				read_lock(&tasklist_lock);
-				for_each_task(p)
-					p->counter = (p->counter >> 1) + p->priority;
-				read_unlock(&tasklist_lock);
-			}
+		/* Do we need to re-calculate counters? */
+		if (!c) {
+			struct task_struct *p;
+			read_lock(&tasklist_lock);
+			for_each_task(p)
+				p->counter = (p->counter >> 1) + p->priority;
+			read_unlock(&tasklist_lock);
 		}
 	}
 
@@ -751,10 +763,8 @@ asmlinkage void schedule(void)
 	 * thus we have to lock the previous process from getting
 	 * rescheduled during switch_to().
 	 */
-	prev->has_cpu = 1;
-
- 	next->has_cpu = 1;
  	next->processor = this_cpu;
+ 	next->has_cpu = 1;
 	spin_unlock(&scheduler_lock);
 #endif /* __SMP__ */
  	if (prev != next) {
@@ -863,30 +873,28 @@ void __up(struct semaphore *sem)
 	struct task_struct *tsk = current;	\
 	struct wait_queue wait = { tsk, NULL };
 
-#define DOWN_HEAD(task_state)						 \
-									 \
-									 \
-	tsk->state = (task_state);					 \
-	add_wait_queue(&sem->wait, &wait);				 \
-									 \
-	/*								 \
-	 * Ok, we're set up.  sem->count is known to be less than zero	 \
-	 * so we must wait.						 \
-	 *								 \
-	 * We can let go the lock for purposes of waiting.		 \
-	 * We re-acquire it after awaking so as to protect		 \
-	 * all semaphore operations.					 \
-	 *								 \
-	 * If "up()" is called before we call waking_non_zero() then	 \
-	 * we will catch it right away.  If it is called later then	 \
-	 * we will have to go through a wakeup cycle to catch it.	 \
-	 *								 \
-	 * Multiple waiters contend for the semaphore lock to see	 \
-	 * who gets to gate through and who has to wait some more.	 \
-	 */								 \
-	for (;;) {							 \
-		if (waking_non_zero(sem, tsk))	/* are we waking up?  */ \
-			break;			/* yes, exit loop */
+#define DOWN_HEAD(task_state)						\
+									\
+									\
+	tsk->state = (task_state);					\
+	add_wait_queue(&sem->wait, &wait);				\
+									\
+	/*								\
+	 * Ok, we're set up.  sem->count is known to be less than zero	\
+	 * so we must wait.						\
+	 *								\
+	 * We can let go the lock for purposes of waiting.		\
+	 * We re-acquire it after awaking so as to protect		\
+	 * all semaphore operations.					\
+	 *								\
+	 * If "up()" is called before we call waking_non_zero() then	\
+	 * we will catch it right away.  If it is called later then	\
+	 * we will have to go through a wakeup cycle to catch it.	\
+	 *								\
+	 * Multiple waiters contend for the semaphore lock to see	\
+	 * who gets to gate through and who has to wait some more.	\
+	 */								\
+	for (;;) {
 
 #define DOWN_TAIL(task_state)			\
 		tsk->state = (task_state);	\
@@ -898,6 +906,8 @@ void __down(struct semaphore * sem)
 {
 	DOWN_VAR
 	DOWN_HEAD(TASK_UNINTERRUPTIBLE)
+	if (waking_non_zero(sem))
+		break;
 	schedule();
 	DOWN_TAIL(TASK_UNINTERRUPTIBLE)
 }
@@ -907,15 +917,23 @@ int __down_interruptible(struct semaphore * sem)
 	DOWN_VAR
 	int ret = 0;
 	DOWN_HEAD(TASK_INTERRUPTIBLE)
-	if (signal_pending(tsk))
+
+	ret = waking_non_zero_interruptible(sem, tsk);
+	if (ret)
 	{
-		ret = -EINTR;			/* interrupted */
-		atomic_inc(&sem->count);	/* give up on down operation */
+		if (ret == 1)
+			/* ret != 0 only if we get interrupted -arca */
+			ret = 0;
 		break;
 	}
 	schedule();
 	DOWN_TAIL(TASK_INTERRUPTIBLE)
 	return ret;
+}
+
+int __down_trylock(struct semaphore * sem)
+{
+	return waking_non_zero_trylock(sem);
 }
 
 #define	SLEEP_ON_VAR				\

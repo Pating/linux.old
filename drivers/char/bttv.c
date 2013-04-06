@@ -120,6 +120,7 @@ static struct bttv bttvs[BTTV_MAX];
 
 #define I2C_TIMING (0x7<<4)
 #define I2C_DELAY   10
+
 #define I2C_SET(CTRL,DATA) \
     { btwrite((CTRL<<1)|(DATA), BT848_I2C); udelay(I2C_DELAY); }
 #define I2C_GET()   (btread(BT848_I2C)&1)
@@ -244,6 +245,7 @@ static void i2c_setlines(struct i2c_bus *bus,int ctrl,int data)
 {
         struct bttv *btv = (struct bttv*)bus->data;
 	btwrite((ctrl<<1)|data, BT848_I2C);
+	btread(BT848_I2C); /* flush buffers */
 	udelay(I2C_DELAY);
 }
 
@@ -537,6 +539,8 @@ static struct tvcard tvcards[] =
 	{ 3, 4, 0, 2, 15, { 2, 3, 1, 1}, { 13, 14, 11, 7, 0, 0}, 0},
         /* Aimslab VHX */
         { 3, 1, 0, 2, 7, { 2, 3, 1, 1}, { 0, 1, 2, 3, 4}},
+        /* Zoltrix TV-Max */
+        { 3, 1, 0, 2,15, { 2, 3, 1, 1}, { 0, 0, 0, 0, 0}},
 };
 #define TVCARDS (sizeof(tvcards)/sizeof(tvcard))
 
@@ -2880,9 +2884,6 @@ static void idcard(int i)
 
 		} else if (I2CRead(&(btv->i2c), I2C_STBEE)>=0) {
 			btv->type=BTTV_STB;
-		} else 
-		        if (I2CRead(&(btv->i2c), I2C_VHX)>=0) {
-			        btv->type=BTTV_VHX;
 		} else {
 			if (I2CRead(&(btv->i2c), 0x80)>=0) /* check for msp34xx */
 				btv->type = BTTV_MIROPRO;
@@ -2907,8 +2908,8 @@ static void idcard(int i)
         }
         if(btv->type==BTTV_AVERMEDIA98)
         {
-          btv->pll.pll_ifreq=28636363;
-          btv->pll.pll_crystal=BT848_IFORM_XT0;
+        	btv->pll.pll_ifreq=28636363;
+        	btv->pll.pll_crystal=BT848_IFORM_XT0;
         }
           
 	if (btv->have_tuner && btv->tuner_type != -1) 

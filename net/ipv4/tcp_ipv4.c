@@ -5,7 +5,7 @@
  *
  *		Implementation of the Transmission Control Protocol(TCP).
  *
- * Version:	$Id: tcp_ipv4.c,v 1.164 1999/01/04 20:36:55 davem Exp $
+ * Version:	$Id: tcp_ipv4.c,v 1.165 1999/02/08 11:19:56 davem Exp $
  *
  *		IPv4 specific functions
  *
@@ -751,7 +751,6 @@ static inline void do_pmtu_discovery(struct sock *sk, struct iphdr *ip)
 	if (sk->ip_pmtudisc != IP_PMTUDISC_DONT && sk->dst_cache) {
 		if (tp->pmtu_cookie > sk->dst_cache->pmtu &&
 		    !atomic_read(&sk->sock_readers)) {
-			lock_sock(sk); 
 			tcp_sync_mss(sk, sk->dst_cache->pmtu);
 
 			/* Resend the TCP packet because it's  
@@ -760,7 +759,6 @@ static inline void do_pmtu_discovery(struct sock *sk, struct iphdr *ip)
 			 * discovery.
 			 */
 			tcp_simple_retransmit(sk);
-			release_sock(sk);
 		} /* else let the usual retransmit timer handle it */
 	}
 }
@@ -1325,6 +1323,10 @@ struct sock *tcp_create_openreq_child(struct sock *sk, struct open_request *req,
 		newsk->pair = NULL;
 		skb_queue_head_init(&newsk->back_log);
 		skb_queue_head_init(&newsk->error_queue);
+#ifdef CONFIG_FILTER
+		if (newsk->filter)
+			sk_filter_charge(newsk, newsk->filter);
+#endif
 
 		/* Now setup tcp_opt */
 		newtp = &(newsk->tp_pinfo.af_tcp);
@@ -1555,19 +1557,11 @@ static inline struct sock *tcp_v4_hnd_req(struct sock *sk,struct sk_buff *skb)
 
 int tcp_v4_do_rcv(struct sock *sk, struct sk_buff *skb)
 {
-#ifdef CONFIG_FILTER
-	if (sk->filter)
-	{
-		if (sk_filter(skb, sk->filter_data, sk->filter))
-			goto discard;
-	}
-#endif /* CONFIG_FILTER */
 
-	/*
-	 *	socket locking is here for SMP purposes as backlog rcv
-	 *	is currently called with bh processing disabled.
-	 */
-	lock_sock(sk); 
+#ifdef CONFIG_FILTER
+	if (sk->filter && sk_filter(skb, sk->filter))
+		goto discard;
+#endif /* CONFIG_FILTER */
 
 	/* 
 	 * This doesn't check if the socket has enough room for the packet.
@@ -1579,7 +1573,6 @@ int tcp_v4_do_rcv(struct sock *sk, struct sk_buff *skb)
 	if (sk->state == TCP_ESTABLISHED) { /* Fast path */
 		if (tcp_rcv_established(sk, skb, skb->h.th, skb->len))
 			goto reset;
-		release_sock(sk);
 		return 0; 
 	} 
 
@@ -1590,14 +1583,21 @@ int tcp_v4_do_rcv(struct sock *sk, struct sk_buff *skb)
 		nsk = tcp_v4_hnd_req(sk, skb);
 		if (!nsk) 
 			goto discard;
-		lock_sock(nsk);
-		release_sock(sk);
+
+		/*
+		 * Queue it on the new socket if the new socket is active,
+		 * otherwise we just shortcircuit this and continue with
+		 * the new socket..
+		 */
+		if (atomic_read(&nsk->sock_readers)) {
+			__skb_queue_tail(&nsk->back_log, skb);
+			return 0;
+		}
 		sk = nsk;
 	}
 	
 	if (tcp_rcv_state_process(sk, skb, skb->h.th, skb->len))
 		goto reset;
-	release_sock(sk); 
 	return 0;
 
 reset:
@@ -1609,7 +1609,6 @@ discard:
 	 * might be destroyed here. This current version compiles correctly,
 	 * but you have been warned.
 	 */
-	release_sock(sk);  
 	return 0;
 }
 

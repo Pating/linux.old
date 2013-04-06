@@ -42,7 +42,7 @@
 
 #include "irq.h"
 
-extern unsigned long start_kernel, _etext;
+extern unsigned long start_kernel;
 extern void update_one_process( struct task_struct *p,
 				unsigned long ticks, unsigned long user,
 				unsigned long system, int cpu);
@@ -145,6 +145,17 @@ int skip_ioapic_setup = 0;				/* 1 if "noapic" boot option passed */
  * IA s/w dev Vol 3, Section 7.4
  */
 #define APIC_DEFAULT_PHYS_BASE 0xfee00000
+
+/*
+ * Reads and clears the Pentium Timestamp-Counter
+ */
+#define READ_TSC(x)	__asm__ __volatile__ (  "rdtsc" \
+				:"=a" (((unsigned long*)&(x))[0]),  \
+				 "=d" (((unsigned long*)&(x))[1]))
+
+#define CLEAR_TSC \
+	__asm__ __volatile__ ("\t.byte 0x0f, 0x30;\n"::\
+		"a"(0x00001000), "d"(0x00001000), "c"(0x10):"memory")
 
 /*
  *	Setup routine for controlling SMP activation
@@ -308,8 +319,17 @@ static int __init smp_read_mpc(struct mp_config_table *mpc)
 						printk("Processor #%d unused. (Max %d processors).\n",m->mpc_apicid, NR_CPUS);
 					else
 					{
+						int ver = m->mpc_apicver;
+
 						cpu_present_map|=(1<<m->mpc_apicid);
-						apic_version[m->mpc_apicid]=m->mpc_apicver;
+						/*
+						 * Validate version
+						 */
+						if (ver == 0x0) {
+							printk("BIOS bug, APIC version is 0 for CPU#%d! fixing up to 0x10. (tell your hw vendor)\n", m->mpc_apicid);
+							ver = 0x10;
+						}
+						apic_version[m->mpc_apicid] = ver;
 					}
 				}
 				mpt+=sizeof(*m);
@@ -710,24 +730,19 @@ void __init enable_local_APIC(void)
 	value |= 0xff;			/* Set spurious IRQ vector to 0xff */
  	apic_write(APIC_SPIV,value);
 
+	/*
+	 * Set Task Priority to 'accept all'
+	 */
  	value = apic_read(APIC_TASKPRI);
- 	value &= ~APIC_TPRI_MASK;	/* Set Task Priority to 'accept all' */
+ 	value &= ~APIC_TPRI_MASK;
  	apic_write(APIC_TASKPRI,value);
 
 	/*
-	 * Set arbitrarion priority to 0
-	 */
- 	value = apic_read(APIC_ARBPRI);
- 	value &= ~APIC_ARBPRI_MASK;
- 	apic_write(APIC_ARBPRI, value);
-
-	/*
-	 * Set the logical destination ID to 'all', just to be safe.
+	 * Clear the logical destination ID, just to be safe.
 	 * also, put the APIC into flat delivery mode.
 	 */
  	value = apic_read(APIC_LDR);
 	value &= ~APIC_LDR_MASK;
-	value |= SET_APIC_LOGICAL_ID(0xff);
  	apic_write(APIC_LDR,value);
 
  	value = apic_read(APIC_DFR);
@@ -735,8 +750,6 @@ void __init enable_local_APIC(void)
  	apic_write(APIC_DFR, value);
 
 	udelay(100);			/* B safe */
-	ack_APIC_irq();
-	udelay(100);
 }
 
 unsigned long __init init_smp_mappings(unsigned long memory_start)
@@ -1802,8 +1815,10 @@ asmlinkage void smp_mtrr_interrupt(void)
  */
 asmlinkage void smp_spurious_interrupt(void)
 {
-	/* ack_APIC_irq();   see sw-dev-man vol 3, chapter 7.4.13.5 */
-	printk("spurious APIC interrupt, ayiee, should never happen.\n");
+	ack_APIC_irq();
+	/* see sw-dev-man vol 3, chapter 7.4.13.5 */
+	printk("spurious APIC interrupt on CPU#%d, should never happen.\n",
+			smp_processor_id());
 }
 
 /*
@@ -1814,10 +1829,6 @@ asmlinkage void smp_spurious_interrupt(void)
  * The APIC timer is not exactly sync with the external timer chip, it
  * closely follows bus clocks.
  */
-
-#define RDTSC(x)	__asm__ __volatile__ (  "rdtsc" \
-				:"=a" (((unsigned long*)&x)[0]),  \
-				 "=d" (((unsigned long*)&x)[1]))
 
 /*
  * The timer chip is already set up at HZ interrupts per second here,
@@ -1937,7 +1948,7 @@ int __init calibrate_APIC_clock(void)
 	/*
 	 * We wrapped around just now. Let's start:
 	 */
-	RDTSC(t1);
+	READ_TSC(t1);
 	tt1=apic_read(APIC_TMCCT);
 
 #define LOOPS (HZ/10)
@@ -1948,7 +1959,7 @@ int __init calibrate_APIC_clock(void)
 		wait_8254_wraparound ();
 
 	tt2=apic_read(APIC_TMCCT);
-	RDTSC(t2);
+	READ_TSC(t2);
 
 	/*
 	 * The APIC bus clock counter is 32 bits only, it
@@ -2058,3 +2069,4 @@ int setup_profiling_timer(unsigned int multiplier)
 }
 
 #undef APIC_DIVISOR
+
