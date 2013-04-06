@@ -532,9 +532,9 @@ static unsigned long get_wchan(struct task_struct *p)
 	    unsigned long schedule_frame;
 	    unsigned long pc;
 
-	    pc = thread_saved_pc(&p->tss);
+	    pc = thread_saved_pc(&p->thread);
 	    if (pc >= first_sched && pc < last_sched) {
-		schedule_frame = ((unsigned long *)p->tss.ksp)[6];
+		schedule_frame = ((unsigned long *)p->thread.ksp)[6];
 		return ((unsigned long *)schedule_frame)[12];
 	    }
 	    return pc;
@@ -603,7 +603,7 @@ static unsigned long get_wchan(struct task_struct *p)
 #ifdef __sparc_v9__
 		bias = STACK_BIAS;
 #endif
-		fp = p->tss.ksp + bias;
+		fp = p->thread.ksp + bias;
 		do {
 			/* Bogus frame pointer? */
 			if (fp < (task_base + sizeof(struct task_struct)) ||
@@ -631,7 +631,7 @@ static unsigned long get_wchan(struct task_struct *p)
 				 + (long)&((struct pt_regs *)0)->reg)
 # define KSTK_EIP(tsk) \
     (*(unsigned long *)(PT_REG(pc) + PAGE_SIZE + (unsigned long)(tsk)))
-# define KSTK_ESP(tsk)	((tsk) == current ? rdusp() : (tsk)->tss.usp)
+# define KSTK_ESP(tsk)	((tsk) == current ? rdusp() : (tsk)->thread.usp)
 #elif defined(__arm__)
 # define KSTK_EIP(tsk)	(((unsigned long *)(4096+(unsigned long)(tsk)))[1022])
 # define KSTK_ESP(tsk)	(((unsigned long *)(4096+(unsigned long)(tsk)))[1020])
@@ -648,11 +648,11 @@ static unsigned long get_wchan(struct task_struct *p)
 #define KSTK_EIP(tsk)	((tsk)->tss.regs->nip)
 #define KSTK_ESP(tsk)	((tsk)->tss.regs->gpr[1])
 #elif defined (__sparc_v9__)
-# define KSTK_EIP(tsk)  ((tsk)->tss.kregs->tpc)
-# define KSTK_ESP(tsk)  ((tsk)->tss.kregs->u_regs[UREG_FP])
+# define KSTK_EIP(tsk)  ((tsk)->thread.kregs->tpc)
+# define KSTK_ESP(tsk)  ((tsk)->thread.kregs->u_regs[UREG_FP])
 #elif defined(__sparc__)
-# define KSTK_EIP(tsk)  ((tsk)->tss.kregs->pc)
-# define KSTK_ESP(tsk)  ((tsk)->tss.kregs->u_regs[UREG_FP])
+# define KSTK_EIP(tsk)  ((tsk)->thread.kregs->pc)
+# define KSTK_ESP(tsk)  ((tsk)->thread.kregs->u_regs[UREG_FP])
 #endif
 
 /* Gcc optimizes away "strlen(x)" for constant x */

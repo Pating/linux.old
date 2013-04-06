@@ -470,7 +470,6 @@ static void show(char * str)
 	int i;
 	unsigned long *stack;
 	int cpu = smp_processor_id();
-	extern char *get_options(char *str, int *ints);
 
 	printk("\n%s, CPU %d:\n", str, cpu);
 	printk("irq:  %d [%d %d]\n",
@@ -480,7 +479,7 @@ static void show(char * str)
 	stack = (unsigned long *) &stack;
 	for (i = 40; i ; i--) {
 		unsigned long x = *++stack;
-		if (x > (unsigned long) &get_options && x < (unsigned long) &vsprintf) {
+		if (x > (unsigned long) &get_option && x < (unsigned long) &vsprintf) {
 			printk("<[%08lx]> ", x);
 		}
 	}

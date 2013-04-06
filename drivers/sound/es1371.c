@@ -68,12 +68,14 @@
  *    15.06.99   0.12  Fix bad allocation bug.
  *                     Thanks to Deti Fliegl <fliegl@in.tum.de>
  *    28.06.99   0.13  Add pci_set_master
+ *    03.08.99   0.14  adapt to Linus' new __setup/__initcall
+ *                     added kernel command line option "es1371=joystickaddr"
+ *                     removed CONFIG_SOUND_ES1371_JOYPORT_BOOT kludge
  *
  */
 
 /*****************************************************************************/
       
-#include <linux/config.h>
 #include <linux/version.h>
 #include <linux/module.h>
 #include <linux/string.h>
@@ -2694,13 +2696,7 @@ static /*const*/ struct file_operations es1371_midi_fops = {
 /* maximum number of devices */
 #define NR_DEVICE 5
 
-#if CONFIG_SOUND_ES1371_JOYPORT_BOOT
-static int joystick[NR_DEVICE] = { 
-CONFIG_SOUND_ES1371_GAMEPORT
-, 0, };
-#else
 static int joystick[NR_DEVICE] = { 0, };
-#endif
 
 /* --------------------------------------------------------------------- */
 
@@ -2723,11 +2719,10 @@ static struct initvol {
 	{ SOUND_MIXER_WRITE_IGAIN, 0x4040 }
 };
 
-#ifdef MODULE
-int __init init_module(void)
-#else
-int __init init_es1371(void)
+#ifndef MODULE
+static
 #endif
+int __init init_module(void)
 {
 	struct es1371_state *s;
 	struct pci_dev *pcidev = NULL;
@@ -2736,11 +2731,11 @@ int __init init_es1371(void)
 
 	if (!pci_present())   /* No PCI bus in this machine! */
 		return -ENODEV;
-	printk(KERN_INFO "es1371: version v0.13 time " __TIME__ " " __DATE__ "\n");
+	printk(KERN_INFO "es1371: version v0.14 time " __TIME__ " " __DATE__ "\n");
 	while (index < NR_DEVICE && 
 	       (pcidev = pci_find_device(PCI_VENDOR_ID_ENSONIQ, PCI_DEVICE_ID_ENSONIQ_ES1371, pcidev))) {
-		if (pcidev->base_address[0] == 0 || 
-		    (pcidev->base_address[0] & PCI_BASE_ADDRESS_SPACE) != PCI_BASE_ADDRESS_SPACE_IO)
+		if (pcidev->resource[0].flags == 0 || 
+		    (pcidev->resource[0].flags & PCI_BASE_ADDRESS_SPACE) != PCI_BASE_ADDRESS_SPACE_IO)
 			continue;
 		if (pcidev->irq == 0) 
 			continue;
@@ -2757,7 +2752,7 @@ int __init init_es1371(void)
 		init_waitqueue_head(&s->midi.owait);
 		init_MUTEX(&s->open_sem);
 		s->magic = ES1371_MAGIC;
-		s->io = pcidev->base_address[0] & PCI_BASE_ADDRESS_IO_MASK;
+		s->io = pcidev->resource[0].start;
 		s->irq = pcidev->irq;
 		if (check_region(s->io, ES1371_EXTENT)) {
 			printk(KERN_ERR "es1371: io ports %#lx-%#lx in use\n", s->io, s->io+ES1371_EXTENT-1);
@@ -2917,5 +2912,24 @@ void cleanup_module(void)
 	}
 	printk(KERN_INFO "es1371: unloading\n");
 }
+
+#else /* MODULE */
+
+/* format is: es1371=[joystick] */
+
+static int __init es1371_setup(char *str)
+{
+	static unsigned __initdata nr_dev = 0;
+        int ints[11];
+
+	if (nr_dev >= NR_DEVICE)
+		return 0;
+	get_option(&str, &joystick[nr_dev]);
+	nr_dev++;
+	return 1;
+}
+
+__setup("es1371=", es1371_setup);
+__initcall(init_module);
 
 #endif /* MODULE */

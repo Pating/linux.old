@@ -51,14 +51,7 @@ spinlock_t semaphore_wake_lock = SPIN_LOCK_UNLOCKED;
 
 asmlinkage void ret_from_fork(void) __asm__("ret_from_fork");
 
-#ifdef CONFIG_APM
-extern int  apm_do_idle(void);
-extern void apm_do_busy(void);
-#endif
-
-static int hlt_counter=0;
-
-#define HARD_IDLE_TIMEOUT (HZ / 3)
+int hlt_counter=0;
 
 void disable_hlt(void)
 {
@@ -70,101 +63,67 @@ void enable_hlt(void)
 	hlt_counter--;
 }
 
-#ifndef __SMP__
-
-static void hard_idle(void)
+static void default_idle(void)
 {
-	while (!current->need_resched) {
-		if (boot_cpu_data.hlt_works_ok && !hlt_counter) {
-#ifdef CONFIG_APM
-				/* If the APM BIOS is not enabled, or there
-				 is an error calling the idle routine, we
-				 should hlt if possible.  We need to check
-				 need_resched again because an interrupt
-				 may have occurred in apm_do_idle(). */
-			start_bh_atomic();
-			if (!apm_do_idle() && !current->need_resched)
-				__asm__("hlt");
-			end_bh_atomic();
-#else
-			__asm__("hlt");
-#endif
-	        }
- 		if (current->need_resched) 
- 			break;
-		schedule();
-	}
-#ifdef CONFIG_APM
-	apm_do_busy();
-#endif
-}
-
-/*
- * The idle loop on a uniprocessor i386..
- */ 
-static int cpu_idle(void *unused)
-{
-	int work = 1;
-	unsigned long start_idle = 0;
-
-	/* endless idle loop with no priority at all */
-	current->priority = 0;
-	current->counter = -100;
-	init_idle();
-
-	for (;;) {
-		if (work)
-			start_idle = jiffies;
-
-		if (jiffies - start_idle > HARD_IDLE_TIMEOUT) 
-			hard_idle();
-		else  {
-			if (boot_cpu_data.hlt_works_ok && !hlt_counter && !current->need_resched)
-		        	__asm__("hlt");
+	while (1) {
+		while (!current->need_resched) {
+			if (!current_cpu_data.hlt_works_ok)
+				continue;
+			if (hlt_counter)
+				continue;
+			asm volatile("sti ; hlt" : : : "memory");
 		}
-
-		work = current->need_resched;
 		schedule();
 		check_pgt_cache();
 	}
-}
+}	
 
-#else
+void (*idle)(void) = default_idle;
 
-/*
- *	This is being executed in task 0 'user space'.
- */
+#if 1
 
-int cpu_idle(void *unused)
+#include <linux/pci.h>
+
+static int __init piix4_idle_init(void)
 {
-	/* endless idle loop with no priority at all */
-	current->priority = 0;
-	current->counter = -100;
-	init_idle();
+	/* This is the PIIX4 ACPI device */
+	struct pci_dev *dev = pci_find_device(PCI_VENDOR_ID_INTEL, PCI_DEVICE_ID_INTEL_82371AB_3, NULL);
 
-	while(1) {
-		if (current_cpu_data.hlt_works_ok && !hlt_counter &&
-				 !current->need_resched)
-			__asm__("hlt");
+	if (dev) {
+		u32 base;
+
+		printk("Found PIIX4 ACPI device\n");
+		pci_read_config_dword(dev, 0x40, &base);
+		printk("  Base address %04x\n", base);
+#ifdef __SMP__
 		/*
-		 * although we are an idle CPU, we do not want to
-		 * get into the scheduler unnecessarily.
+		 * We can't really do idle things with multiple CPU's, I'm
+		 * afraid.  We'd need a per-CPU ACPI device.
 		 */
-		if (current->need_resched) {
-			schedule();
-			check_pgt_cache();
-		}
+		if (smp_num_cpus > 1)
+			return 0;
+#endif
 	}
+	return 0;
 }
+
+__initcall(piix4_idle_init);
 
 #endif
 
-asmlinkage int sys_idle(void)
+/*
+ * The idle thread. There's no useful work to be
+ * done, so just try to conserve power and have a
+ * low exit latency (ie sit in a loop waiting for
+ * somebody to say that they'd like to reschedule)
+ */
+void cpu_idle(void)
 {
-	if (current->pid != 0)
-		return -EPERM;
-	cpu_idle(NULL);
-	return 0;
+	/* endless idle loop with no priority at all */
+	init_idle();
+	current->priority = 0;
+	current->counter = -100;
+	idle();
 }
 
 /*
@@ -177,7 +136,7 @@ static long no_idt[2] = {0, 0};
 static int reboot_mode = 0;
 static int reboot_thru_bios = 0;
 
-__initfunc(void reboot_setup(char *str, int *ints))
+static int __init reboot_setup(char *str)
 {
 	while(1) {
 		switch (*str) {
@@ -199,8 +158,10 @@ __initfunc(void reboot_setup(char *str, int *ints))
 		else
 			break;
 	}
+	return 1;
 }
 
+__setup("reboot=", reboot_setup);
 
 /* The following code and data reboots the machine by switching to real
    mode and jumping to the BIOS reset entry point, as if the CPU has

@@ -44,7 +44,7 @@
 #include <asm/adb.h>
 #include <asm/cuda.h>
 #include <asm/pmu.h>
-#include <asm/init.h>
+#include <linux/init.h>
 
 #include <linux/kbd_kern.h>
 #include <linux/kbd_ll.h>
@@ -673,7 +673,7 @@ static void leds_done(struct adb_request *req)
 
 }
 
-__initfunc(void mackbd_init_hw(void))
+void __init mackbd_init_hw(void)
 {
 	if ( (_machine != _MACH_chrp) && (_machine != _MACH_Pmac) )
 	    return;

@@ -212,8 +212,6 @@ repeat:
 	spin_unlock(&pagecache_lock);
 }
 
-extern atomic_t too_many_dirty_buffers;
-
 int shrink_mmap(int priority, int gfp_mask)
 {
 	static unsigned long clock = 0;
@@ -294,11 +292,15 @@ int shrink_mmap(int priority, int gfp_mask)
 
 		/* Is it a buffer page? */
 		if (page->buffers) {
-			int mem = page->inode ? 0 : PAGE_CACHE_SIZE;
 			spin_unlock(&pagecache_lock);
 			if (!try_to_free_buffers(page))
 				goto unlock_continue;
-			atomic_sub(mem, &buffermem);
+			/* page was locked, inode can't go away under us */
+			if (!page->inode)
+			{
+				atomic_sub(PAGE_CACHE_SIZE, &buffermem);
+				goto made_progress;
+			}
 			spin_lock(&pagecache_lock);
 		}
 
@@ -1862,21 +1864,22 @@ repeat_find:
 
 		status = write_one_page(file, page, offset, bytes, buf);
 
+		if (status >= 0) {
+			written += status;
+			count -= status;
+			pos += status;
+			buf += status;
+			if (pos > inode->i_size)
+				inode->i_size = pos;
+		}
 		/* Mark it unlocked again and drop the page.. */
 		UnlockPage(page);
 		page_cache_release(page);
 
 		if (status < 0)
 			break;
-
-		written += status;
-		count -= status;
-		pos += status;
-		buf += status;
 	}
 	*ppos = pos;
-	if (pos > inode->i_size)
-		inode->i_size = pos;
 
 	if (page_cache)
 		page_cache_free(page_cache);

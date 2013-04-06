@@ -75,17 +75,22 @@ extern void calibrate_delay(void);
 extern asmlinkage void entInt(void);
 
 
-/*
- * Process bootcommand SMP options, like "nosmp" and "maxcpus=".
- */
-void __init
-smp_setup(char *str, int *ints)
+static int __init nosmp(char *str)
 {
-	if (ints && ints[0] > 0)
-		max_cpus = ints[1];
-	else
-		max_cpus = 0;
+	max_cpus = 0;
+	return 1;
 }
+
+__setup("nosmp", nosmp);
+
+static int __init maxcpus(char *str)
+{
+	get_option(&str, &max_cpus);
+	return 1;
+}
+
+__setup("maxcpus", maxcpus);
+
 
 /*
  * Called by both boot and secondaries to move global data into
@@ -133,6 +138,10 @@ smp_callin(void)
 	/* Setup the scheduler for this processor.  */
 	init_idle();
 
+	/* ??? This should be in init_idle.  */
+	atomic_inc(&init_mm.mm_count);
+	current->active_mm = &init_mm;
+
 	/* Get our local ticker going. */
 	smp_setup_percpu_timer(cpuid);
 
@@ -153,7 +162,7 @@ smp_callin(void)
 	      cpuid, current));
 
 	/* Do nothing.  */
-	cpu_idle(NULL);
+	cpu_idle();
 }
 
 
@@ -335,21 +344,21 @@ secondary_cpu_start(int cpuid, struct task_struct *idle)
 
 	/* Initialize the CPU's HWPCB to something just good enough for
 	   us to get started.  Immediately after starting, we'll swpctx
-	   to the target idle task's tss.  Reuse the stack in the mean
+	   to the target idle task's ptb.  Reuse the stack in the mean
 	   time.  Precalculate the target PCBB.  */
 	hwpcb->ksp = (unsigned long) idle + sizeof(union task_union) - 16;
 	hwpcb->usp = 0;
-	hwpcb->ptbr = idle->tss.ptbr;
+	hwpcb->ptbr = idle->thread.ptbr;
 	hwpcb->pcc = 0;
 	hwpcb->asn = 0;
-	hwpcb->unique = virt_to_phys(&idle->tss);
-	hwpcb->flags = idle->tss.pal_flags;
+	hwpcb->unique = virt_to_phys(&idle->thread);
+	hwpcb->flags = idle->thread.pal_flags;
 	hwpcb->res1 = hwpcb->res2 = 0;
 
 	DBGS(("KSP 0x%lx PTBR 0x%lx VPTBR 0x%lx UNIQUE 0x%lx\n",
 	      hwpcb->ksp, hwpcb->ptbr, hwrpb->vptb, hwcpb->unique));
 	DBGS(("Starting secondary cpu %d: state 0x%lx pal_flags 0x%lx\n",
-	      cpuid, idle->state, idle->tss.pal_flags));
+	      cpuid, idle->state, idle->thread.pal_flags));
 
 	/* Setup HWRPB fields that SRM uses to activate secondary CPU */
 	hwrpb->CPU_restart = __smp_callin;
@@ -399,10 +408,13 @@ smp_boot_one_cpu(int cpuid, int cpunum)
 	   HWRPB.CPU_restart says to start.  But this gets all the other
 	   task-y sort of data structures set up like we wish.  */
 	kernel_thread((void *)__smp_callin, NULL, CLONE_PID|CLONE_VM);
-	idle = task[cpunum];
-	if (!idle)
-		panic("No idle process for CPU %d", cpuid);
-	idle->processor = cpuid;
+
+        idle = init_task.prev_task;
+        if (!idle)
+                panic("No idle process for CPU %d", cpunum);
+        del_from_runqueue(idle);
+        init_tasks[cpunum] = idle;
+        idle->processor = cpuid;
 
 	/* Schedule the first task manually.  */
 	/* ??? Ingo, what is this?  */
@@ -511,6 +523,10 @@ smp_boot_cpus(void)
 	smp_setup_percpu_timer(smp_boot_cpuid);
 
 	init_idle();
+
+	/* ??? This should be in init_idle.  */
+	atomic_inc(&init_mm.mm_count);
+	current->active_mm = &init_mm;
 
 	/* Nothing to do on a UP box, or when told not to.  */
 	if (smp_num_probed == 1 || max_cpus == 0) {
@@ -859,16 +875,16 @@ static void
 ipi_flush_tlb_mm(void *x)
 {
 	struct mm_struct *mm = (struct mm_struct *) x;
-	if (mm == current->mm)
+	if (mm == current->active_mm)
 		flush_tlb_current(mm);
 }
 
 void
 flush_tlb_mm(struct mm_struct *mm)
 {
-	if (mm == current->mm) {
+	if (mm == current->active_mm) {
 		flush_tlb_current(mm);
-		if (atomic_read(&mm->count) == 1)
+		if (atomic_read(&mm->mm_users) <= 1)
 			return;
 	} else
 		flush_tlb_other(mm);
@@ -888,7 +904,7 @@ static void
 ipi_flush_tlb_page(void *x)
 {
 	struct flush_tlb_page_struct *data = (struct flush_tlb_page_struct *)x;
-	if (data->mm == current->mm)
+	if (data->mm == current->active_mm)
 		flush_tlb_current_page(data->mm, data->vma, data->addr);
 }
 
@@ -898,9 +914,9 @@ flush_tlb_page(struct vm_area_struct *vma, unsigned long addr)
 	struct flush_tlb_page_struct data;
 	struct mm_struct *mm = vma->vm_mm;
 
-	if (mm == current->mm) {
+	if (mm == current->active_mm) {
 		flush_tlb_current_page(mm, vma, addr);
-		if (atomic_read(&mm->count) == 1)
+		if (atomic_read(&mm->mm_users) <= 1)
 			return;
 	} else
 		flush_tlb_other(mm);

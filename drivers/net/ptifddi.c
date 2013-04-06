@@ -1,4 +1,4 @@
-/* $Id: ptifddi.c,v 1.7 1999/06/09 08:19:01 davem Exp $
+/* $Id: ptifddi.c,v 1.8 1999/08/08 01:35:56 davem Exp $
  * ptifddi.c: Network driver for Performance Technologies single-attach
  *            and dual-attach FDDI sbus cards.
  *
@@ -213,7 +213,7 @@ static inline int pti_fddi_init(struct device *dev, struct linux_sbus_device *sd
 	pti_load_main_firmware(pp);
 }
 
-__initfunc(int ptifddi_sbus_probe(struct device *dev))
+int __init ptifddi_sbus_probe(struct device *dev)
 {
 	struct linux_sbus *bus;
 	struct linux_sbus_device *sdev = 0;

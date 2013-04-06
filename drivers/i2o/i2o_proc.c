@@ -3,7 +3,7 @@
  *
  *   Copyright (c) 1999 Intel Corporation
  *   
- *   Originally written by Deepak Saxena(deepak.saxena@intel.com)
+ *   Originally written by Deepak Saxena(deepak@plexity.net)
  *
  *   This program is free software. You can redistribute it and/or
  *   modify it under the terms of the GNU General Public License
@@ -143,7 +143,8 @@ static struct i2o_handler i2o_proc_handler =
 {
 	(void *)i2o_proc_reply,
 	"I2O procfs Layer",
-	0
+	0,
+	0xffffffff	// All classes
 };
 
 /*
@@ -3089,7 +3090,7 @@ __init int i2o_proc_init(void)
 #ifdef MODULE
 
 
-MODULE_AUTHOR("Intel Corporation");
+MODULE_AUTHOR("Deepak Saxena");
 MODULE_DESCRIPTION("I2O procfs Handler");
 
 void cleanup_module(void)

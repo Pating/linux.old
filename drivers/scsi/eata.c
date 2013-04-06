@@ -516,7 +516,6 @@ struct proc_dir_entry proc_scsi_eata2x = {
 #define ASOK              0x00
 #define ASST              0x01
 
-#define ARRAY_SIZE(arr) (sizeof (arr) / sizeof (arr)[0])
 #define YESNO(a) ((a) ? 'y' : 'n')
 #define TLDEV(type) ((type) == TYPE_DISK || (type) == TYPE_ROM)
 
@@ -829,8 +828,8 @@ static inline int read_pio(unsigned long iobase, ushort *start, ushort *end) {
    return FALSE;
 }
 
-__initfunc (static inline int
-            get_pci_irq(unsigned long port_base, unsigned char *apic_irq)) {
+static inline int __init 
+get_pci_irq(unsigned long port_base, unsigned char *apic_irq){
 
 #if defined(CONFIG_PCI)
 
@@ -867,8 +866,8 @@ __initfunc (static inline int
    return FALSE;
 }
 
-__initfunc (static inline int port_detect \
-      (unsigned long port_base, unsigned int j, Scsi_Host_Template *tpnt)) {
+static inline int __init port_detect \
+      (unsigned long port_base, unsigned int j, Scsi_Host_Template *tpnt){
    unsigned char irq, dma_channel, subversion, i;
    unsigned char protocol_rev, apic_irq;
    struct eata_info info;
@@ -1152,7 +1151,7 @@ __initfunc (static inline int port_detect \
    return TRUE;
 }
 
-__initfunc (void eata2x_setup(char *str, int *ints)) {
+void  __init eata2x_setup(char *str, int *ints){
    int i, argc = ints[0];
    char *cur = str, *pc;
 
@@ -1188,7 +1187,7 @@ __initfunc (void eata2x_setup(char *str, int *ints)) {
    return;
 }
 
-__initfunc (static void add_pci_ports(void)) {
+static void __init add_pci_ports(void){
 
 #if defined(CONFIG_PCI)
 
@@ -1254,7 +1253,7 @@ __initfunc (static void add_pci_ports(void)) {
    return;
 }
 
-__initfunc (int eata2x_detect(Scsi_Host_Template *tpnt)) {
+int __init eata2x_detect(Scsi_Host_Template *tpnt){
    unsigned int j = 0, k;
    IRQ_FLAGS
 

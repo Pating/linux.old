@@ -257,7 +257,7 @@
 #define __NR_munlockall		317
 #define __NR_sysinfo		318
 #define __NR__sysctl		319
-#define __NR_idle		320
+/* 320 was sys_idle.  */
 #define __NR_oldumount		321
 #define __NR_swapon		322
 #define __NR_times		323
@@ -495,13 +495,6 @@ type name (type1 arg1,type2 arg2,type3 arg3,type4 arg4,type5 arg5, type6 arg6)\
 
 #include <linux/string.h>
 #include <linux/signal.h>
-
-extern long __kernel_thread(unsigned long, int (*)(void *), void *);
-
-static inline long kernel_thread(int (*fn)(void *), void * arg, unsigned long flags)
-{
-	return __kernel_thread(flags | CLONE_VM, fn, arg);
-}
 
 extern void sys_idle(void);
 static inline void idle(void)

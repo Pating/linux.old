@@ -114,10 +114,12 @@ extern int rtl8139_probe(struct device *dev);
 extern int hplance_probe(struct device *dev);
 extern int bagetlance_probe(struct device *);
 extern int dec_lance_probe(struct device *);
+extern int mvme147lance_probe(struct device *dev);
 extern int via_rhine_probe(struct device *dev);
 extern int tc515_probe(struct device *dev);
 extern int lance_probe(struct device *dev);
 extern int rcpci_probe(struct device *);
+extern int mac_onboard_sonic_probe(struct device *dev);
 
 /* Gigabit Ethernet adapters */
 extern int yellowfin_probe(struct device *dev);
@@ -425,6 +427,12 @@ struct devprobe m68k_probes[] __initdata = {
 #ifdef CONFIG_HPLANCE		/* HP300 internal Ethernet */
 	{hplance_probe, 0},
 #endif
+#ifdef CONFIG_MVME147_NET	/* MVME147 internal Ethernet */
+	{mvme147lance_probe, 0},
+#endif
+#ifdef CONFIG_MACSONIC		/* Mac 68k Quadra builtin Ethernet */ 
+	{mac_onboard_sonic_probe, 0},
+#endif
 	{NULL, 0},
 };
 
@@ -679,6 +687,14 @@ static struct device mkiss_bootstrap = {
 #undef NEXT_DEV
 #define NEXT_DEV (&mkiss_bootstrap)
 #endif	/* MKISS */
+  
+#if defined(CONFIG_YAM)
+extern int yam_init(struct device *);
+static struct device yam_bootstrap = {
+  "yam", 0x0, 0x0, 0x0, 0x0, 0, 0, 0, 0, 0, NEXT_DEV, yam_init, };
+#undef NEXT_DEV
+#define NEXT_DEV (&yam_bootstrap)
+#endif	/* CONFIG_YAM */
   
 #if defined(CONFIG_STRIP)
 extern int strip_init_ctrl_dev(struct device *);

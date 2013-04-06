@@ -39,6 +39,7 @@
 #include <linux/console.h>
 #include <linux/poll.h>
 #include <linux/mm.h>
+#include <linux/capability.h>
 
 #if defined(CONFIG_PROC_FS)
 #include <linux/proc_fs.h>
@@ -47,7 +48,6 @@
 #include <linux/kmod.h>
 #endif
 
-extern char *get_options(char *str, int *ints);
 extern void set_device_ro(kdev_t dev,int flag);
 extern struct file_operations * get_blkfops(unsigned int);
 extern int blkdev_release(struct inode * inode);
@@ -77,6 +77,7 @@ EXPORT_SYMBOL(request_module);
 #ifdef CONFIG_MODULES
 EXPORT_SYMBOL(get_module_symbol);
 #endif
+EXPORT_SYMBOL(get_option);
 EXPORT_SYMBOL(get_options);
 
 /* process memory management */
@@ -94,6 +95,7 @@ EXPORT_SYMBOL(free_pages);
 EXPORT_SYMBOL(__free_page);
 EXPORT_SYMBOL(kmem_find_general_cachep);
 EXPORT_SYMBOL(kmem_cache_create);
+EXPORT_SYMBOL(kmem_cache_destroy);
 EXPORT_SYMBOL(kmem_cache_shrink);
 EXPORT_SYMBOL(kmem_cache_alloc);
 EXPORT_SYMBOL(kmem_cache_free);
@@ -109,6 +111,7 @@ EXPORT_SYMBOL(high_memory);
 EXPORT_SYMBOL(vmtruncate);
 EXPORT_SYMBOL(find_vma);
 EXPORT_SYMBOL(get_unmapped_area);
+EXPORT_SYMBOL(init_mm);
 
 /* filesystem internal functions */
 EXPORT_SYMBOL(in_group_p);
@@ -167,10 +170,12 @@ EXPORT_SYMBOL(add_blkdev_randomness);
 EXPORT_SYMBOL(block_read_full_page);
 EXPORT_SYMBOL(block_write_full_page);
 EXPORT_SYMBOL(block_write_partial_page);
+EXPORT_SYMBOL(block_write_cont_page);
 EXPORT_SYMBOL(block_flushpage);
 EXPORT_SYMBOL(generic_file_read);
 EXPORT_SYMBOL(generic_file_write);
 EXPORT_SYMBOL(generic_file_mmap);
+EXPORT_SYMBOL(generic_buffer_fdatasync);
 EXPORT_SYMBOL(page_hash_bits);
 EXPORT_SYMBOL(page_hash_table);
 EXPORT_SYMBOL(file_lock_table);
@@ -354,6 +359,7 @@ EXPORT_SYMBOL(_ctype);
 EXPORT_SYMBOL(secure_tcp_sequence_number);
 EXPORT_SYMBOL(get_random_bytes);
 EXPORT_SYMBOL(securebits);
+EXPORT_SYMBOL(cap_bset);
 
 /* Program loader interfaces */
 EXPORT_SYMBOL(setup_arg_pages);

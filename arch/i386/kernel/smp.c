@@ -172,6 +172,22 @@ void __init smp_setup(char *str, int *ints)
 		max_cpus = 0;
 }
 
+static int __init nosmp(char *str)
+{
+	max_cpus = 0;
+	return 1;
+}
+
+__setup("nosmp", nosmp);
+
+static int __init maxcpus(char *str)
+{
+	get_option(&str, &max_cpus);
+	return 1;
+}
+
+__setup("maxcpus", maxcpus);
+
 void ack_APIC_irq(void)
 {
 	/* Clear the IPI */
@@ -875,7 +891,7 @@ void __init smp_callin(void)
 
 int cpucount = 0;
 
-extern int cpu_idle(void * unused);
+extern int cpu_idle(void);
 
 /*
  *	Activate a secondary processor.
@@ -891,7 +907,7 @@ int __init start_secondary(void *unused)
 	smp_callin();
 	while (!atomic_read(&smp_commenced))
 		/* nothing */ ;
-	return cpu_idle(NULL);
+	return cpu_idle();
 }
 
 /*
@@ -939,8 +955,6 @@ static void __init do_boot_cpu(int i)
 	 * once we got the process:
 	 */
 	idle = init_task.prev_task;
-
-	init_tasks[cpucount] = idle;
 	if (!idle)
 		panic("No idle process for CPU %d", i);
 
@@ -952,6 +966,7 @@ static void __init do_boot_cpu(int i)
 
 	del_from_runqueue(idle);
 	unhash_process(idle);
+	init_tasks[cpucount] = idle;
 
 	/* start_eip had better be page-aligned! */
 	start_eip = setup_trampoline();
@@ -1229,6 +1244,7 @@ void __init smp_boot_cpus(void)
 		io_apic_irqs = 0;
 #endif
 		cpu_online_map = cpu_present_map;
+		smp_num_cpus = 1;
 		goto smp_done;
 	}
 
@@ -1615,7 +1631,10 @@ static void flush_tlb_others(unsigned int cpumask)
 			 * Take care of "crossing" invalidates
 			 */
 			if (test_bit(cpu, &smp_invalidate_needed)) {
+				struct mm_struct *mm = current->mm;
 				clear_bit(cpu, &smp_invalidate_needed);
+				if (mm)
+					atomic_set_mask(1 << cpu, &mm->cpu_vm_mask);
 				local_flush_tlb();
 			}
 			--stuck;
@@ -1639,11 +1658,10 @@ void flush_tlb_current_task(void)
 {
 	unsigned long vm_mask = 1 << current->processor;
 	struct mm_struct *mm = current->mm;
+	unsigned long cpu_mask = mm->cpu_vm_mask & ~vm_mask;
 
-	if (mm->cpu_vm_mask != vm_mask) {
-		flush_tlb_others(mm->cpu_vm_mask & ~vm_mask);
-		mm->cpu_vm_mask = vm_mask;
-	}
+	mm->cpu_vm_mask = vm_mask;
+	flush_tlb_others(cpu_mask);
 	local_flush_tlb();
 }
 

@@ -779,6 +779,7 @@ still_running_back:
 	 * but prev is set to (the just run) 'last' process by switch_to().
 	 * This might sound slightly confusing but makes tons of sense.
 	 */
+	prepare_to_switch();
 	{
 		struct mm_struct *mm = next->mm;
 		struct mm_struct *oldmm = prev->active_mm;
@@ -788,7 +789,7 @@ still_running_back:
 			atomic_inc(&oldmm->mm_count);
 		} else {
 			if (next->active_mm != mm) BUG();
-			switch_mm(oldmm, mm, this_cpu);
+			switch_mm(oldmm, mm, next, this_cpu);
 		}
 
 		if (!prev->mm) {

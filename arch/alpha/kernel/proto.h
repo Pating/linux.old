@@ -162,6 +162,7 @@ extern void timer_interrupt(int irq, void *dev, struct pt_regs * regs);
 extern void rtc_init_pit(void);
 extern void generic_init_pit(void);
 extern unsigned long est_cycle_freq;
+extern struct resource timer_resource;
 
 /* smc37c93x.c */
 extern void SMC93x_Init(void);
@@ -193,7 +194,7 @@ extern void entDbg(void);
 
 /* process.c */
 extern void generic_kill_arch (int mode, char *reboot_cmd);
-extern int cpu_idle(void *) __attribute__((noreturn));
+extern void cpu_idle(void) __attribute__((noreturn));
 
 /* ptrace.c */
 extern int ptrace_set_bpt (struct task_struct *child);

@@ -88,11 +88,12 @@ struct el_common_EV5_uncorrectable_mcheck {
 
 extern void halt(void) __attribute__((noreturn));
 
+#define prepare_to_switch()	do { } while(0)
 #define switch_to(prev,next,last)			\
 do {							\
 	unsigned long pcbb;				\
 	current = (next);				\
-	pcbb = virt_to_phys(&current->tss);		\
+	pcbb = virt_to_phys(&current->thread);		\
 	(last) = alpha_switch_to(pcbb, (prev));		\
 } while (0)
 

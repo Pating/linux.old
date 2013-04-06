@@ -21,6 +21,8 @@
 
 #define STACK_MAGIC	0xdeadbeef
 
+#define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
+
 #define	KERN_EMERG	"<0>"	/* system is unusable			*/
 #define	KERN_ALERT	"<1>"	/* action must be taken immediately	*/
 #define	KERN_CRIT	"<2>"	/* critical conditions			*/
@@ -49,6 +51,8 @@ extern unsigned long simple_strtoul(const char *,char **,unsigned int);
 extern long simple_strtol(const char *,char **,unsigned int);
 extern int sprintf(char * buf, const char * fmt, ...);
 extern int vsprintf(char *buf, const char *, va_list);
+extern int get_option(char **str, int *pint);
+extern char *get_options(char *str, int nints, int *ints);
 
 extern int session_of_pgrp(int pgrp);
 

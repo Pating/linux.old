@@ -60,13 +60,15 @@
 #include <asm/system.h>
 #include <asm/checksum.h>
 
-
-__initfunc(void eth_setup(char *str, int *ints))
+static int __init eth_setup(char *str)
 {
+	int ints[5];
 	struct device *d;
 
+	str = get_options(str, ARRAY_SIZE(ints), ints);
+
 	if (!str || !*str)
-		return;
+		return 0;
 
 	d = dev_base;
 	while (d) 
@@ -85,8 +87,10 @@ __initfunc(void eth_setup(char *str, int *ints))
 		}
 		d=d->next;
 	}
+	return 1;
 }
 
+__setup("ether=", eth_setup);
 
 /*
  *	 Create the Ethernet MAC header for an arbitrary protocol layer 

@@ -101,6 +101,11 @@
  *    15.06.99   0.23  Fix bad allocation bug.
  *                     Thanks to Deti Fliegl <fliegl@in.tum.de>
  *    28.06.99   0.24  Add pci_set_master
+ *    02.08.99   0.25  Added workaround for the "phantom write" bug first
+ *                     documented by Dave Sharpless from Anchor Games
+ *    03.08.99   0.26  adapt to Linus' new __setup/__initcall
+ *                     added kernel command line option "es1370=joystick[,lineout[,micbias]]"
+ *                     removed CONFIG_SOUND_ES1370_JOYPORT_BOOT kludge
  *
  * some important things missing in Ensoniq documentation:
  *
@@ -123,7 +128,6 @@
 
 /*****************************************************************************/
       
-#include <linux/config.h>
 #include <linux/version.h>
 #include <linux/module.h>
 #include <linux/string.h>
@@ -175,12 +179,14 @@
 #define ES1370_REG_DAC2_SCOUNT    0x28
 #define ES1370_REG_ADC_SCOUNT     0x2c
 
-#define ES1370_REG_DAC1_FRAMEADR  0xc30
-#define ES1370_REG_DAC1_FRAMECNT  0xc34
-#define ES1370_REG_DAC2_FRAMEADR  0xc38
-#define ES1370_REG_DAC2_FRAMECNT  0xc3c
-#define ES1370_REG_ADC_FRAMEADR   0xd30
-#define ES1370_REG_ADC_FRAMECNT   0xd34
+#define ES1370_REG_DAC1_FRAMEADR    0xc30
+#define ES1370_REG_DAC1_FRAMECNT    0xc34
+#define ES1370_REG_DAC2_FRAMEADR    0xc38
+#define ES1370_REG_DAC2_FRAMECNT    0xc3c
+#define ES1370_REG_ADC_FRAMEADR     0xd30
+#define ES1370_REG_ADC_FRAMECNT     0xd34
+#define ES1370_REG_PHANTOM_FRAMEADR 0xd38
+#define ES1370_REG_PHANTOM_FRAMECNT 0xd3c
 
 #define ES1370_FMT_U8_MONO     0
 #define ES1370_FMT_U8_STEREO   1
@@ -359,6 +365,13 @@ struct es1370_state {
 /* --------------------------------------------------------------------- */
 
 static struct es1370_state *devs = NULL;
+
+/*
+ * The following buffer is used to point the phantom write channel to,
+ * so that it cannot wreak havoc. The attribute makes sure it doesn't
+ * cross a page boundary and ensures dword alignment for the DMA engine
+ */
+static unsigned char bugbuf[16] __attribute__ ((aligned (16)));
 
 /* --------------------------------------------------------------------- */
 
@@ -2282,11 +2295,8 @@ static /*const*/ struct file_operations es1370_midi_fops = {
 
 /* maximum number of devices */
 #define NR_DEVICE 5
-#ifdef CONFIG_SOUND_ES1370_JOYPORT_BOOT
-static int joystick[NR_DEVICE] = { 1, 0, };
-#else
+
 static int joystick[NR_DEVICE] = { 0, };
-#endif
 static int lineout[NR_DEVICE] = { 0, };
 static int micbias[NR_DEVICE] = { 0, };
 
@@ -2308,11 +2318,10 @@ static struct initvol {
 	{ SOUND_MIXER_WRITE_OGAIN, 0x4040 }
 };
 
-#ifdef MODULE
-int __init init_module(void)
-#else
-int __init init_es1370(void)
+#ifndef MODULE
+static
 #endif
+int __init init_module(void)
 {
 	struct es1370_state *s;
 	struct pci_dev *pcidev = NULL;
@@ -2321,11 +2330,11 @@ int __init init_es1370(void)
 
 	if (!pci_present())   /* No PCI bus in this machine! */
 		return -ENODEV;
-	printk(KERN_INFO "es1370: version v0.24 time " __TIME__ " " __DATE__ "\n");
+	printk(KERN_INFO "es1370: version v0.26 time " __TIME__ " " __DATE__ "\n");
 	while (index < NR_DEVICE && 
 	       (pcidev = pci_find_device(PCI_VENDOR_ID_ENSONIQ, PCI_DEVICE_ID_ENSONIQ_ES1370, pcidev))) {
-		if (pcidev->base_address[0] == 0 || 
-		    (pcidev->base_address[0] & PCI_BASE_ADDRESS_SPACE) != PCI_BASE_ADDRESS_SPACE_IO)
+		if (pcidev->resource[0].flags == 0 || 
+		    (pcidev->resource[0].flags & PCI_BASE_ADDRESS_SPACE) != PCI_BASE_ADDRESS_SPACE_IO)
 			continue;
 		if (pcidev->irq == 0) 
 			continue;
@@ -2342,7 +2351,7 @@ int __init init_es1370(void)
 		init_waitqueue_head(&s->midi.owait);
 		init_MUTEX(&s->open_sem);
 		s->magic = ES1370_MAGIC;
-		s->io = pcidev->base_address[0] & PCI_BASE_ADDRESS_IO_MASK;
+		s->io = pcidev->resource[0].start;
 		s->irq = pcidev->irq;
 		if (check_region(s->io, ES1370_EXTENT)) {
 			printk(KERN_ERR "es1370: io ports %#lx-%#lx in use\n", s->io, s->io+ES1370_EXTENT-1);
@@ -2385,6 +2394,10 @@ int __init init_es1370(void)
 		/* initialize the chips */
 		outl(s->ctrl, s->io+ES1370_REG_CONTROL);
 		outl(s->sctrl, s->io+ES1370_REG_SERIAL_CONTROL);
+		/* point phantom write channel to "bugbuf" */
+		outl((ES1370_REG_PHANTOM_FRAMEADR >> 8) & 15, s->io+ES1370_REG_MEMPAGE);
+		outl(virt_to_bus(bugbuf), s->io+(ES1370_REG_PHANTOM_FRAMEADR & 0xff));
+		outl(0, s->io+(ES1370_REG_PHANTOM_FRAMECNT & 0xff));
 		pci_set_master(pcidev);  /* enable bus mastering */
 		wrcodec(s, 0x16, 3); /* no RST, PD */
 		wrcodec(s, 0x17, 0); /* CODEC ADC and CODEC DAC use {LR,B}CLK2 and run off the LRCLK2 PLL; program DAC_SYNC=0!!  */
@@ -2458,5 +2471,28 @@ void cleanup_module(void)
 	}
 	printk(KERN_INFO "es1370: unloading\n");
 }
+
+#else /* MODULE */
+
+/* format is: es1370=[joystick[,lineout[,micbias]]] */
+
+static int __init es1370_setup(char *str)
+{
+	static unsigned __initdata nr_dev = 0;
+
+	if (nr_dev >= NR_DEVICE)
+		return 0;
+
+	(   (get_option(&str,&joystick[nr_dev]) == 2)
+	 && (get_option(&str,&lineout [nr_dev]) == 2)
+	 &&  get_option(&str,&micbias [nr_dev])
+	);
+
+	nr_dev++;
+	return 1;
+}
+
+__setup("es1370=", es1370_setup);
+__initcall(init_module);
 
 #endif /* MODULE */

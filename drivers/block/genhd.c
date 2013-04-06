@@ -85,6 +85,10 @@ char *disk_name (struct gendisk *hd, int minor, char *buf)
 	 * This requires special handling here.
 	 */
 	switch (hd->major) {
+		case IDE9_MAJOR:
+			unit += 2;
+		case IDE8_MAJOR:
+			unit += 2;
 		case IDE7_MAJOR:
 			unit += 2;
 		case IDE6_MAJOR:
@@ -1383,7 +1387,7 @@ static inline void setup_dev(struct gendisk *dev)
 		resetup_one_dev(dev, drive);
 }
 
-void __init device_setup(void)
+static int __init device_setup(void)
 {
 	extern void console_map_init(void);
 	extern void cpqarray_init(void);
@@ -1441,7 +1445,10 @@ void __init device_setup(void)
 #ifdef CONFIG_MD_BOOT
         md_setup_drive();
 #endif
+	return 0;
 }
+
+__initcall(device_setup);
 
 #ifdef CONFIG_PROC_FS
 int get_partition_list(char * page)

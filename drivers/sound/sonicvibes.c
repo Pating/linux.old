@@ -71,6 +71,8 @@
  *    15.06.99   0.15  Fix bad allocation bug.
  *                     Thanks to Deti Fliegl <fliegl@in.tum.de>
  *    28.06.99   0.16  Add pci_set_master
+ *    03.08.99   0.17  adapt to Linus' new __setup/__initcall
+ *                     added kernel command line options "sonicvibes=reverb" and "sonicvibesdmaio=dmaioaddr"
  *
  */
 
@@ -2312,11 +2314,10 @@ static struct initvol {
 	{ SOUND_MIXER_WRITE_PCM, 0x4040 }
 };
 
-#ifdef MODULE
-int __init init_module(void)
-#else
-int __init init_sonicvibes(void)
+#ifndef MODULE
+static
 #endif
+int __init init_module(void)
 {
 	struct sv_state *s;
 	struct pci_dev *pcidev = NULL;
@@ -2325,21 +2326,21 @@ int __init init_sonicvibes(void)
 
 	if (!pci_present())   /* No PCI bus in this machine! */
 		return -ENODEV;
-	printk(KERN_INFO "sv: version v0.16 time " __TIME__ " " __DATE__ "\n");
+	printk(KERN_INFO "sv: version v0.17 time " __TIME__ " " __DATE__ "\n");
 #if 0
 	if (!(wavetable_mem = __get_free_pages(GFP_KERNEL, 20-PAGE_SHIFT)))
 		printk(KERN_INFO "sv: cannot allocate 1MB of contiguous nonpageable memory for wavetable data\n");
 #endif
 	while (index < NR_DEVICE && 
 	       (pcidev = pci_find_device(PCI_VENDOR_ID_S3, PCI_DEVICE_ID_S3_SONICVIBES, pcidev))) {
-		if (pcidev->base_address[1] == 0 || 
-		    (pcidev->base_address[1] & PCI_BASE_ADDRESS_SPACE) != PCI_BASE_ADDRESS_SPACE_IO)
+		if (pcidev->resource[1].flags == 0 || 
+		    (pcidev->resource[1].flags & PCI_BASE_ADDRESS_SPACE) != PCI_BASE_ADDRESS_SPACE_IO)
 			continue;
-		if (pcidev->base_address[2] == 0 || 
-		    (pcidev->base_address[2] & PCI_BASE_ADDRESS_SPACE) != PCI_BASE_ADDRESS_SPACE_IO)
+		if (pcidev->resource[2].flags == 0 || 
+		    (pcidev->resource[2].flags & PCI_BASE_ADDRESS_SPACE) != PCI_BASE_ADDRESS_SPACE_IO)
 			continue;
-		if (pcidev->base_address[3] == 0 || 
-		    (pcidev->base_address[3] & PCI_BASE_ADDRESS_SPACE) != PCI_BASE_ADDRESS_SPACE_IO)
+		if (pcidev->resource[3].flags == 0 || 
+		    (pcidev->resource[3].flags & PCI_BASE_ADDRESS_SPACE) != PCI_BASE_ADDRESS_SPACE_IO)
 			continue;
 		if (pcidev->irq == 0)
 			continue;
@@ -2355,11 +2356,11 @@ int __init init_sonicvibes(void)
 		init_waitqueue_head(&s->midi.owait);
 		init_MUTEX(&s->open_sem);
 		s->magic = SV_MAGIC;
-		s->iosb = pcidev->base_address[0] & PCI_BASE_ADDRESS_IO_MASK;
-		s->ioenh = pcidev->base_address[1] & PCI_BASE_ADDRESS_IO_MASK;
-		s->iosynth = pcidev->base_address[2] & PCI_BASE_ADDRESS_IO_MASK;
-		s->iomidi = pcidev->base_address[3] & PCI_BASE_ADDRESS_IO_MASK;
-		s->iogame = pcidev->base_address[4] & PCI_BASE_ADDRESS_IO_MASK;
+		s->iosb = pcidev->resource[0].start;
+		s->ioenh = pcidev->resource[1].start;
+		s->iosynth = pcidev->resource[2].start;
+		s->iomidi = pcidev->resource[3].start;
+		s->iogame = pcidev->resource[4].start;
 		pci_read_config_dword(pcidev, 0x40, &s->iodmaa);
 		pci_read_config_dword(pcidev, 0x48, &s->iodmac);
 		dmaio &= ~(SV_EXTENT_DMA-1);
@@ -2525,8 +2526,8 @@ void cleanup_module(void)
 		synchronize_irq();
 		inb(s->ioenh + SV_CODEC_STATUS); /* ack interrupts */
 		wrindir(s, SV_CIENABLE, 0);     /* disable DMAA and DMAC */
-		//outb(0, s->iodmaa + SV_DMA_RESET);
-		//outb(0, s->iodmac + SV_DMA_RESET);
+		/*outb(0, s->iodmaa + SV_DMA_RESET);*/
+		/*outb(0, s->iodmac + SV_DMA_RESET);*/
 		free_irq(s->irq, s);
 		release_region(s->iodmac, SV_EXTENT_DMA);
 		release_region(s->iodmaa, SV_EXTENT_DMA);
@@ -2543,5 +2544,40 @@ void cleanup_module(void)
 		free_pages(wavetable_mem, 20-PAGE_SHIFT);
 	printk(KERN_INFO "sv: unloading\n");
 }
+
+#else /* MODULE */
+
+/* format is: sonicvibes=[reverb] sonicvibesdmaio=dmaioaddr */
+
+static int __init sonicvibes_setup(char *str)
+{
+	static unsigned __initdata nr_dev = 0;
+
+	if (nr_dev >= NR_DEVICE)
+		return 0;
+
+	(   (get_option(&str, &reverb   [nr_dev]) == 2)
+#if 0
+	 &&  get_option(&str, &wavetable[nr_dev])
+#endif
+	};
+
+	nr_dev++;
+	return 1;
+}
+
+static int __init sonicvibesdmaio_setup(char *str)
+{
+        int ints[11];
+
+        get_options(str, ints);
+	if (ints[0] >= 1)
+		dmaio = ints[1];
+	return 1;
+}
+
+__setup("sonicvibes=", sonicvibes_setup);
+__setup("sonicvibesdmaio=", sonicvibesdmaio_setup);
+__initcall(init_module);
 
 #endif /* MODULE */

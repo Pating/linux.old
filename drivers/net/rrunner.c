@@ -72,7 +72,7 @@ extern __u32 sysctl_rmem_max;
 
 static int probed __initdata = 0;
 
-__initfunc(int rr_hippi_probe (struct device *dev))
+int __init rr_hippi_probe (struct device *dev)
 {
 	int boards_found = 0;
 	int version_disp;	/* was version info already displayed? */
@@ -152,14 +152,14 @@ __initfunc(int rr_hippi_probe (struct device *dev))
 
 		printk(KERN_INFO "%s: Essential RoadRunner serial HIPPI "
 		       "at 0x%08lx, irq %i, PCI latency %i\n", dev->name,
-		       pdev->base_address[0], dev->irq, pci_latency);
+		       pdev->resource[0].start, dev->irq, pci_latency);
 
 		/*
 		 * Remap the regs into kernel space.
 		 */
 
 		rrpriv->regs = (struct rr_regs *)
-			ioremap(pdev->base_address[0], 0x1000);
+			ioremap(pdev->resource[0].start, 0x1000);
 
 		if (!rrpriv->regs){
 			printk(KERN_ERR "%s:  Unable to map I/O register, "
@@ -502,7 +502,7 @@ static unsigned int write_eeprom(struct rr_private *rrpriv,
 }
 
 
-__initfunc(static int rr_init(struct device *dev))
+static int __init rr_init(struct device *dev)
 {
 	struct rr_private *rrpriv;
 	struct rr_regs *regs;
