@@ -271,6 +271,13 @@ static void __init smp_init(void)
 #else
 #define smp_init()	do { } while (0)
 #endif
+static inline void setup_per_cpu_areas(void)
+{
+}
+
+static inline void setup_per_cpu_areas(void)
+{
+}
 
 #else
 
@@ -295,10 +302,6 @@ static void __init setup_per_cpu_areas(void)
 		__per_cpu_offset[i] = ptr - __per_cpu_start;
 		memcpy(ptr, __per_cpu_start, size);
 	}
-}
-#else
-static inline void setup_per_cpu_areas(void)
-{
 }
 #endif /* !__GENERIC_PER_CPU */
 
