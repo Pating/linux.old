@@ -49,6 +49,9 @@ if [ "$CONFIG_NET_ETHERNET" = "y" ]; then
    if [ "$CONFIG_MIPS_JAZZ" = "y" ]; then
       tristate '  MIPS JAZZ onboard SONIC Ethernet support' CONFIG_MIPS_JAZZ_SONIC
    fi
+   if [ "$CONFIG_MIPS_GT96100" = "y" ]; then
+      bool '  MIPS GT96100 Ethernet support' CONFIG_MIPS_GT96100ETH
+   fi
    if [ "$CONFIG_SGI_IP27" = "y" ]; then
       bool '  SGI IOC3 Ethernet' CONFIG_SGI_IOC3_ETH
    fi
@@ -164,6 +167,9 @@ if [ "$CONFIG_NET_ETHERNET" = "y" ]; then
       if [ "$CONFIG_OBSOLETE" = "y" ]; then
 	 bool '    Zenith Z-Note support (EXPERIMENTAL)' CONFIG_ZNET
       fi
+      if [ "$CONFIG_EXPERIMENTAL" = "y" -a "$CONFIG_ORION" = "y" ]; then
+	 bool '    Philips SAA9730 Ethernet support (EXPERIMENTAL)' CONFIG_LAN_SAA9730
+      fi
    fi
    bool '  Pocket and portable adapters' CONFIG_NET_POCKET
    if [ "$CONFIG_NET_POCKET" = "y" ]; then
@@ -221,6 +227,7 @@ fi
 tristate 'PPP (point-to-point protocol) support' CONFIG_PPP
 if [ ! "$CONFIG_PPP" = "n" ]; then
    dep_bool '  PPP multilink support (EXPERIMENTAL)' CONFIG_PPP_MULTILINK $CONFIG_EXPERIMENTAL
+   dep_bool '  PPP filtering' CONFIG_PPP_FILTER $CONFIG_FILTER
    dep_tristate '  PPP support for async serial ports' CONFIG_PPP_ASYNC $CONFIG_PPP
    dep_tristate '  PPP support for sync tty ports' CONFIG_PPP_SYNC_TTY $CONFIG_PPP
    dep_tristate '  PPP Deflate compression' CONFIG_PPP_DEFLATE $CONFIG_PPP
