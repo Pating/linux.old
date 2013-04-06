@@ -74,6 +74,7 @@ typedef enum {
  * parport_negotiate to use address operations.  They have no effect
  * other than to make parport_read/write use address transfers. */
 #define IEEE1284_ADDR			(1<<13)	/* This is a flag */
+#define IEEE1284_DATA			 0	/* So is this */
 
 /* The rest is for the kernel only */
 #ifdef __KERNEL__
@@ -143,7 +144,7 @@ struct parport_operations {
 	void (*data_reverse) (struct parport *);
 
 	/* For core parport code. */
-	void (*interrupt)(int, void *, struct pt_regs *); /* ? */
+	void (*interrupt)(int, void *, struct pt_regs *);
 
 	void (*init_state)(struct pardevice *, struct parport_state *);
 	void (*save_state)(struct parport *, struct parport_state *);
@@ -151,7 +152,6 @@ struct parport_operations {
 
 	void (*inc_use_count)(void);
 	void (*dec_use_count)(void);
-	void (*fill_inode)(struct inode *inode, int fill); /* ? */
 
 	/* Block read/write */
 	size_t (*epp_write_data) (struct parport *port, const void *buf,

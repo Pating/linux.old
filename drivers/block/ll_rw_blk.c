@@ -403,7 +403,7 @@ void make_request(int major,int rw, struct buffer_head * bh)
 		unsigned long maxsector = (blk_size[major][MINOR(bh->b_rdev)] << 1) + 1;
 
 		if (maxsector < count || maxsector - count < sector) {
-			bh->b_state &= (1 << BH_Lock);
+			bh->b_state &= (1 << BH_Lock) | (1 << BH_Mapped);
                         /* This may well happen - the kernel calls bread()
                            without checking the size of the device, e.g.,
                            when mounting a device. */
@@ -428,6 +428,9 @@ void make_request(int major,int rw, struct buffer_head * bh)
 			kstat.pgpgin++;
 			max_req = NR_REQUEST;	/* reads take precedence */
 			break;
+		case WRITERAW:
+			rw = WRITE;
+			goto do_write;	/* Skip the buffer refile */
 		case WRITEA:
 			rw_ahead = 1;
 			rw = WRITE;	/* drop into WRITE */
@@ -435,6 +438,7 @@ void make_request(int major,int rw, struct buffer_head * bh)
 			if (!test_and_clear_bit(BH_Dirty, &bh->b_state))
 				goto end_io;	/* Hmmph! Nothing to write */
 			refile_buffer(bh);
+		do_write:
 			/*
 			 * We don't allow the write-requests to fill up the
 			 * queue completely:  we want some room for reads,
@@ -641,7 +645,7 @@ void ll_rw_block(int rw, int nr, struct buffer_head * bh[])
 #endif
 	}
 
-	if ((rw == WRITE || rw == WRITEA) && is_read_only(bh[0]->b_dev)) {
+	if ((rw & WRITE) && is_read_only(bh[0]->b_dev)) {
 		printk(KERN_NOTICE "Can't write to read-only device %s\n",
 		       kdevname(bh[0]->b_dev));
 		goto sorry;

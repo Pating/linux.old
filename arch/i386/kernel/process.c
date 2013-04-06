@@ -40,6 +40,7 @@
 #include <asm/ldt.h>
 #include <asm/processor.h>
 #include <asm/desc.h>
+#include <asm/mmu_context.h>
 #ifdef CONFIG_MATH_EMULATION
 #include <asm/math_emu.h>
 #endif
@@ -321,13 +322,9 @@ void machine_restart(char * __unused)
 	pg0[0] = _PAGE_RW | _PAGE_PRESENT;
 
 	/*
-	 * Use `swapper_pg_dir' as our page directory.  We bother with
-	 * `SET_PAGE_DIR' because although might be rebooting, but if we change
-	 * the way we set root page dir in the future, then we wont break a
-	 * seldom used feature ;)
+	 * Use `swapper_pg_dir' as our page directory.
 	 */
-
-	SET_PAGE_DIR(current,swapper_pg_dir);
+	asm volatile("movl %0,%%cr3": :"r" (__pa(swapper_pg_dir)));
 
 	/* Write 0x1234 to absolute memory location 0x472.  The BIOS reads
 	   this on booting to tell it to "Bypass memory test (also warm
@@ -488,16 +485,7 @@ void release_segments(struct mm_struct *mm)
 	 */
 	if (ldt) {
 		mm->segments = NULL;
-		/*
-		 * special case, when we release the LDT from under
-		 * the running CPU. Other CPUs cannot possibly use
-		 * this LDT as we were getting here through mmput() ...
-		 */
-		if (mm == current->mm)
-			load_LDT(mm);
-		/*
-		 * Nobody anymore uses the LDT, we can free it:
-		 */
+		clear_LDT();
 		vfree(ldt);
 	}
 }
@@ -579,12 +567,8 @@ void release_thread(struct task_struct *dead_task)
 }
 
 /*
- * If new_mm is NULL, we're being called to set up the LDT for
- * a clone task: this is easy since the clone is not running yet.
- * otherwise we copy the old segment into a new segment.
- *
  * we do not have to muck with descriptors here, that is
- * done in __switch_to() and get_mmu_context().
+ * done in switch_mm() as needed.
  */
 void copy_segments(struct task_struct *p, struct mm_struct *new_mm)
 {
@@ -595,22 +579,19 @@ void copy_segments(struct task_struct *p, struct mm_struct *new_mm)
 		/*
 		 * default LDT - use the one from init_task
 		 */
-		if (new_mm)
-			new_mm->segments = NULL;
+		new_mm->segments = NULL;
 		return;
 	}
 
-	if (new_mm) {
-		/*
-		 * Completely new LDT, we initialize it from the parent:
-		 */
-		ldt = vmalloc(LDT_ENTRIES*LDT_ENTRY_SIZE);
-		if (!ldt)
-			printk(KERN_WARNING "ldt allocation failed\n");
-		else
-			memcpy(ldt, old_ldt, LDT_ENTRIES*LDT_ENTRY_SIZE);
-		new_mm->segments = ldt;
-	}
+	/*
+	 * Completely new LDT, we initialize it from the parent:
+	 */
+	ldt = vmalloc(LDT_ENTRIES*LDT_ENTRY_SIZE);
+	if (!ldt)
+		printk(KERN_WARNING "ldt allocation failed\n");
+	else
+		memcpy(ldt, old_ldt, LDT_ENTRIES*LDT_ENTRY_SIZE);
+	new_mm->segments = ldt;
 	return;
 }
 
@@ -754,21 +735,6 @@ void __switch_to(struct task_struct *prev_p, struct task_struct *next_p)
 	 */
 	asm volatile("movl %%fs,%0":"=m" (*(int *)&prev->fs));
 	asm volatile("movl %%gs,%0":"=m" (*(int *)&prev->gs));
-
-	/*
-	 * Re-load LDT if necessary
-	 */
-	if (prev_p->active_mm->segments != next_p->active_mm->segments)
-		load_LDT(next_p->mm);
-
-	/* Re-load page tables */
-	{
-		unsigned long new_cr3 = next->cr3;
-
-		tss->cr3 = new_cr3;
-		if (new_cr3 != prev->cr3)
-			asm volatile("movl %0,%%cr3": :"r" (new_cr3));
-	}
 
 	/*
 	 * Restore %fs and %gs.

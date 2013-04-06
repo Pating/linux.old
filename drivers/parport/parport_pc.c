@@ -55,10 +55,7 @@
 
 #include <linux/parport.h>
 #include <linux/parport_pc.h>
-
-/* Maximum number of ports to support.  It is useless to set this greater
-   than PARPORT_MAX (in <linux/parport.h>).  */
-#define PARPORT_PC_MAX_PORTS  8
+#include <asm/parport.h>
 
 /* ECR modes */
 #define ECR_SPP 00
@@ -69,8 +66,6 @@
 #define ECR_VND 05
 #define ECR_TST 06
 #define ECR_CNF 07
-
-static int user_specified __initdata = 0;
 
 /* frob_control, but for ECR */
 static void frob_econtrol (struct parport *pb, unsigned char m,
@@ -927,17 +922,6 @@ void parport_pc_dec_use_count(void)
 #endif
 }
 
-static void parport_pc_fill_inode(struct inode *inode, int fill)
-{
-	/* Is this still needed? -tim */
-#ifdef MODULE
-	if (fill)
-		MOD_INC_USE_COUNT;
-	else
-		MOD_DEC_USE_COUNT;
-#endif
-}
-
 struct parport_operations parport_pc_ops = 
 {
 	parport_pc_write_data,
@@ -962,7 +946,6 @@ struct parport_operations parport_pc_ops =
 
 	parport_pc_inc_use_count,
 	parport_pc_dec_use_count,
-	parport_pc_fill_inode,
 
 	parport_ieee1284_epp_write_data,
 	parport_ieee1284_epp_read_data,
@@ -1521,6 +1504,7 @@ static int __init probe_one_port(unsigned long int base,
 				 int irq, int dma)
 {
 	struct parport_pc_private *priv;
+	struct parport_operations *ops;
 	struct parport tmp;
 	struct parport *p = &tmp;
 	int probedirq = PARPORT_IRQ_NONE;
@@ -1530,6 +1514,14 @@ static int __init probe_one_port(unsigned long int base,
 		printk (KERN_DEBUG "parport (0x%lx): no memory!\n", base);
 		return 0;
 	}
+	ops = kmalloc (sizeof (struct parport_operations), GFP_KERNEL);
+	if (!ops) {
+		printk (KERN_DEBUG "parport (0x%lx): no memory for ops!\n",
+			base);
+		kfree (priv);
+		return 0;
+	}
+	memcpy (ops, &parport_pc_ops, sizeof (struct parport_operations));
 	priv->ctr = 0xc;
 	priv->ctr_writable = 0xff;
 	priv->ecr = 0;
@@ -1540,7 +1532,7 @@ static int __init probe_one_port(unsigned long int base,
 	p->irq = irq;
 	p->dma = dma;
 	p->modes = PARPORT_MODE_PCSPP;
-	p->ops = &parport_pc_ops;
+	p->ops = ops;
 	p->private_data = priv;
 	p->physport = p;
 	if (base_hi && !check_region(base_hi,3)) {
@@ -1564,8 +1556,9 @@ static int __init probe_one_port(unsigned long int base,
 	parport_PS2_supported (p);
 
 	if (!(p = parport_register_port(base, PARPORT_IRQ_NONE,
-									PARPORT_DMA_NONE, &parport_pc_ops))) {
+					PARPORT_DMA_NONE, ops))) {
 		kfree (priv);
+		kfree (ops);
 		return 0;
 	}
 
@@ -1697,41 +1690,13 @@ static int __init probe_one_port(unsigned long int base,
 /* Look for PCI parallel port cards. */
 static int __init parport_pc_init_pci (int irq, int dma)
 {
-/* These need to go in pci.h: */
-#ifndef PCI_VENDOR_ID_SIIG
-#define PCI_VENDOR_ID_SIIG              0x131f
-#define PCI_DEVICE_ID_SIIG_1S1P_10x_550 0x1010
-#define PCI_DEVICE_ID_SIIG_1S1P_10x_650 0x1011
-#define PCI_DEVICE_ID_SIIG_1S1P_10x_850 0x1012
-#define PCI_DEVICE_ID_SIIG_1P_10x       0x1020
-#define PCI_DEVICE_ID_SIIG_2P_10x       0x1021
-#define PCI_DEVICE_ID_SIIG_2S1P_10x_550 0x1034
-#define PCI_DEVICE_ID_SIIG_2S1P_10x_650 0x1035
-#define PCI_DEVICE_ID_SIIG_2S1P_10x_850 0x1036
-#define PCI_DEVICE_ID_SIIG_1P_20x       0x2020
-#define PCI_DEVICE_ID_SIIG_2P_20x       0x2021
-#define PCI_DEVICE_ID_SIIG_2P1S_20x_550 0x2040
-#define PCI_DEVICE_ID_SIIG_2P1S_20x_650 0x2041
-#define PCI_DEVICE_ID_SIIG_2P1S_20x_850 0x2042
-#define PCI_DEVICE_ID_SIIG_1S1P_20x_550 0x2010
-#define PCI_DEVICE_ID_SIIG_1S1P_20x_650 0x2011
-#define PCI_DEVICE_ID_SIIG_1S1P_20x_850 0x2012
-#define PCI_DEVICE_ID_SIIG_2S1P_20x_550 0x2060
-#define PCI_DEVICE_ID_SIIG_2S1P_20x_650 0x2061
-#define PCI_DEVICE_ID_SIIG_2S1P_20x_850 0x2062
-#define PCI_VENDOR_ID_LAVA              0x1407
-#define PCI_DEVICE_ID_LAVA_PARALLEL     0x8000
-#define PCI_DEVICE_ID_LAVA_DUAL_PAR_A   0x8001 /* The Lava Dual Parallel is */
-#define PCI_DEVICE_ID_LAVA_DUAL_PAR_B   0x8002 /* two PCI devices on a card */
-#endif
-
 	struct {
 		unsigned int vendor;
 		unsigned int device;
 		unsigned int numports;
 		struct {
-			unsigned int lo;
-			unsigned int hi; /* -ve if not there */
+			unsigned long lo;
+			unsigned long hi; /* -ve if not there */
 		} addr[4];
 	} cards[] = {
 		{ PCI_VENDOR_ID_SIIG, PCI_DEVICE_ID_SIIG_1S1P_10x_550, 1,
@@ -1794,39 +1759,22 @@ static int __init parport_pc_init_pci (int irq, int dma)
 						  pcidev)) != NULL) {
 			int n;
 			for (n = 0; n < cards[i].numports; n++) {
-				int lo = cards[i].addr[n].lo;
-				int hi = cards[i].addr[n].hi;
-				int io_lo = pcidev->base_address[lo];
-				int io_hi = ((hi < 0) ? 0 :
-					     pcidev->base_address[hi]);
+				unsigned long lo = cards[i].addr[n].lo;
+				unsigned long hi = cards[i].addr[n].hi;
+				unsigned long io_lo = pcidev->base_address[lo];
+				unsigned long io_hi = ((hi < 0) ? 0 :
+						pcidev->base_address[hi]);
 				io_lo &= PCI_BASE_ADDRESS_IO_MASK;
 				io_hi &= PCI_BASE_ADDRESS_IO_MASK;
-				count += probe_one_port (io_lo, io_hi,
-							 irq, dma);
+				if (irq == PARPORT_IRQ_AUTO)
+					count += probe_one_port (io_lo, io_hi,
+								 pcidev->irq,
+								 dma);
+				else
+					count += probe_one_port (io_lo, io_hi,
+								 irq, dma);
 			}
 		}
-	}
-
-	return count;
-}
-
-int __init parport_pc_init(int *io, int *io_hi, int *irq, int *dma)
-{
-	int count = 0, i = 0;
-	if (io && *io) {
-		/* Only probe the ports we were given. */
-		user_specified = 1;
-		do {
-			if (!*io_hi) *io_hi = 0x400 + *io;
-			count += probe_one_port(*(io++), *(io_hi++),
-						*(irq++), *(dma++));
-		} while (*io && (++i < PARPORT_PC_MAX_PORTS));
-	} else {
-		/* Probe all the likely ports. */
-		count += probe_one_port(0x3bc, 0x7bc, irq[0], dma[0]);
-		count += probe_one_port(0x378, 0x778, irq[0], dma[0]);
-		count += probe_one_port(0x278, 0x678, irq[0], dma[0]);
-		count += parport_pc_init_pci (irq[0], dma[0]);
 	}
 
 	return count;
@@ -1883,6 +1831,7 @@ void cleanup_module(void)
 		tmp = p->next;
 		if (p->modes & PARPORT_MODE_PCSPP) { 
 			struct parport_pc_private *priv = p->private_data;
+			struct parport_operations *ops = p->ops;
 			if (p->dma != PARPORT_DMA_NONE)
 				free_dma(p->dma);
 			if (p->irq != PARPORT_IRQ_NONE)
@@ -1897,6 +1846,7 @@ void cleanup_module(void)
 				free_page((unsigned long) priv->dma_buf);
 			kfree (p->private_data);
 			parport_unregister_port(p);
+			kfree (ops); /* hope no-one cached it */
 		}
 		p = tmp;
 	}

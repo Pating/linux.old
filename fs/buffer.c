@@ -40,10 +40,12 @@
 #include <linux/file.h>
 #include <linux/init.h>
 #include <linux/quotaops.h>
+#include <linux/iobuf.h>
 
 #include <asm/uaccess.h>
 #include <asm/io.h>
 #include <asm/bitops.h>
+#include <asm/mmu_context.h>
 
 #define NR_SIZES 7
 static char buffersize_index[65] =
@@ -1526,6 +1528,221 @@ out:
 	return err;
 }
 
+
+/*
+ * IO completion routine for a buffer_head being used for kiobuf IO: we
+ * can't dispatch the kiobuf callback until io_count reaches 0.  
+ */
+
+static void end_buffer_io_kiobuf(struct buffer_head *bh, int uptodate)
+{
+	struct kiobuf *kiobuf;
+	
+	mark_buffer_uptodate(bh, uptodate);
+
+	kiobuf = bh->b_kiobuf;
+	if (atomic_dec_and_test(&kiobuf->io_count))
+		kiobuf->end_io(kiobuf);
+	if (!uptodate)
+		kiobuf->errno = -EIO;
+}
+
+
+/*
+ * For brw_kiovec: submit a set of buffer_head temporary IOs and wait
+ * for them to complete.  Clean up the buffer_heads afterwards.  
+ */
+
+#define dprintk(x...) 
+
+static int do_kio(struct kiobuf *kiobuf,
+		  int rw, int nr, struct buffer_head *bh[], int size)
+{
+	int iosize;
+	int i;
+	struct buffer_head *tmp;
+
+	struct task_struct *tsk = current;
+	DECLARE_WAITQUEUE(wait, tsk);
+
+	dprintk ("do_kio start %d\n", rw);
+
+	if (rw == WRITE)
+		rw = WRITERAW;
+	atomic_add(nr, &kiobuf->io_count);
+	kiobuf->errno = 0;
+	ll_rw_block(rw, nr, bh);
+
+	kiobuf_wait_for_io(kiobuf);
+	
+	spin_lock(&unused_list_lock);
+	
+	iosize = 0;
+	for (i = nr; --i >= 0; ) {
+		iosize += size;
+		tmp = bh[i];
+		if (!buffer_uptodate(tmp)) {
+			/* We are traversing bh'es in reverse order so
+                           clearing iosize on error calculates the
+                           amount of IO before the first error. */
+			iosize = 0;
+		}
+		__put_unused_buffer_head(tmp);
+	}
+	
+	spin_unlock(&unused_list_lock);
+
+	dprintk ("do_kio end %d %d\n", iosize, err);
+	
+	if (iosize)
+		return iosize;
+	if (kiobuf->errno)
+		return kiobuf->errno;
+	return -EIO;
+}
+
+/*
+ * Start I/O on a physical range of kernel memory, defined by a vector
+ * of kiobuf structs (much like a user-space iovec list).
+ *
+ * The kiobuf must already be locked for IO.  IO is submitted
+ * asynchronously: you need to check page->locked, page->uptodate, and
+ * maybe wait on page->wait.
+ *
+ * It is up to the caller to make sure that there are enough blocks
+ * passed in to completely map the iobufs to disk.
+ */
+
+int brw_kiovec(int rw, int nr, struct kiobuf *iovec[], 
+	       kdev_t dev, unsigned long b[], int size, int bmap)
+{
+	int		err;
+	int		length;
+	int		transferred;
+	int		i;
+	int		bufind;
+	int		pageind;
+	int		bhind;
+	int		offset;
+	unsigned long	blocknr;
+	struct kiobuf *	iobuf = NULL;
+	unsigned long	page;
+	struct page *	map;
+	struct buffer_head *tmp, *bh[KIO_MAX_SECTORS];
+
+	if (!nr)
+		return 0;
+	
+	/* 
+	 * First, do some alignment and validity checks 
+	 */
+	for (i = 0; i < nr; i++) {
+		iobuf = iovec[i];
+		if ((iobuf->offset & (size-1)) ||
+		    (iobuf->length & (size-1)))
+			return -EINVAL;
+		if (!iobuf->locked)
+			panic("brw_kiovec: iobuf not locked for I/O");
+		if (!iobuf->nr_pages)
+			panic("brw_kiovec: iobuf not initialised");
+	}
+
+	/* DEBUG */
+#if 0
+	return iobuf->length;
+#endif
+	dprintk ("brw_kiovec: start\n");
+	
+	/* 
+	 * OK to walk down the iovec doing page IO on each page we find. 
+	 */
+	bufind = bhind = transferred = err = 0;
+	for (i = 0; i < nr; i++) {
+		iobuf = iovec[i];
+		offset = iobuf->offset;
+		length = iobuf->length;
+		dprintk ("iobuf %d %d %d\n", offset, length, size);
+
+		for (pageind = 0; pageind < iobuf->nr_pages; pageind++) {
+			page = iobuf->pagelist[pageind];
+			map  = iobuf->maplist[pageind];
+
+			while (length > 0) {
+				blocknr = b[bufind++];
+				tmp = get_unused_buffer_head(0);
+				if (!tmp) {
+					err = -ENOMEM;
+					goto error;
+				}
+				
+				tmp->b_dev = B_FREE;
+				tmp->b_size = size;
+				tmp->b_data = (char *) (page + offset);
+				tmp->b_this_page = tmp;
+
+				init_buffer(tmp, end_buffer_io_kiobuf, NULL);
+				tmp->b_dev = dev;
+				tmp->b_blocknr = blocknr;
+				tmp->b_state = 1 << BH_Mapped;
+				tmp->b_kiobuf = iobuf;
+
+				if (rw == WRITE) {
+					set_bit(BH_Uptodate, &tmp->b_state);
+					set_bit(BH_Dirty, &tmp->b_state);
+				}
+
+				dprintk ("buffer %d (%d) at %p\n", 
+					 bhind, tmp->b_blocknr, tmp->b_data);
+				bh[bhind++] = tmp;
+				length -= size;
+				offset += size;
+
+				/* 
+				 * Start the IO if we have got too much 
+				 */
+				if (bhind >= KIO_MAX_SECTORS) {
+					err = do_kio(iobuf, rw, bhind, bh, size);
+					if (err >= 0)
+						transferred += err;
+					else
+						goto finished;
+					bhind = 0;
+				}
+				
+				if (offset >= PAGE_SIZE) {
+					offset = 0;
+					break;
+				}
+			} /* End of block loop */
+		} /* End of page loop */		
+	} /* End of iovec loop */
+
+	/* Is there any IO still left to submit? */
+	if (bhind) {
+		err = do_kio(iobuf, rw, bhind, bh, size);
+		if (err >= 0)
+			transferred += err;
+		else
+			goto finished;
+	}
+
+ finished:
+	dprintk ("brw_kiovec: end (%d, %d)\n", transferred, err);
+	if (transferred)
+		return transferred;
+	return err;
+
+ error:
+	/* We got an error allocation the bh'es.  Just free the current
+           buffer_heads and exit. */
+	spin_lock(&unused_list_lock);
+	for (i = bhind; --i >= 0; ) {
+		__put_unused_buffer_head(bh[bhind]);
+	}
+	spin_unlock(&unused_list_lock);
+	goto finished;
+}
+
 /*
  * Start I/O on a page.
  * This function expects the page to be locked and may return
@@ -1955,7 +2172,6 @@ static int sync_old_buffers(void)
 	return 0;
 }
 
-
 /* This is the interface to bdflush.  As we get more sophisticated, we can
  * pass tuning parameters to this "process", to adjust how it behaves. 
  * We would want to verify each parameter, however, to make sure that it 
@@ -1963,57 +2179,45 @@ static int sync_old_buffers(void)
 
 asmlinkage int sys_bdflush(int func, long data)
 {
-	int i, error = -EPERM;
-
 	if (!capable(CAP_SYS_ADMIN))
-		goto out;
+		return -EPERM;
 
 	if (func == 1) {
+		int error;
 		struct mm_struct *user_mm;
+
 		/*
 		 * bdflush will spend all of it's time in kernel-space,
 		 * without touching user-space, so we can switch it into
 		 * 'lazy TLB mode' to reduce the cost of context-switches
 		 * to and from bdflush.
 		 */
-		user_mm = current->mm;
-		atomic_inc(&user_mm->mm_count);
-		current->mm = NULL;
-		/* active_mm is still 'user_mm' */
-
+		user_mm = start_lazy_tlb();
 		error = sync_old_buffers();
-
-		current->mm = user_mm;
-		mmdrop(current->active_mm);
-		current->active_mm = user_mm;
-
-		goto out;
+		end_lazy_tlb(user_mm);
+		return error;
 	}
 
 	/* Basically func 1 means read param 1, 2 means write param 1, etc */
 	if (func >= 2) {
-		i = (func-2) >> 1;
-		error = -EINVAL;
-		if (i < 0 || i >= N_PARAM)
-			goto out;
-		if((func & 1) == 0) {
-			error = put_user(bdf_prm.data[i], (int*)data);
-			goto out;
+		int i = (func-2) >> 1;
+		if (i >= 0 && i < N_PARAM) {
+			if ((func & 1) == 0)
+				return put_user(bdf_prm.data[i], (int*)data);
+
+			if (data >= bdflush_min[i] && data <= bdflush_max[i]) {
+				bdf_prm.data[i] = data;
+				return 0;
+			}
 		}
-		if (data < bdflush_min[i] || data > bdflush_max[i])
-			goto out;
-		bdf_prm.data[i] = data;
-		error = 0;
-		goto out;
-	};
+		return -EINVAL;
+	}
 
 	/* Having func 0 used to launch the actual bdflush and then never
 	 * return (unless explicitly killed). We return zero here to 
 	 * remain semi-compatible with present update(8) programs.
 	 */
-	error = 0;
-out:
-	return error;
+	return 0;
 }
 
 /*

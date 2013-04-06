@@ -128,6 +128,8 @@ volatile unsigned long ipi_count;			/* Number of IPIs delivered				*/
 const char lk_lockmsg[] = "lock from interrupt context at %p\n"; 
 
 int mp_bus_id_to_type [MAX_MP_BUSSES] = { -1, };
+extern int nr_ioapics;
+extern struct mpc_config_ioapic mp_apics [MAX_IO_APICS];
 extern int mp_irq_entries;
 extern struct mpc_config_intsrc mp_irqs [MAX_IRQ_SOURCES];
 extern int mpc_default_type;
@@ -258,12 +260,10 @@ static int __init smp_read_mpc(struct mp_config_table *mpc)
 	}
 	memcpy(str,mpc->mpc_oem,8);
 	str[8]=0;
-	memcpy(ioapic_OEM_ID,str,9);
 	printk("OEM ID: %s ",str);
 	
 	memcpy(str,mpc->mpc_productid,12);
 	str[12]=0;
-	memcpy(ioapic_Product_ID,str,13);
 	printk("Product ID: %s ",str);
 
 	printk("APIC at: 0x%lX\n",mpc->mpc_lapic);
@@ -368,11 +368,9 @@ static int __init smp_read_mpc(struct mp_config_table *mpc)
 					printk("I/O APIC #%d Version %d at 0x%lX.\n",
 						m->mpc_apicid,m->mpc_apicver,
 						m->mpc_apicaddr);
-					/*
-					 * we use the first one only currently
-					 */
-					if (ioapics == 1)
-						mp_ioapic_addr = m->mpc_apicaddr;
+					mp_apics [nr_ioapics] = *m;
+					if (++nr_ioapics > MAX_IO_APICS)
+						--nr_ioapics;
 				}
 				mpt+=sizeof(*m);
 				count+=sizeof(*m);
@@ -404,9 +402,9 @@ static int __init smp_read_mpc(struct mp_config_table *mpc)
 			}
 		}
 	}
-	if (ioapics > 1)
+	if (ioapics > MAX_IO_APICS)
 	{
-		printk("Warning: Multiple IO-APICs not yet supported.\n");
+		printk("Warning: Max I/O APICs exceeded (max %d, found %d).\n", MAX_IO_APICS, ioapics);
 		printk("Warning: switching to non APIC mode.\n");
 		skip_ioapic_setup=1;
 	}
@@ -774,18 +772,22 @@ unsigned long __init init_smp_mappings(unsigned long memory_start)
 
 #ifdef CONFIG_X86_IO_APIC
 	{
-		unsigned long ioapic_phys;
+		unsigned long ioapic_phys, idx = FIX_IO_APIC_BASE_0;
+		int i;
 
-		if (smp_found_config) {
-			ioapic_phys = mp_ioapic_addr;
-		} else {
-			ioapic_phys = __pa(memory_start);
-			memset((void *)memory_start, 0, PAGE_SIZE);
-			memory_start += PAGE_SIZE;
+		for (i = 0; i < nr_ioapics; i++) {
+			if (smp_found_config) {
+				ioapic_phys = mp_apics[i].mpc_apicaddr;
+			} else {
+				ioapic_phys = __pa(memory_start);
+				memset((void *)memory_start, 0, PAGE_SIZE);
+				memory_start += PAGE_SIZE;
+			}
+			set_fixmap(idx,ioapic_phys);
+			printk("mapped IOAPIC to %08lx (%08lx)\n",
+					__fix_to_virt(idx), ioapic_phys);
+			idx++;
 		}
-		set_fixmap(FIX_IO_APIC_BASE,ioapic_phys);
-		printk("mapped IOAPIC to %08lx (%08lx)\n",
-				fix_to_virt(FIX_IO_APIC_BASE), ioapic_phys);
 	}
 #endif
 
@@ -1382,12 +1384,6 @@ void __init smp_boot_cpus(void)
 		printk(KERN_WARNING "WARNING: SMP operation may be unreliable with B stepping processors.\n");
 	SMP_PRINTK(("Boot done.\n"));
 
-	/*
-	 * now we know the other CPUs have fired off and we know our
-	 * APIC ID, so we can go init the TSS and stuff:
-	 */
-	cpu_init();
-
 	cache_APIC_registers();
 #ifndef CONFIG_VISWS
 	/*
@@ -1399,6 +1395,11 @@ void __init smp_boot_cpus(void)
 #endif
 
 smp_done:
+	/*
+	 * now we know the other CPUs have fired off and we know our
+	 * APIC ID, so we can go init the TSS and stuff:
+	 */
+	cpu_init();
 }
 
 
@@ -1578,8 +1579,7 @@ static inline void send_IPI_single(int dest, int vector)
  * bad as in the early days of SMP, so we might ease some of the
  * paranoia here.
  */
-
-void smp_flush_tlb(void)
+static void flush_tlb_others(unsigned int cpumask)
 {
 	int cpu = smp_processor_id();
 	int stuck;
@@ -1589,17 +1589,9 @@ void smp_flush_tlb(void)
 	 * it's important that we do not generate any APIC traffic
 	 * until the AP CPUs have booted up!
 	 */
-	if (cpu_online_map) {
-		/*
-		 * The assignment is safe because it's volatile so the
-		 * compiler cannot reorder it, because the i586 has
-		 * strict memory ordering and because only the kernel
-		 * lock holder may issue a tlb flush. If you break any
-		 * one of those three change this to an atomic bus
-		 * locked or.
-		 */
-
-		smp_invalidate_needed = cpu_online_map;
+	cpumask &= cpu_online_map;
+	if (cpumask) {
+		atomic_set_mask(cpumask, &smp_invalidate_needed);
 
 		/*
 		 * Processors spinning on some lock with IRQs disabled
@@ -1622,8 +1614,10 @@ void smp_flush_tlb(void)
 			/*
 			 * Take care of "crossing" invalidates
 			 */
-			if (test_bit(cpu, &smp_invalidate_needed))
-			clear_bit(cpu, &smp_invalidate_needed);
+			if (test_bit(cpu, &smp_invalidate_needed)) {
+				clear_bit(cpu, &smp_invalidate_needed);
+				local_flush_tlb();
+			}
 			--stuck;
 			if (!stuck) {
 				printk("stuck on TLB IPI wait (CPU#%d)\n",cpu);
@@ -1632,12 +1626,58 @@ void smp_flush_tlb(void)
 		}
 		__restore_flags(flags);
 	}
+}
 
-	/*
-	 *	Flush the local TLB
-	 */
+/*
+ *	Smarter SMP flushing macros. 
+ *		c/o Linus Torvalds.
+ *
+ *	These mean you can really definitely utterly forget about
+ *	writing to user space from interrupts. (Its not allowed anyway).
+ */	
+void flush_tlb_current_task(void)
+{
+	unsigned long vm_mask = 1 << current->processor;
+	struct mm_struct *mm = current->mm;
+
+	if (mm->cpu_vm_mask != vm_mask) {
+		flush_tlb_others(mm->cpu_vm_mask & ~vm_mask);
+		mm->cpu_vm_mask = vm_mask;
+	}
 	local_flush_tlb();
+}
 
+void flush_tlb_mm(struct mm_struct * mm)
+{
+	unsigned long vm_mask = 1 << current->processor;
+	unsigned long cpu_mask = mm->cpu_vm_mask & ~vm_mask;
+
+	mm->cpu_vm_mask = 0;
+	if (current->active_mm == mm) {
+		mm->cpu_vm_mask = vm_mask;
+		local_flush_tlb();
+	}
+	flush_tlb_others(cpu_mask);
+}
+
+void flush_tlb_page(struct vm_area_struct * vma, unsigned long va)
+{
+	unsigned long vm_mask = 1 << current->processor;
+	struct mm_struct *mm = vma->vm_mm;
+	unsigned long cpu_mask = mm->cpu_vm_mask & ~vm_mask;
+
+	mm->cpu_vm_mask = 0;
+	if (current->active_mm == mm) {
+		__flush_tlb_one(va);
+		mm->cpu_vm_mask = vm_mask;
+	}
+	flush_tlb_others(cpu_mask);
+}
+
+void flush_tlb_all(void)
+{
+	flush_tlb_others(~(1 << current->processor));
+	local_flush_tlb();
 }
 
 
@@ -1860,13 +1900,24 @@ asmlinkage void smp_reschedule_interrupt(void)
 }
 
 /*
- * Invalidate call-back
+ * Invalidate call-back.
+ *
+ * Mark the CPU as a VM user if there is a active
+ * thread holding on to an mm at this time. This
+ * allows us to optimize CPU cross-calls even in the
+ * presense of lazy TLB handling.
  */
 asmlinkage void smp_invalidate_interrupt(void)
 {
-	if (test_and_clear_bit(smp_processor_id(), &smp_invalidate_needed))
-		local_flush_tlb();
+	struct task_struct *tsk = current;
+	unsigned int cpu = tsk->processor;
 
+	if (test_and_clear_bit(cpu, &smp_invalidate_needed)) {
+		struct mm_struct *mm = tsk->mm;
+		if (mm)
+			atomic_set_mask(1 << cpu, &mm->cpu_vm_mask);
+		local_flush_tlb();
+	}
 	ack_APIC_irq();
 
 }

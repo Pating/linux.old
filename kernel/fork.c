@@ -300,13 +300,39 @@ struct mm_struct * mm_alloc(void)
 	mm = kmem_cache_alloc(mm_cachep, SLAB_KERNEL);
 	if (mm) {
 		memset(mm, 0, sizeof(*mm));
-		init_new_context(mm);
 		atomic_set(&mm->mm_users, 1);
 		atomic_set(&mm->mm_count, 1);
 		init_MUTEX(&mm->mmap_sem);
 		mm->page_table_lock = SPIN_LOCK_UNLOCKED;
+		mm->pgd = pgd_alloc();
+		if (mm->pgd)
+			return mm;
+		kmem_cache_free(mm_cachep, mm);
 	}
-	return mm;
+	return NULL;
+}
+
+/*
+ * Called when the last reference to the mm
+ * is dropped: either by a lazy thread or by
+ * mmput. Free the page directory and the mm.
+ */
+inline void __mmdrop(struct mm_struct *mm)
+{
+	if (mm == &init_mm) BUG();
+	pgd_free(mm->pgd);
+	kmem_cache_free(mm_cachep, mm);
+}
+
+/*
+ * Decrement the use count and release all resources for an mm.
+ */
+void mmput(struct mm_struct *mm)
+{
+	if (atomic_dec_and_test(&mm->mm_users)) {
+		exit_mmap(mm);
+		mmdrop(mm);
+	}
 }
 
 /* Please note the differences between mmput and mm_release.
@@ -330,30 +356,6 @@ void mm_release(void)
 	if (tsk->flags & PF_VFORK) {
 		tsk->flags &= ~PF_VFORK;
 		up(tsk->p_opptr->vfork_sem);
-	}
-}
-
-/*
- * Called when the last reference to the mm
- * is dropped: either by a lazy thread or by
- * mmput
- */
-inline void __mmdrop(struct mm_struct *mm)
-{
-	if (mm == &init_mm) BUG();
-	free_page_tables(mm);
-	kmem_cache_free(mm_cachep, mm);
-}
-
-/*
- * Decrement the use count and release all resources for an mm.
- */
-void mmput(struct mm_struct *mm)
-{
-	if (atomic_dec_and_test(&mm->mm_users)) {
-		release_segments(mm);
-		exit_mmap(mm);
-		mmdrop(mm);
 	}
 }
 
@@ -391,10 +393,6 @@ static inline int copy_mm(unsigned long clone_flags, struct task_struct * tsk)
 	tsk->mm = mm;
 	tsk->active_mm = mm;
 
-	mm->pgd = pgd_alloc();
-	if (!mm->pgd)
-		goto free_mm;
-
 	/*
 	 * child gets a private LDT (if there was an LDT in the parent)
 	 */
@@ -409,12 +407,9 @@ static inline int copy_mm(unsigned long clone_flags, struct task_struct * tsk)
 good_mm:
 	tsk->mm = mm;
 	tsk->active_mm = mm;
-	SET_PAGE_DIR(tsk, mm->pgd);
+	init_new_context(tsk,mm);
 	return 0;
 
-free_mm:
-	kmem_cache_free(mm_cachep, mm);
-	return retval;
 free_pt:
 	mmput(mm);
 fail_nomem:
@@ -437,32 +432,24 @@ static inline int copy_fs(unsigned long clone_flags, struct task_struct * tsk)
 	return 0;
 }
 
-/*
- * Copy a fd_set and compute the maximum fd it contains. 
- */
-static inline int __copy_fdset(unsigned long *d, unsigned long *src)
+static int count_open_files(struct files_struct *files, int size)
 {
-	int i; 
-	unsigned long *p = src; 
-	unsigned long *max = src; 
-
-	for (i = __FDSET_LONGS; i; --i) {
-		if ((*d++ = *p++) != 0) 
-			max = p; 
+	int i;
+	
+	/* Find the last open fd */
+	for (i = size/(8*sizeof(long)); i > 0; ) {
+		if (files->open_fds->fds_bits[--i])
+			break;
 	}
-	return (max - src)*sizeof(long)*8; 
-}
-
-static inline int copy_fdset(fd_set *dst, fd_set *src)
-{
-	return __copy_fdset(dst->fds_bits, src->fds_bits);  
+	i = (i+1) * 8 * sizeof(long);
+	return i;
 }
 
 static int copy_files(unsigned long clone_flags, struct task_struct * tsk)
 {
 	struct files_struct *oldf, *newf;
 	struct file **old_fds, **new_fds;
-	int size, i, error = 0;
+	int open_files, nfds, size, i, error = 0;
 
 	/*
 	 * A background process may not have any files ...
@@ -482,43 +469,85 @@ static int copy_files(unsigned long clone_flags, struct task_struct * tsk)
 	if (!newf) 
 		goto out;
 
-	/*
-	 * Allocate the fd array, using get_free_page() if possible.
-	 * Eventually we want to make the array size variable ...
-	 */
-	size = NR_OPEN * sizeof(struct file *);
-	if (size == PAGE_SIZE)
-		new_fds = (struct file **) __get_free_page(GFP_KERNEL);
-	else
-		new_fds = (struct file **) kmalloc(size, GFP_KERNEL);
-	if (!new_fds)
-		goto out_release;
-
-	newf->file_lock = RW_LOCK_UNLOCKED;
 	atomic_set(&newf->count, 1);
-	newf->max_fds = NR_OPEN;
-	newf->fd = new_fds;
+
+	newf->file_lock	    = RW_LOCK_UNLOCKED;
+	newf->next_fd	    = 0;
+	newf->max_fds	    = NR_OPEN_DEFAULT;
+	newf->max_fdset	    = __FD_SETSIZE;
+	newf->close_on_exec = &newf->close_on_exec_init;
+	newf->open_fds	    = &newf->open_fds_init;
+	newf->fd	    = &newf->fd_array[0];
+
+	/* We don't yet have the oldf readlock, but even if the old
+           fdset gets grown now, we'll only copy up to "size" fds */
+	size = oldf->max_fdset;
+	if (size > __FD_SETSIZE) {
+		newf->max_fdset = 0;
+		write_lock(&newf->file_lock);
+		error = expand_fdset(newf, size);
+		write_unlock(&newf->file_lock);
+		if (error)
+			goto out_release;
+	}
 	read_lock(&oldf->file_lock);
-	newf->close_on_exec = oldf->close_on_exec;
-	i = copy_fdset(&newf->open_fds, &oldf->open_fds);
+
+	open_files = count_open_files(oldf, size);
+
+	/*
+	 * Check whether we need to allocate a larger fd array.
+	 * Note: we're not a clone task, so the open count won't
+	 * change.
+	 */
+	nfds = NR_OPEN_DEFAULT;
+	if (open_files > nfds) {
+		read_unlock(&oldf->file_lock);
+		newf->max_fds = 0;
+		write_lock(&newf->file_lock);
+		error = expand_fd_array(newf, open_files);
+		write_unlock(&newf->file_lock);
+		if (error) 
+			goto out_release;
+		nfds = newf->max_fds;
+		read_lock(&oldf->file_lock);
+	}
 
 	old_fds = oldf->fd;
-	for (; i != 0; i--) {
+	new_fds = newf->fd;
+
+	memcpy(newf->open_fds->fds_bits, oldf->open_fds->fds_bits, open_files/8);
+	memcpy(newf->close_on_exec->fds_bits, oldf->close_on_exec->fds_bits, open_files/8);
+
+	for (i = open_files; i != 0; i--) {
 		struct file *f = *old_fds++;
 		if (f)
 			get_file(f);
 		*new_fds++ = f;
 	}
 	read_unlock(&oldf->file_lock);
+
+	/* compute the remainder to be cleared */
+	size = (newf->max_fds - open_files) * sizeof(struct file *);
+
 	/* This is long word aligned thus could use a optimized version */ 
-	memset(new_fds, 0, (char *)newf->fd + size - (char *)new_fds); 
-      
+	memset(new_fds, 0, size); 
+
+	if (newf->max_fdset > open_files) {
+		int left = (newf->max_fdset-open_files)/8;
+		int start = open_files / (8 * sizeof(unsigned long));
+		
+		memset(&newf->open_fds->fds_bits[start], 0, left);
+		memset(&newf->close_on_exec->fds_bits[start], 0, left);
+	}
+
 	tsk->files = newf;
 	error = 0;
 out:
 	return error;
 
 out_release:
+	free_fdset (newf->close_on_exec, newf->max_fdset);
+	free_fdset (newf->open_fds, newf->max_fdset);
 	kmem_cache_free(files_cachep, newf);
 	goto out;
 }
@@ -608,7 +637,8 @@ int do_fork(unsigned long clone_flags, unsigned long usp, struct pt_regs *regs)
 	p->run_list.next = NULL;
 	p->run_list.prev = NULL;
 
-	p->p_pptr = p->p_opptr = current;
+	if ((clone_flags & CLONE_VFORK) || !(clone_flags & CLONE_PARENT))
+		p->p_pptr = p->p_opptr = current;
 	p->p_cptr = NULL;
 	init_waitqueue_head(&p->wait_chldexit);
 	p->vfork_sem = NULL;

@@ -39,6 +39,7 @@
 #include <linux/pagemap.h>
 #include <linux/smp_lock.h>
 #include <linux/swapctl.h>
+#include <linux/iobuf.h>
 
 #include <asm/uaccess.h>
 #include <asm/pgtable.h>
@@ -140,28 +141,6 @@ void clear_page_tables(struct mm_struct *mm, unsigned long first, int nr)
 
 	/* keep the page table cache within bounds */
 	check_pgt_cache();
-}
-
-/*
- * This function just free's the page directory - the
- * pages tables themselves have been freed earlier by 
- * clear_page_tables().
- */
-void free_page_tables(struct mm_struct * mm)
-{
-	pgd_t * page_dir = mm->pgd;
-
-	if (page_dir) {
-		if (page_dir == swapper_pg_dir)
-			goto out_bad;
-		pgd_free(page_dir);
-	}
-	return;
-
-out_bad:
-	printk(KERN_ERR
-		"free_page_tables: Trying to free kernel pgd\n");
-	return;
 }
 
 #define PTE_TABLE_MASK	((PTRS_PER_PTE-1) * sizeof(pte_t))
@@ -404,6 +383,190 @@ void zap_page_range(struct mm_struct *mm, unsigned long address, unsigned long s
 		if (mm->rss < 0)
 			mm->rss = 0;
 	}
+}
+
+
+/*
+ * Do a quick page-table lookup for a single page. 
+ */
+static unsigned long follow_page(unsigned long address) 
+{
+	pgd_t *pgd;
+	pmd_t *pmd;
+
+	pgd = pgd_offset(current->mm, address);
+	pmd = pmd_offset(pgd, address);
+	if (pmd) {
+		pte_t * pte = pte_offset(pmd, address);
+		if (pte && pte_present(*pte)) {
+			return pte_page(*pte);
+		}
+	}
+	
+	printk(KERN_ERR "Missing page in follow_page\n");
+	return 0;
+}
+
+/* 
+ * Given a physical address, is there a useful struct page pointing to it?
+ */
+
+static struct page * get_page_map(unsigned long page)
+{
+	struct page *map;
+	
+	if (MAP_NR(page) >= max_mapnr)
+		return 0;
+	if (page == ZERO_PAGE(page))
+		return 0;
+	map = mem_map + MAP_NR(page);
+	if (PageReserved(map))
+		return 0;
+	return map;
+}
+
+/*
+ * Force in an entire range of pages from the current process's user VA,
+ * and pin and lock the pages for IO.  
+ */
+
+#define dprintk(x...)
+int map_user_kiobuf(int rw, struct kiobuf *iobuf, unsigned long va, size_t len)
+{
+	unsigned long		ptr, end;
+	int			err;
+	struct mm_struct *	mm;
+	struct vm_area_struct *	vma = 0;
+	unsigned long		page;
+	struct page *		map;
+	int			doublepage = 0;
+	int			repeat = 0;
+	int			i;
+	
+	/* Make sure the iobuf is not already mapped somewhere. */
+	if (iobuf->nr_pages)
+		return -EINVAL;
+
+	mm = current->mm;
+	dprintk ("map_user_kiobuf: begin\n");
+	
+	ptr = va & PAGE_MASK;
+	end = (va + len + PAGE_SIZE - 1) & PAGE_MASK;
+	err = expand_kiobuf(iobuf, (end - ptr) >> PAGE_SHIFT);
+	if (err)
+		return err;
+
+ repeat:
+	down(&mm->mmap_sem);
+
+	err = -EFAULT;
+	iobuf->locked = 1;
+	iobuf->offset = va & ~PAGE_MASK;
+	iobuf->length = len;
+	
+	i = 0;
+	
+	/* 
+	 * First of all, try to fault in all of the necessary pages
+	 */
+	while (ptr < end) {
+		if (!vma || ptr >= vma->vm_end) {
+			vma = find_vma(current->mm, ptr);
+			if (!vma) 
+				goto out_unlock;
+		}
+		if (handle_mm_fault(current, vma, ptr, (rw==READ)) <= 0) 
+			goto out_unlock;
+		spin_lock(&mm->page_table_lock);
+		page = follow_page(ptr);
+		if (!page) {
+			dprintk (KERN_ERR "Missing page in map_user_kiobuf\n");
+			map = NULL;
+			goto retry;
+		}
+		map = get_page_map(page);
+		if (map) {
+			if (TryLockPage(map)) {
+				goto retry;
+			}
+			atomic_inc(&map->count);
+		}
+		spin_unlock(&mm->page_table_lock);
+		dprintk ("Installing page %p %p: %d\n", (void *)page, map, i);
+		iobuf->pagelist[i] = page;
+		iobuf->maplist[i] = map;
+		iobuf->nr_pages = ++i;
+		
+		ptr += PAGE_SIZE;
+	}
+
+	up(&mm->mmap_sem);
+	dprintk ("map_user_kiobuf: end OK\n");
+	return 0;
+
+ out_unlock:
+	up(&mm->mmap_sem);
+	unmap_kiobuf(iobuf);
+	dprintk ("map_user_kiobuf: end %d\n", err);
+	return err;
+
+ retry:
+
+	/* 
+	 * Undo the locking so far, wait on the page we got to, and try again.
+	 */
+	spin_unlock(&mm->page_table_lock);
+	unmap_kiobuf(iobuf);
+	up(&mm->mmap_sem);
+
+	/* 
+	 * Did the release also unlock the page we got stuck on?
+	 */
+	if (map) {
+		if (!PageLocked(map)) {
+			/* If so, we may well have the page mapped twice
+			 * in the IO address range.  Bad news.  Of
+			 * course, it _might_ * just be a coincidence,
+			 * but if it happens more than * once, chances
+			 * are we have a double-mapped page. */
+			if (++doublepage >= 3) {
+				return -EINVAL;
+			}
+		}
+	
+		/*
+		 * Try again...
+		 */
+		wait_on_page(map);
+	}
+	
+	if (++repeat < 16)
+		goto repeat;
+	return -EAGAIN;
+}
+
+
+/*
+ * Unmap all of the pages referenced by a kiobuf.  We release the pages,
+ * and unlock them if they were locked. 
+ */
+
+void unmap_kiobuf (struct kiobuf *iobuf) 
+{
+	int i;
+	struct page *map;
+	
+	for (i = 0; i < iobuf->nr_pages; i++) {
+		map = iobuf->maplist[i];
+		
+		if (map && iobuf->locked) {
+			__free_page(map);
+			UnlockPage(map);
+		}
+	}
+	
+	iobuf->nr_pages = 0;
+	iobuf->locked = 0;
 }
 
 static inline void zeromap_pte_range(pte_t * pte, unsigned long address,
@@ -670,6 +833,7 @@ static int do_wp_page(struct task_struct * tsk, struct vm_area_struct * vma,
 	return 1;
 
 bad_wp_page:
+	spin_unlock(&tsk->mm->page_table_lock);
 	printk("do_wp_page: bogus page at address %08lx (%08lx)\n",address,old_page);
 	return -1;
 }

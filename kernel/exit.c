@@ -26,13 +26,17 @@ static void release(struct task_struct * p)
 {
 	if (p != current) {
 #ifdef __SMP__
+		int has_cpu;
+
 		/*
 		 * Wait to make sure the process isn't on the
 		 * runqueue (active on some other CPU still)
 		 */
 		do {
-			barrier();
-		} while (p->has_cpu);
+			spin_lock_irq(&runqueue_lock);
+			has_cpu = p->has_cpu;
+			spin_unlock_irq(&runqueue_lock);
+		} while (has_cpu);
 #endif
 		free_uid(p);
 		unhash_process(p);
@@ -145,11 +149,11 @@ static inline void close_files(struct files_struct * files)
 
 	j = 0;
 	for (;;) {
-		unsigned long set = files->open_fds.fds_bits[j];
+		unsigned long set;
 		i = j * __NFDBITS;
-		j++;
-		if (i >= files->max_fds)
+		if (i >= files->max_fdset || i >= files->max_fds)
 			break;
+		set = files->open_fds->fds_bits[j++];
 		while (set) {
 			if (set & 1) {
 				struct file * file = xchg(&files->fd[i], NULL);
@@ -172,12 +176,14 @@ static inline void __exit_files(struct task_struct *tsk)
 		if (atomic_dec_and_test(&files->count)) {
 			close_files(files);
 			/*
-			 * Free the fd array as appropriate ...
+			 * Free the fd and fdset arrays if we expanded them.
 			 */
-			if (NR_OPEN * sizeof(struct file *) == PAGE_SIZE)
-				free_page((unsigned long) files->fd);
-			else
-				kfree(files->fd);
+			if (files->fd != &files->fd_array[0])
+				free_fd_array(files->fd, files->max_fds);
+			if (files->max_fdset > __FD_SETSIZE) {
+				free_fdset(files->open_fds, files->max_fdset);
+				free_fdset(files->close_on_exec, files->max_fdset);
+			}
 			kmem_cache_free(files_cachep, files);
 		}
 	}
@@ -230,6 +236,31 @@ void exit_sighand(struct task_struct *tsk)
 }
 
 /*
+ * We can use these to temporarily drop into
+ * "lazy TLB" mode and back.
+ */
+struct mm_struct * start_lazy_tlb(void)
+{
+	struct mm_struct *mm = current->mm;
+	current->mm = NULL;
+	/* active_mm is still 'mm' */
+	atomic_inc(&mm->mm_count);
+	return mm;
+}
+
+void end_lazy_tlb(struct mm_struct *mm)
+{
+	struct mm_struct *active_mm = current->active_mm;
+
+	current->mm = mm;
+	if (mm != active_mm) {
+		current->active_mm = mm;
+		switch_mm(active_mm, mm, current->processor);
+	}
+	mmdrop(active_mm);
+}
+
+/*
  * Turn us into a lazy TLB process if we
  * aren't already..
  */
@@ -238,8 +269,9 @@ static inline void __exit_mm(struct task_struct * tsk)
 	struct mm_struct * mm = tsk->mm;
 
 	if (mm) {
-		mm_release();
 		atomic_inc(&mm->mm_count);
+		mm_release();
+		if (mm != tsk->active_mm) BUG();
 		tsk->mm = NULL;
 		mmput(mm);
 	}

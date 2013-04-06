@@ -11,7 +11,7 @@
  * as published by the Free Software Foundation; either version
  * 2 of the License, or (at your option) any later version.
  *
- * A /dev/parportxy device node represents an arbitrary device ('y')
+ * A /dev/parportx device node represents an arbitrary device
  * on port 'x'.  The following operations are possible:
  *
  * open		do nothing, set up default IEEE 1284 protocol to be COMPAT
@@ -30,6 +30,8 @@
  *   RSTATUS	read_status
  *   NEGOT	parport_negotiate
  *   YIELD	parport_yield_blocking
+ *   WCTLONIRQ	on interrupt, set control lines
+ *   CLRIRQ	clear (and return) interrupt count
  * read/write	read or write in current IEEE 1284 protocol
  * select	wait for interrupt (in readfds)
  */
@@ -53,9 +55,13 @@
 struct pp_struct {
 	struct pardevice * pdev;
 	wait_queue_head_t irq_wait;
-	int got_irq;
+	atomic_t irqc;
 	int mode;
 	unsigned int flags;
+	int irqresponse;
+	unsigned char irqctl;
+	struct ieee1284_info state;
+	struct ieee1284_info saved_state;
 };
 
 /* pp_struct.flags bitfields */
@@ -85,8 +91,10 @@ static ssize_t do_read (struct pp_struct *pp, void *buf, size_t len)
 {
 	size_t (*fn) (struct parport *, void *, size_t, int);
 	struct parport *port = pp->pdev->port;
+	int addr = pp->mode & IEEE1284_ADDR;
+	int mode = pp->mode & ~(IEEE1284_DEVICEID | IEEE1284_ADDR);
 
-	switch (pp->mode) {
+	switch (mode) {
 	case IEEE1284_MODE_COMPAT:
 		/* This is a write-only mode. */
 		return -EIO;
@@ -100,7 +108,10 @@ static ssize_t do_read (struct pp_struct *pp, void *buf, size_t len)
 		break;
 
 	case IEEE1284_MODE_EPP:
-		fn = port->ops->epp_read_data;
+		if (addr)
+			fn = port->ops->epp_read_addr;
+		else
+			fn = port->ops->epp_read_data;
 		break;
 
 	case IEEE1284_MODE_ECP:
@@ -128,8 +139,10 @@ static ssize_t do_write (struct pp_struct *pp, const void *buf, size_t len)
 {
 	size_t (*fn) (struct parport *, const void *, size_t, int);
 	struct parport *port = pp->pdev->port;
+	int addr = pp->mode & IEEE1284_ADDR;
+	int mode = pp->mode & ~(IEEE1284_DEVICEID | IEEE1284_ADDR);
 
-	switch (pp->mode) {
+	switch (mode) {
 	case IEEE1284_MODE_NIBBLE:
 	case IEEE1284_MODE_BYTE:
 		/* Read-only modes. */
@@ -140,16 +153,25 @@ static ssize_t do_write (struct pp_struct *pp, const void *buf, size_t len)
 		break;
 
 	case IEEE1284_MODE_EPP:
-		fn = port->ops->epp_write_data;
+		if (addr)
+			fn = port->ops->epp_write_addr;
+		else
+			fn = port->ops->epp_write_data;
 		break;
 
 	case IEEE1284_MODE_ECP:
 	case IEEE1284_MODE_ECPRLE:
-		fn = port->ops->ecp_write_data;
+		if (addr)
+			fn = port->ops->ecp_write_addr;
+		else
+			fn = port->ops->ecp_write_data;
 		break;
 
 	case IEEE1284_MODE_ECPSWE:
-		fn = parport_ieee1284_ecp_write_data;
+		if (addr)
+			fn = parport_ieee1284_ecp_write_addr;
+		else
+			fn = parport_ieee1284_ecp_write_data;
 		break;
 
 	default:
@@ -271,7 +293,13 @@ static ssize_t pp_write (struct file * file, const char * buf, size_t count,
 static void pp_irq (int irq, void * private, struct pt_regs * unused)
 {
 	struct pp_struct * pp = (struct pp_struct *) private;
-	pp->got_irq = 1;
+
+	if (pp->irqresponse) {
+		parport_write_control (pp->pdev->port, pp->irqctl);
+		pp->irqresponse = 0;
+	}
+
+	atomic_inc (&pp->irqc);
 	wake_up_interruptible (&pp->irq_wait);
 }
 
@@ -322,6 +350,9 @@ static int pp_ioctl(struct inode *inode, struct file *file,
 
 	/* First handle the cases that don't take arguments. */
 	if (cmd == PPCLAIM) {
+		struct ieee1284_info *info;
+		int first_claim = 0;
+
 		if (pp->flags & PP_CLAIMED) {
 			printk (KERN_DEBUG CHRDEV
 				"%x: you've already got it!\n", minor);
@@ -333,6 +364,8 @@ static int pp_ioctl(struct inode *inode, struct file *file,
 			int err = register_device (minor, pp);
 			if (err)
 				return err;
+
+			first_claim = 1;
 		}
 
 		parport_claim_or_block (pp->pdev);
@@ -341,6 +374,30 @@ static int pp_ioctl(struct inode *inode, struct file *file,
 		/* For interrupt-reporting to work, we need to be
 		 * informed of each interrupt. */
 		enable_irq (pp);
+
+		/* We may need to fix up the state machine. */
+		info = &pp->pdev->port->ieee1284;
+		pp->saved_state.mode = info->mode;
+		pp->saved_state.phase = info->phase;
+		if (pp->mode != info->mode) {
+			int phase = IEEE1284_PH_FWD_IDLE;
+
+			if (first_claim) {
+				info->mode = pp->mode;
+				switch (pp->mode & ~(IEEE1284_DEVICEID
+						     | IEEE1284_ADDR)) {
+				case IEEE1284_MODE_NIBBLE:
+				case IEEE1284_MODE_BYTE:
+					phase = IEEE1284_PH_REV_IDLE;
+				}
+				info->phase = phase;
+			} else {
+				/* Just restore the state. */
+				info->mode = pp->state.mode;
+				info->phase = pp->state.phase;
+			}
+		}
+
 		return 0;
 	}
 
@@ -380,6 +437,7 @@ static int pp_ioctl(struct inode *inode, struct file *file,
 
 	port = pp->pdev->port;
 	switch (cmd) {
+		struct ieee1284_info *info;
 		unsigned char reg;
 		unsigned char mask;
 		int mode;
@@ -405,6 +463,12 @@ static int pp_ioctl(struct inode *inode, struct file *file,
 		return 0;
 
 	case PPRELEASE:
+		/* Save the state machine's state. */
+		info = &pp->pdev->port->ieee1284;
+		pp->state.mode = info->mode;
+		pp->state.phase = info->phase;
+		info->mode = pp->saved_state.mode;
+		info->phase = pp->saved_state.phase;
 		parport_release (pp->pdev);
 		pp->flags &= ~PP_CLAIMED;
 		return 0;
@@ -443,10 +507,35 @@ static int pp_ioctl(struct inode *inode, struct file *file,
 	case PPNEGOT:
 		if (copy_from_user (&mode, (int *) arg, sizeof (mode)))
 			return -EFAULT;
-		/* FIXME: validate mode */
-		ret = parport_negotiate (port, mode);
+		switch ((ret = parport_negotiate (port, mode))) {
+		case 0: break;
+		case -1: /* handshake failed, peripheral not IEEE 1284 */
+			ret = -EIO;
+			break;
+		case 1:  /* handshake succeeded, peripheral rejected mode */
+			ret = -ENXIO;
+			break;
+		}
 		enable_irq (pp);
 		return ret;
+
+	case PPWCTLONIRQ:
+		if (copy_from_user (&reg, (unsigned char *) arg,
+				    sizeof (reg)))
+			return -EFAULT;
+
+		/* Remember what to set the control lines to, for next
+		 * time we get an interrupt. */
+		pp->irqctl = reg;
+		pp->irqresponse = 1;
+		return 0;
+
+	case PPCLRIRQ:
+		ret = atomic_read (&pp->irqc);
+		if (copy_to_user ((int *) arg, &ret, sizeof (ret)))
+			return -EFAULT;
+		atomic_sub (ret, &pp->irqc);
+		return 0;
 
 	default:
 		printk (KERN_DEBUG CHRDEV "%x: What? (cmd=0x%x)\n", minor,
@@ -472,7 +561,7 @@ static int pp_open (struct inode * inode, struct file * file)
 
 	pp->mode = IEEE1284_MODE_COMPAT;
 	pp->flags = 0;
-	pp->got_irq = 0;
+	atomic_set (&pp->irqc, 0);
 	init_waitqueue_head (&pp->irq_wait);
 
 	/* Defer the actual device registration until the first claim.
@@ -515,10 +604,10 @@ static unsigned int pp_poll (struct file * file, poll_table * wait)
 {
 	struct pp_struct *pp = file->private_data;
 	unsigned int mask = 0;
-	if (pp->got_irq) {
-		pp->got_irq = 0;
+
+	if (atomic_read (&pp->irqc))
 		mask |= POLLIN | POLLRDNORM;
-	}
+
 	poll_wait (file, &pp->irq_wait, wait);
 	return mask;
 }
