@@ -324,14 +324,15 @@ static int usblp_ioctl(struct inode *inode, struct file *file, unsigned int cmd,
 static ssize_t usblp_write(struct file *file, const char *buffer, size_t count, loff_t *ppos)
 {
 	struct usblp *usblp = file->private_data;
-	int timeout, err = 0, writecount = 0;
+	int timeout, err = 0;
+	size_t writecount = 0;
 
 	while (writecount < count) {
 
 		if (usblp->writeurb.status == -EINPROGRESS) {
 
 			if (file->f_flags & O_NONBLOCK)
-				return -EAGAIN;
+				return writecount ? writecount : -EAGAIN;
 
 			timeout = USBLP_WRITE_TIMEOUT;
 			while (timeout && usblp->writeurb.status == -EINPROGRESS) {
@@ -370,7 +371,9 @@ static ssize_t usblp_write(struct file *file, const char *buffer, size_t count, 
 							 (count - writecount) : USBLP_BUF_SIZE;
 
 		if (copy_from_user(usblp->writeurb.transfer_buffer, buffer + writecount,
-				usblp->writeurb.transfer_buffer_length)) return -EFAULT;
+				usblp->writeurb.transfer_buffer_length)) {
+			return writecount ? writecount : -EFAULT;
+		}
 
 		usblp->writeurb.dev = usblp->dev;
 		usb_submit_urb(&usblp->writeurb);
