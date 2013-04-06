@@ -166,7 +166,6 @@ static void ddv_release(struct inode * inode, struct file * filp)
 #if DEBUG
 	printk("ddv_release started\n");
 #endif
-	sync_dev(inode->i_rdev);
 #if DEBUG
 	printk("ddv_release done\n");
 #endif
@@ -386,10 +385,11 @@ static int ddv_daemon(void *unused)
 		save_flags(flags); cli();
 
 		while (!rem_queue) {
-			spin_lock_irq(&current->sigmask_lock);
+			spin_lock(&current->sigmask_lock);
 			flush_signals(current);
-			spin_unlock_irq(&current->sigmask_lock);
+			spin_unlock(&current->sigmask_lock);
 			interruptible_sleep_on(&ddv_daemon_wait);
+			__sti(); cli();
 		}
 
 		rem = rem_queue;
