@@ -941,6 +941,7 @@ static int lo_release(struct inode *inode, struct file *file)
 }
 
 static struct block_device_operations lo_fops = {
+	owner:		THIS_MODULE,
 	open:		lo_open,
 	release:	lo_release,
 	ioctl:		lo_ioctl,
@@ -951,6 +952,7 @@ static struct block_device_operations lo_fops = {
  */
 MODULE_PARM(max_loop, "i");
 MODULE_PARM_DESC(max_loop, "Maximum number of loop devices (1-255)");
+MODULE_LICENSE("GPL");
 
 int loop_register_transfer(struct loop_func_table *funcs)
 {
