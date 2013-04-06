@@ -283,6 +283,10 @@
  *			to trition.c and added UDMA to current DMA support.
  *			update Promise Ultra33 and added AEC6210U/UF UDMA cards.
  *			add configuration flag to allow booting of either card.
+ * Version 5.53.5	Fixed chipset identifiers.
+ * Version 5.53.6	Added Aladdin IV/V M5229 chipset support.
+ * Version 5.53.7	Added HPT343 basic support with everything at PIO 0.
+ *			This is regardless of DMA capabilties.
  *
  *  Some additional driver compile-time options are in ide.h
  *
@@ -328,9 +332,9 @@
 #define IS_PROMISE_DRIVE (0)	/* auto-NULLs out Promise code */
 #endif /* CONFIG_BLK_DEV_PROMISE */
 
-static const byte	ide_hwif_to_major[MAX_HWIFS] = {IDE0_MAJOR, IDE1_MAJOR, IDE2_MAJOR, IDE3_MAJOR};
-static const unsigned short default_io_base[MAX_HWIFS] = {0x1f0, 0x170, 0x1e8, 0x168};
-static const byte	default_irqs[MAX_HWIFS]     = {14, 15, 11, 10};
+static const byte	ide_hwif_to_major[MAX_HWIFS] = {IDE0_MAJOR, IDE1_MAJOR, IDE2_MAJOR, IDE3_MAJOR, IDE4_MAJOR, IDE5_MAJOR};
+static const unsigned short default_io_base[MAX_HWIFS] = {0x1f0, 0x170, 0x1e8, 0x168, 0x1e0, 0x160};
+static const byte	default_irqs[MAX_HWIFS]     = {14, 15, 11, 10, 8, 12};
 static int	idebus_parameter; /* holds the "idebus=" parameter */
 static int	system_bus_speed; /* holds what we think is VESA/PCI bus speed */
 
@@ -606,6 +610,9 @@ void ide_set_handler (ide_drive_t *drive, ide_handler_t *handler, unsigned int t
  *
  * Returns:	1 if lba_capacity looks sensible
  *		0 otherwise
+ *
+ * Note: we must not change id->cyls here, otherwise a second call
+ * of this routine might no longer find lba_capacity ok.
  */
 static int lba_capacity_is_ok (struct hd_driveid *id)
 {
@@ -614,14 +621,15 @@ static int lba_capacity_is_ok (struct hd_driveid *id)
 	unsigned long _10_percent = chs_sects / 10;
 
 	/*
-	 * very large drives (8GB+) may lie about the number of cylinders
-	 * This is a split test for drives 8 Gig and Bigger only.
+	 * The ATA spec tells large drives to return
+	 * C/H/S = 16383/16/63 independent of their size.
+	 * Some drives can be jumpered to use 15 heads instead of 16.
 	 */
-	if ((id->lba_capacity >= 16514064) && (id->cyls == 0x3fff) &&
-	    (id->heads == 16) && (id->sectors == 63)) {
-		id->cyls = lba_sects / (16 * 63); /* correct cyls */
+	if (id->cyls == 16383 && id->sectors == 63 &&
+	    (id->heads == 15 || id->heads == 16) &&
+	    id->lba_capacity >= 16383*63*id->heads)
 		return 1;	/* lba_capacity is our only option */
-	}
+
 	/* perform a rough sanity check on lba_sects:  within 10% is "okay" */
 	if ((lba_sects - chs_sects) < _10_percent)
 		return 1;	/* lba_capacity is good */
@@ -638,11 +646,13 @@ static int lba_capacity_is_ok (struct hd_driveid *id)
 /*
  * current_capacity() returns the capacity (in sectors) of a drive
  * according to its current geometry/LBA settings.
+ *
+ * It also sets select.b.lba.
  */
 static unsigned long current_capacity (ide_drive_t  *drive)
 {
 	struct hd_driveid *id = drive->id;
-	unsigned long capacity = drive->cyl * drive->head * drive->sect;
+	unsigned long capacity;
 
 	if (!drive->present)
 		return 0;
@@ -652,22 +662,14 @@ static unsigned long current_capacity (ide_drive_t  *drive)
 #endif /* CONFIG_BLK_DEV_IDEFLOPPY */
 	if (drive->media != ide_disk)
 		return 0x7fffffff;	/* cdrom or tape */
+
 	drive->select.b.lba = 0;
 	/* Determine capacity, and use LBA if the drive properly supports it */
+	capacity = drive->cyl * drive->head * drive->sect;
 	if (id != NULL && (id->capability & 2) && lba_capacity_is_ok(id)) {
 		if (id->lba_capacity >= capacity) {
-			drive->cyl = id->lba_capacity / (drive->head * drive->sect);
 			capacity = id->lba_capacity;
 			drive->select.b.lba = 1;
-#if 0
-			/*
-			 * This is the correct place to perform this task;
-			 * however, we do this later for reporting.
-			 */
-			if (*(int *)&id->cur_capacity0 != id->lba_capacity) {
-				*(int *)&id->cur_capacity0 = id->lba_capacity;
-			}
-#endif
 		}
 	}
 	return (capacity - drive->sect0);
@@ -697,8 +699,9 @@ static void ide_geninit (struct gendisk *gd)
 			idefloppy_setup(drive);
 #endif /* CONFIG_BLK_DEV_IDEFLOPPY */
 		drive->part[0].nr_sects = current_capacity(drive);
-		if (!drive->present || (drive->media != ide_disk && drive->media != ide_floppy) ||
-		    !drive->part[0].nr_sects) {
+		if (!drive->present
+		    || (drive->media != ide_disk && drive->media != ide_floppy)
+		    || !drive->part[0].nr_sects) {
 			drive->part[0].start_sect = -1; /* skip partition check */
 		}
 	}
@@ -1597,11 +1600,16 @@ static inline void do_request (ide_hwif_t *hwif, struct request *rq)
 		goto kill_rq;
 	}
 	block += drive->part[minor&PARTN_MASK].start_sect + drive->sect0;
+
 #if FAKE_FDISK_FOR_EZDRIVE
+	/* Yecch - this will shift the entire interval,
+	   possibly killing some innocent following sector */
 	if (block == 0 && drive->remap_0_to_1)
 		block = 1;  /* redirect MBR access to EZ-Drive partn table */
 #endif /* FAKE_FDISK_FOR_EZDRIVE */
+
 	((ide_hwgroup_t *)hwif->hwgroup)->drive = drive;
+
 #if (DISK_RECOVERY_TIME > 0)
 	while ((read_timer() - hwif->last_time) < DISK_RECOVERY_TIME);
 #endif
@@ -1655,7 +1663,7 @@ static inline void do_request (ide_hwif_t *hwif, struct request *rq)
 #else
 		do_rw_disk (drive, rq, block); /* simpler and faster */
 		return;
-#endif /* CONFIG_BLK_DEV_IDEATAPI */;
+#endif /* CONFIG_BLK_DEV_IDEATAPI */
 	}
 	do_special(drive);
 	return;
@@ -1761,6 +1769,20 @@ static void do_ide2_request (void)	/* invoked with cli() */
 static void do_ide3_request (void)	/* invoked with cli() */
 {
 	do_hwgroup_request (ide_hwifs[3].hwgroup);
+}
+#endif
+
+#if MAX_HWIFS > 4
+static void do_ide4_request (void)	/* invoked with cli() */
+{
+	do_hwgroup_request (ide_hwifs[4].hwgroup);
+}
+#endif
+
+#if MAX_HWIFS > 5
+static void do_ide5_request (void)	/* invoked with cli() */
+{
+	do_hwgroup_request (ide_hwifs[5].hwgroup);
 }
 #endif
 
@@ -2127,7 +2149,8 @@ static int revalidate_disk(kdev_t i_rdev)
 	};
 
 	drive->part[0].nr_sects = current_capacity(drive);
-	if ((drive->media != ide_disk && drive->media != ide_floppy) || !drive->part[0].nr_sects)
+	if ((drive->media != ide_disk && drive->media != ide_floppy)
+	    || !drive->part[0].nr_sects)
 		drive->part[0].start_sect = -1;
 	resetup_one_dev(HWIF(drive)->gd, drive->select.b.unit);
 
@@ -2322,10 +2345,18 @@ static int ide_ioctl (struct inode *inode, struct file *file,
 					argbuf[3] = args[3];
 				}
 				if (!(err = verify_area(VERIFY_WRITE,(void *)arg, argsize))) {
+					if ((args[0] == WIN_SETFEATURES) &&
+					    (args[1] > 66) &&
+					    (args[2] == 3) &&
+					    ((drive->id->word93 & 0x2000) == 0)) {
+						printk("%s: Speed warnings UDMA 3/4 is not functional.\n", drive->name);
+						goto abort_speed;
+					}
 					rq.buffer = argbuf;
 					err = ide_do_drive_cmd(drive, &rq, ide_wait);
 					memcpy_tofs((void *)arg, argbuf, argsize);
 				}
+abort_speed:
 				if (argsize > 4)
 					kfree(argbuf);
 			}
@@ -2557,6 +2588,7 @@ static inline void do_identify (ide_drive_t *drive, byte cmd)
 	}
 
 	drive->media = ide_disk;
+
 	/* Extract geometry if we did not already have one for the drive */
 	if (!drive->present) {
 		drive->present = 1;
@@ -2565,8 +2597,8 @@ static inline void do_identify (ide_drive_t *drive, byte cmd)
 		drive->sect    = drive->bios_sect = id->sectors;
 	}
 	/* Handle logical geometry translation by the drive */
-	if ((id->field_valid & 1) && id->cur_cyls &&
-		id->cur_heads && (id->cur_heads <= 16) && id->cur_sectors) {
+	if ((id->field_valid & 1) && id->cur_cyls && id->cur_heads
+	    && (id->cur_heads <= 16) && id->cur_sectors) {
 		/*
 		 * Extract the physical drive geometry for our use.
 		 * Note that we purposely do *not* update the bios info.
@@ -2593,12 +2625,9 @@ static inline void do_identify (ide_drive_t *drive, byte cmd)
 	/* Use physical geometry if what we have still makes no sense */
 	if ((!drive->head || drive->head > 16) &&
 	    id->heads && id->heads <= 16) {
-		if ((id->lba_capacity > 16514064) || (id->cyls == 0x3fff)) {
-			id->cyls = ((int)(id->lba_capacity/(id->heads * id->sectors)));
-		}
-		drive->cyl  = id->cur_cyls    = id->cyls;
-		drive->head = id->cur_heads   = id->heads;
-		drive->sect = id->cur_sectors = id->sectors;
+		drive->cyl  = id->cyls;
+		drive->head = id->heads;
+		drive->sect = id->sectors;
 	}
 
 	/* calculate drive capacity, and select LBA if possible */
@@ -2608,21 +2637,17 @@ static inline void do_identify (ide_drive_t *drive, byte cmd)
 	 * if possible, give fdisk access to more of the drive,
 	 * by correcting bios_cyls:
 	 */
-	if ((capacity >= (id->cyls * id->heads * id->sectors)) &&
-	    (!drive->forced_geom) && drive->bios_sect && drive->bios_head) {
-		drive->bios_cyl = (capacity / drive->bios_sect) / drive->bios_head;
-#ifdef DEBUG
-		printk("FDISK Fixing Geometry :: CHS=%d/%d/%d to CHS=%d/%d/%d\n",
-			drive->id->cur_cyls,
-			drive->id->cur_heads,
-			drive->id->cur_sectors,
-			drive->bios_cyl,
-			drive->bios_head,
-			drive->bios_sect);
-#endif
-		drive->id->cur_cyls    = drive->bios_cyl;
-		drive->id->cur_heads   = drive->bios_head;
-		drive->id->cur_sectors = drive->bios_sect;
+	if (capacity > drive->bios_cyl * drive->bios_head * drive->bios_sect
+	    && !drive->forced_geom && drive->bios_sect && drive->bios_head) {
+		int cyl = (capacity / drive->bios_sect) / drive->bios_head;
+		if (cyl <= 65535)
+			drive->bios_cyl = cyl;
+		else {
+			/* OK until 539 GB */
+			drive->bios_sect = 63;
+			drive->bios_head = 255;
+			drive->bios_cyl = capacity / (63*255);
+		}
 	}
 
 	if (!strncmp(id->model, "BMI ", 4) &&
@@ -2657,8 +2682,12 @@ static inline void do_identify (ide_drive_t *drive, byte cmd)
 		capacity/2048L, id->buf_size/2,
 		drive->bios_cyl, drive->bios_head, drive->bios_sect);
 	if (drive->using_dma) {
-		if ((id->field_valid & 4) && (id->dma_ultra & (id->dma_ultra >> 8) & 7)) {
-			printk(", UDMA");	/* UDMA BIOS-enabled! */
+		if ((id->field_valid & 4) && (id->word93 & 0x2000) &&
+		    (id->dma_ultra & (id->dma_ultra >>  11) & 3)) {
+			printk(", UDMA(66)");	/* UDMA BIOS-enabled! */
+		} else if ((id->field_valid & 4) &&
+			   (id->dma_ultra & (id->dma_ultra >> 8) & 7)) {
+			printk(", UDMA(33)");	/* UDMA BIOS-enabled! */
 		} else if (id->field_valid & 4) {
 			printk(", (U)DMA");	/* Can be BIOS-enabled! */
 		} else {
@@ -2666,18 +2695,6 @@ static inline void do_identify (ide_drive_t *drive, byte cmd)
 		}
 	}
 	printk("\n");
-	if (drive->select.b.lba) {
-		if (*(int *)&id->cur_capacity0 != id->lba_capacity) {
-#ifdef DEBUG
-			printk("     CurSects=%d, LBASects=%d, ",
-				*(int *)&id->cur_capacity0, id->lba_capacity);
-#endif
-			*(int *)&id->cur_capacity0 = id->lba_capacity;
-#ifdef DEBUG
-			printk( "Fixed CurSects=%d\n", *(int *)&id->cur_capacity0);
-#endif
-		}
-	}
 }
 
 /*
@@ -2934,6 +2951,12 @@ static inline byte probe_for_drive (ide_drive_t *drive)
  * The only "perfect" way to handle this would be to modify the setup.[cS] code
  * to do BIOS calls Int13h/Fn08h and Int13h/Fn48h to get all of the drive info
  * for us during initialization.  I have the necessary docs -- any takers?  -ml
+ * [I did this. But the result is more suited for user space. -aeb]
+ *
+ * Unfortunately the above is far too optimistic. One of the problems is that
+ * drives 1 and 2 may be SCSI disks (even when IDE disks are present), so that
+ * the geometry we read here from BIOS is attributed to the wrong disks.
+ * Eventually the routine below should be removed.
  */
 static void probe_cmos_for_drives (ide_hwif_t *hwif)
 {
@@ -3380,12 +3403,6 @@ done:
  * Returns 1 if the geometry translation was successful.
  */
 
-/*
- * We update the values if the current CHS as determined by the kernel.
- * This now allows for the hdparm tool to read the actual settings of the
- * being used by the kernel.  This removes the need for doing guess
- * translations based on the raw values of the drive.
- */
 int ide_xlate_1024 (kdev_t i_rdev, int xparm, const char *msg)
 {
 	ide_drive_t *drive;
@@ -3397,35 +3414,15 @@ int ide_xlate_1024 (kdev_t i_rdev, int xparm, const char *msg)
 	if (!drive)
 		return 0;
 
-	if (drive->forced_geom) {
-		/*
-		 * Update the current 3D drive values.
-		 */
-		drive->id->cur_cyls	= drive->bios_cyl;
-		drive->id->cur_heads	= drive->bios_head;
-		drive->id->cur_sectors	= drive->bios_sect;
+	if (drive->forced_geom)
 		return 0;
-	}
 
-	if (xparm > 1 && xparm <= drive->bios_head && drive->bios_sect == 63) {
-		/*
-		 * Update the current 3D drive values.
-		 */
-		drive->id->cur_cyls	= drive->bios_cyl;
-		drive->id->cur_heads	= drive->bios_head;
-		drive->id->cur_sectors	= drive->bios_sect;
+	if (xparm > 1 && xparm <= drive->bios_head && drive->bios_sect == 63)
 		return 0;		/* we already have a translation */
-	}
 
 	printk("%s ", msg);
 
 	if (xparm < 0 && (drive->bios_cyl * drive->bios_head * drive->bios_sect) < (1024 * 16 * 63)) {
-		/*
-		 * Update the current 3D drive values.
-		 */
-		drive->id->cur_cyls	= drive->bios_cyl;
-		drive->id->cur_heads	= drive->bios_head;
-		drive->id->cur_sectors	= drive->bios_sect;
 		return 0;		/* small disk: no translation needed */
 	}
 
@@ -3466,12 +3463,6 @@ int ide_xlate_1024 (kdev_t i_rdev, int xparm, const char *msg)
 	}
 	drive->part[0].nr_sects = current_capacity(drive);
 	printk("[%d/%d/%d]", drive->bios_cyl, drive->bios_head, drive->bios_sect);
-	/*
-	 * Update the current 3D drive values.
-	 */
-	drive->id->cur_cyls	= drive->bios_cyl;
-	drive->id->cur_heads	= drive->bios_head;
-	drive->id->cur_sectors	= drive->bios_sect;
 	return 1;
 }
 
@@ -3635,7 +3626,18 @@ static void ide_probe_pci (unsigned short vendor, unsigned short device, ide_pci
 	save_flags(flags);
 	cli();
 	for (index = 0; !pcibios_find_device (vendor, device, index, &bus, &fn); ++index) {
-		init (bus, fn + func_adj);
+		if ((vendor == PCI_VENDOR_ID_TTI) &&
+		    (device == PCI_DEVICE_ID_TTI_HPT343) && (func_adj)) {
+			unsigned short pcicmd = 0;
+
+			pcibios_read_config_word(bus, fn, PCI_COMMAND, &pcicmd);
+			if (pcicmd & PCI_COMMAND_MEMORY)
+				init (bus, fn);
+			else
+				return;
+		} else {
+			init (bus, fn + func_adj);
+		}
 	}
 	restore_flags(flags);
 }
@@ -3670,17 +3672,22 @@ static void probe_for_hwifs (void)
 		 */
 #ifdef CONFIG_BLK_DEV_OFFBOARD
 		ide_probe_pci (PCI_VENDOR_ID_PROMISE, PCI_DEVICE_ID_PROMISE_20246, &ide_init_triton, 0);
+		ide_probe_pci (PCI_VENDOR_ID_PROMISE, PCI_DEVICE_ID_PROMISE_20262, &ide_init_triton, 0);
 		ide_probe_pci (PCI_VENDOR_ID_ARTOP, PCI_DEVICE_ID_ARTOP_ATP850UF, &ide_init_triton, 0);
+		ide_probe_pci (PCI_VENDOR_ID_TTI, PCI_DEVICE_ID_TTI_HPT343, &ide_init_triton, 1);
 #endif /* CONFIG_BLK_DEV_OFFBOARD */
 		ide_probe_pci (PCI_VENDOR_ID_INTEL, PCI_DEVICE_ID_INTEL_82371_0, &ide_init_triton, 1);
 		ide_probe_pci (PCI_VENDOR_ID_INTEL, PCI_DEVICE_ID_INTEL_82371SB_1, &ide_init_triton, 0);
 		ide_probe_pci (PCI_VENDOR_ID_INTEL, PCI_DEVICE_ID_INTEL_82371AB, &ide_init_triton, 0);
 		ide_probe_pci (PCI_VENDOR_ID_SI, PCI_DEVICE_ID_SI_5513, &ide_init_triton, 0);
 		ide_probe_pci (PCI_VENDOR_ID_VIA, PCI_DEVICE_ID_VIA_82C586_1, &ide_init_triton, 0);
+		ide_probe_pci (PCI_VENDOR_ID_AL, PCI_DEVICE_ID_AL_M5229, &ide_init_triton, 0);
 #ifndef CONFIG_BLK_DEV_OFFBOARD
 		ide_probe_pci (PCI_VENDOR_ID_PROMISE, PCI_DEVICE_ID_PROMISE_20246, &ide_init_triton, 0);
+		ide_probe_pci (PCI_VENDOR_ID_PROMISE, PCI_DEVICE_ID_PROMISE_20262, &ide_init_triton, 0);
 		ide_probe_pci (PCI_VENDOR_ID_ARTOP, PCI_DEVICE_ID_ARTOP_ATP850UF, &ide_init_triton, 0);
 #endif /* CONFIG_BLK_DEV_OFFBOARD */
+		ide_probe_pci (PCI_VENDOR_ID_TTI, PCI_DEVICE_ID_TTI_HPT343, &ide_init_triton, 0);
 #endif /* CONFIG_BLK_DEV_TRITON */
 	}
 #endif /* CONFIG_PCI */
@@ -3726,6 +3733,12 @@ static int hwif_init (int h)
 #endif
 #if MAX_HWIFS > 3
 	case IDE3_MAJOR: rfn = &do_ide3_request; break;
+#endif
+#if MAX_HWIFS > 4
+	case IDE4_MAJOR: rfn = &do_ide4_request; break;
+#endif
+#if MAX_HWIFS > 5
+	case IDE5_MAJOR: rfn = &do_ide5_request; break;
 #endif
 	default:
 		printk("%s: request_fn NOT DEFINED\n", hwif->name);

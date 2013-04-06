@@ -13,8 +13,8 @@
  *		Corey Minyard <wf-rch!minyard@relay.EU.net>
  *		Florian La Roche, <flla@stud.uni-sb.de>
  *		Charles Hedrick, <hedrick@klinzhai.rutgers.edu>
- *		Linus Torvalds, <torvalds@cs.helsinki.fi>
- *		Alan Cox, <gw4pts@gw4pts.ampr.org>
+ *		Linus Torvalds, <torvalds@transmeta.com>
+ *		Alan Cox, <alan@lxorguk.ukuu.org.uk>
  *		Matthew Dillon, <dillon@apollo.west.oic.com>
  *		Arnt Gulbrandsen, <agulbra@nvg.unit.no>
  *		Jorge Cwik, <jorge@laser.satlink.net>
@@ -1186,6 +1186,15 @@ static int tcp_ack(struct sock *sk, struct tcphdr *th, u32 ack, int len)
 	 *	then we can probably ignore it.
 	 */
 	 
+	if (sk->state == TCP_SYN_RECV) {
+		/*
+		 * Should be the exact sequence number for the handshake
+		 * to succeed, or sequence prediction gets a bit easier.
+		 * Also, "partially-established" connections are bad for
+		 * the rest of our code.
+		 */
+		if (ack != sk->sent_seq) goto uninteresting_ack;
+	} else
 	if (after(ack, sk->sent_seq) || before(ack, sk->rcv_ack_seq)) 
 		goto uninteresting_ack;
 
