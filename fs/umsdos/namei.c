@@ -1008,8 +1008,7 @@ int UMSDOS_rmdir (struct inode *dir, struct dentry *dentry)
 		goto out;
 
 	ret = -EBUSY;
-	shrink_dcache_parent(dentry);
-	if (dentry->d_count > 1)
+	if (!list_empty(&dentry->d_hash))
 		goto out;
 
 	/* check the sticky bit */
@@ -1019,11 +1018,6 @@ printk("umsdos_rmdir: %s/%s is sticky\n",
 dentry->d_parent->d_name.name, dentry->d_name.name);
 		goto out;
 	}
-
-	/*
-	 * Lock the directory, then check whether it's empty.
-	 */
-	down(&dentry->d_inode->i_sem);
 
 	/* check whether the EMD is empty */
 	ret = -ENOTEMPTY;
@@ -1050,7 +1044,6 @@ demd->d_parent->d_name.name, demd->d_name.name, err);
 		}
 	} else if (empty == 2)
 		ret = 0;
-	up(&dentry->d_inode->i_sem);
 	if (ret)
 		goto out;
 
@@ -1071,15 +1064,6 @@ demd->d_parent->d_name.name, demd->d_name.name, err);
 	else
 		d_drop(temp);
 
-	/* Check again for a busy dentry */
-	ret = -EBUSY;
-	shrink_dcache_parent(dentry);
-	if (dentry->d_count > 1) {
-printk("umsdos_rmdir: %s/%s busy\n",
-dentry->d_parent->d_name.name, dentry->d_name.name);
-		goto out_dput;
-	}
-
 	/*
 	 * Attempt to remove the msdos name.
 	 */
@@ -1096,11 +1080,8 @@ printk("umsdos_rmdir: delentry %s failed, ret=%d\n", info.entry.name, ret);
 
 	/* dput() temp if we didn't do it above */
 out_dput:
-	if (temp != dentry) {
+	if (temp != dentry)
 		dput(temp);
-		if (!ret)
-			d_delete (dentry);
-	}
 
 out:
 	Printk (("umsdos_rmdir %d\n", ret));
