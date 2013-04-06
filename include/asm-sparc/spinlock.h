@@ -112,7 +112,7 @@ do {	unsigned long flags; \
 	_do_read_unlock(lock, "read_unlock"); \
 	__restore_flags(flags); \
 } while(0)
-#define read_unlock_irq(lock)	do { _do_read_unlock(lock, "read_unlock_irq"); __sti() } while(0)
+#define read_unlock_irq(lock)	do { _do_read_unlock(lock, "read_unlock_irq"); __sti(); } while(0)
 #define read_unlock_irqrestore(lock, flags) do { _do_read_unlock(lock, "read_unlock_irqrestore"); __restore_flags(flags); } while(0)
 
 #define write_lock(lock) \
@@ -209,10 +209,10 @@ extern __inline__ void spin_unlock_irq(spinlock_t *lock)
 	: "g2", "memory");
 }
 
-#define spin_lock_irqsave(lock, flags)		\
+#define spin_lock_irqsave(__lock, flags)	\
 do {						\
-	register spinlock_t *lp asm("g1");	\
-	lp = lock;				\
+	register spinlock_t *__lp asm("g1");	\
+	__lp = (__lock);			\
 	__asm__ __volatile__(			\
 	"rd	%%psr, %0\n\t"			\
 	"or	%0, %1, %%g2\n\t"		\
@@ -231,7 +231,7 @@ do {						\
 	"b,a	1b\n\t"				\
 	".previous\n"				\
 	: "=r" (flags)				\
-	: "i" (PSR_PIL), "r" (lp)		\
+	: "i" (PSR_PIL), "r" (__lp)		\
 	: "g2", "memory", "cc");		\
 } while(0)
 

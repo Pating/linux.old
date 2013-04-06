@@ -5,7 +5,7 @@
  *
  *		Implementation of the Transmission Control Protocol(TCP).
  *
- * Version:	$Id: tcp_ipv4.c,v 1.166 1999/02/23 08:12:41 davem Exp $
+ * Version:	$Id: tcp_ipv4.c,v 1.170 1999/03/21 05:22:47 davem Exp $
  *
  *		IPv4 specific functions
  *
@@ -657,7 +657,6 @@ int tcp_v4_connect(struct sock *sk, struct sockaddr *uaddr, int addr_len)
 
 static int tcp_v4_sendmsg(struct sock *sk, struct msghdr *msg, int len)
 {
-	struct tcp_opt *tp;
 	int retval = -EINVAL;
 
 	/* Do sanity checking for sendmsg/sendto/send. */
@@ -679,15 +678,7 @@ static int tcp_v4_sendmsg(struct sock *sk, struct msghdr *msg, int len)
 		if (addr->sin_addr.s_addr != sk->daddr)
 			goto out;
 	}
-
-	lock_sock(sk);
-	retval = tcp_do_sendmsg(sk, msg->msg_iovlen, msg->msg_iov,
-				msg->msg_flags);
-	/* Push out partial tail frames if needed. */
-	tp = &(sk->tp_pinfo.af_tcp);
-	if(tp->send_head && tcp_snd_test(sk, tp->send_head))
-		tcp_write_xmit(sk);
-	release_sock(sk);
+	retval = tcp_do_sendmsg(sk, msg);
 
 out:
 	return retval;
@@ -735,6 +726,9 @@ static inline void do_pmtu_discovery(struct sock *sk, struct iphdr *ip)
 {
 	struct tcp_opt *tp = &sk->tp_pinfo.af_tcp;
 
+	if (atomic_read(&sk->sock_readers))
+		return;
+
 	/* Don't interested in TCP_LISTEN and open_requests (SYN-ACKs
 	 * send out by Linux are always <576bytes so they should go through
 	 * unfragmented).
@@ -748,19 +742,18 @@ static inline void do_pmtu_discovery(struct sock *sk, struct iphdr *ip)
      	 * There is a small race when the user changes this flag in the
 	 * route, but I think that's acceptable.
 	 */
-	if (sk->ip_pmtudisc != IP_PMTUDISC_DONT && sk->dst_cache) {
-		if (tp->pmtu_cookie > sk->dst_cache->pmtu &&
-		    !atomic_read(&sk->sock_readers)) {
-			tcp_sync_mss(sk, sk->dst_cache->pmtu);
+	if (sk->dst_cache &&
+	    sk->ip_pmtudisc != IP_PMTUDISC_DONT &&
+	    tp->pmtu_cookie > sk->dst_cache->pmtu) {
+		tcp_sync_mss(sk, sk->dst_cache->pmtu);
 
-			/* Resend the TCP packet because it's  
-			 * clear that the old packet has been
-			 * dropped. This is the new "fast" path mtu
-			 * discovery.
-			 */
-			tcp_simple_retransmit(sk);
-		} /* else let the usual retransmit timer handle it */
-	}
+		/* Resend the TCP packet because it's  
+		 * clear that the old packet has been
+		 * dropped. This is the new "fast" path mtu
+		 * discovery.
+		 */
+		tcp_simple_retransmit(sk);
+	} /* else let the usual retransmit timer handle it */
 }
 
 /*
@@ -787,6 +780,11 @@ void tcp_v4_err(struct sk_buff *skb, unsigned char *dp, int len)
 	struct tcp_opt *tp;
 	int type = skb->h.icmph->type;
 	int code = skb->h.icmph->code;
+#if ICMP_MIN_LENGTH < 14
+	int no_flags = 0;
+#else
+#define no_flags 0
+#endif
 	struct sock *sk;
 	__u32 seq;
 	int err;
@@ -795,6 +793,10 @@ void tcp_v4_err(struct sk_buff *skb, unsigned char *dp, int len)
 		icmp_statistics.IcmpInErrors++; 
 		return;
 	}
+#if ICMP_MIN_LENGTH < 14
+	if (len < (iph->ihl << 2) + 14)
+		no_flags = 1;
+#endif
 
 	th = (struct tcphdr*)(dp+(iph->ihl<<2));
 
@@ -861,7 +863,7 @@ void tcp_v4_err(struct sk_buff *skb, unsigned char *dp, int len)
 		 * ACK should set the opening flag, but that is too
 		 * complicated right now. 
 		 */ 
-		if (!th->syn && !th->ack)
+		if (!no_flags && !th->syn && !th->ack)
 			return;
 
 		req = tcp_v4_search_req(tp, iph, th, &prev); 
@@ -896,7 +898,7 @@ void tcp_v4_err(struct sk_buff *skb, unsigned char *dp, int len)
 		break;
 	case TCP_SYN_SENT:
 	case TCP_SYN_RECV:  /* Cannot happen */ 
-		if (!th->syn)
+		if (!no_flags && !th->syn)
 			return;
 		tcp_statistics.TcpAttemptFails++;
 		sk->err = err;

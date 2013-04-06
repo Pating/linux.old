@@ -751,12 +751,7 @@ out_error:
  */
 asmlinkage int sys_creat(const char * pathname, int mode)
 {
-	int ret;
-
-	lock_kernel();
-	ret = sys_open(pathname, O_CREAT | O_WRONLY | O_TRUNC, mode);
-	unlock_kernel();
-	return ret;
+	return sys_open(pathname, O_CREAT | O_WRONLY | O_TRUNC, mode);
 }
 
 #endif
@@ -781,7 +776,7 @@ void __fput(struct file *filp)
  * "id" is the POSIX thread ID. We use the
  * files pointer for this..
  */
-int close_fp(struct file *filp, fl_owner_t id)
+int filp_close(struct file *filp, fl_owner_t id)
 {
 	int retval;
 	struct dentry *dentry = filp->f_dentry;
@@ -817,7 +812,7 @@ asmlinkage int sys_close(unsigned int fd)
 		files->fd[fd] = NULL;
 		put_unused_fd(fd);
 		FD_CLR(fd, &files->close_on_exec);
-		error = close_fp(filp, files);
+		error = filp_close(filp, files);
 	}
 	unlock_kernel();
 	return error;
