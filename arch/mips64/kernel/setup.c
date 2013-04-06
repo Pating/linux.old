@@ -18,7 +18,7 @@
 #include <linux/string.h>
 #include <linux/unistd.h>
 #include <linux/ptrace.h>
-#include <linux/malloc.h>
+#include <linux/slab.h>
 #include <linux/user.h>
 #include <linux/utsname.h>
 #include <linux/a.out.h>
@@ -55,6 +55,8 @@ char wait_available;
  * Do we have a cyclecounter available?
  */
 char cyclecounter_available;
+
+unsigned long loops_per_sec;
 
 /*
  * Set if box has EISA slots.
