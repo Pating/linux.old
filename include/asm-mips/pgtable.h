@@ -51,6 +51,8 @@ extern void (*_flush_icache_page)(struct vm_area_struct *vma,
 
 #define flush_icache_range(start, end)	_flush_icache_range(start,end)
 #define flush_icache_page(vma, page) 	_flush_icache_page(vma, page)
+#define flush_icache_user_range(vma, page, addr, len)	\
+					_flush_icache_page((vma), (page))
 
 
 /*
@@ -329,11 +331,6 @@ extern inline int pgd_bad(pgd_t pgd)		{ return 0; }
 extern inline int pgd_present(pgd_t pgd)	{ return 1; }
 extern inline void pgd_clear(pgd_t *pgdp)	{ }
 
-/*
- * Permanent address of a page.  On MIPS we never have highmem, so this
- * is simple.
- */
-#define page_address(page)	((page)->virtual)
 #ifdef CONFIG_CPU_VR41XX
 #define pte_page(x)             (mem_map+(unsigned long)((pte_val(x) >> (PAGE_SHIFT + 2))))
 #else

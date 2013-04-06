@@ -43,6 +43,8 @@ extern void (*_flush_page_to_ram)(struct page * page);
 #define flush_page_to_ram(page)		_flush_page_to_ram(page)
 
 #define flush_icache_range(start, end)	_flush_cache_l1()
+#define flush_icache_user_range(vma, page, addr, len)	\
+					flush_icache_page((vma), (page))
 
 #define flush_icache_page(vma, page)					\
 do {									\
@@ -66,6 +68,8 @@ extern void andes_flush_icache_page(unsigned long);
 #define flush_cache_page(vma,page)	do { } while(0)
 #define flush_page_to_ram(page)		do { } while(0)
 #define flush_icache_range(start, end)	_flush_cache_l1()
+#define flush_icache_user_range(vma, page, addr, len)	\
+					flush_icache_page((vma), (page))
 #define flush_icache_page(vma, page)					\
 do {									\
 	if ((vma)->vm_flags & VM_EXEC)					\
@@ -366,11 +370,6 @@ extern inline void pgd_clear(pgd_t *pgdp)
 	pgd_val(*pgdp) = ((unsigned long) invalid_pmd_table);
 }
 
-/*
- * Permanent address of a page.  On MIPS64 we never have highmem, so this
- * is simple.
- */
-#define page_address(page)	((page)->virtual)
 #ifndef CONFIG_DISCONTIGMEM
 #define pte_page(x)		(mem_map+(unsigned long)((pte_val(x) >> PAGE_SHIFT)))
 #else
