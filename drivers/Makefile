@@ -9,8 +9,9 @@
 
 SUB_DIRS     := block char net misc sound
 MOD_SUB_DIRS := $(SUB_DIRS)
-ALL_SUB_DIRS := $(SUB_DIRS) pci scsi sbus cdrom isdn pnp \
-				 macintosh video dio zorro fc4 usb
+ALL_SUB_DIRS := $(SUB_DIRS) pci sgi scsi sbus cdrom isdn pnp i2o \
+				macintosh video dio zorro fc4 usb \
+				nubus tc ap1000
 
 ifdef CONFIG_DIO
 SUB_DIRS += dio
@@ -34,6 +35,10 @@ ifdef CONFIG_NUBUS
 SUB_DIRS += nubus
 endif
 
+ifdef CONFIG_TC
+SUB_DIRS += tc
+endif
+
 ifdef CONFIG_VT
 SUB_DIRS += video
 MOD_SUB_DIRS += video
@@ -52,6 +57,11 @@ else
   MOD_SUB_DIRS += usb
   endif
 endif 
+
+ifdef CONFIG_SGI
+SUB_DIRS += sgi
+MOD_SUB_DIRS += sgi
+endif
 
 ifeq ($(CONFIG_I2O),y)
 SUB_DIRS += i2o

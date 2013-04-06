@@ -166,7 +166,6 @@ show_mem(void)
 	printk("%ld pages shared\n",shared);
 	printk("%ld pages swap cached\n",cached);
 	printk("%ld pages in page table cache\n",pgtable_cache_size);
-	show_buffers();
 #ifdef CONFIG_NET
 	show_net_buffers();
 #endif
@@ -219,7 +218,7 @@ paging_init(unsigned long start_mem, unsigned long end_mem)
 
 	/* Initialize the kernel's page tables.  Linux puts the vptb in
 	   the last slot of the L1 page table.  */
-	memset((void *) ZERO_PAGE, 0, PAGE_SIZE);
+	memset((void *) ZERO_PAGE(0), 0, PAGE_SIZE);
 	memset(swapper_pg_dir, 0, PAGE_SIZE);
 	newptbr = ((unsigned long) swapper_pg_dir - PAGE_OFFSET) >> PAGE_SHIFT;
 	pgd_val(swapper_pg_dir[1023]) =
@@ -359,7 +358,7 @@ si_meminfo(struct sysinfo *val)
 	val->totalram = 0;
 	val->sharedram = 0;
 	val->freeram = nr_free_pages << PAGE_SHIFT;
-	val->bufferram = buffermem;
+	val->bufferram = atomic_read(&buffermem);
 	while (i-- > 0)  {
 		if (PageReserved(mem_map+i))
 			continue;
