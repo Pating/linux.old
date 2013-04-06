@@ -17,6 +17,7 @@
 #include <linux/mm.h>
 #include <linux/delay.h>
 #include <linux/interrupt.h>
+#include <linux/init.h>
 
 #include <asm/system.h>
 #include <asm/dma.h>
@@ -201,7 +202,7 @@ static inline void free_kmalloc_pages(struct page_descriptor * page,
 	free_pages((unsigned long) page, order);
 }
 
-long kmalloc_init(long start_mem, long end_mem)
+__initfunc(long kmalloc_init(long start_mem, long end_mem))
 {
 	int order;
 
@@ -223,6 +224,7 @@ long kmalloc_init(long start_mem, long end_mem)
 	return start_mem;
 }
 
+static spinlock_t kmalloc_lock;
 
 /*
  * Ugh, this is ugly, but we want the default case to run
@@ -276,8 +278,7 @@ void *kmalloc(size_t size, int priority)
 		}
 	}
 
-	save_flags(flags);
-	cli();
+	spin_lock_irqsave(&kmalloc_lock, flags);
 	page = *pg;
 	if (!page)
 		goto no_bucket_page;
@@ -291,7 +292,7 @@ found_it:
 	page->nfree--;
 	if (!page->nfree)
 		*pg = page->next;
-	restore_flags(flags);
+	spin_unlock_irqrestore(&kmalloc_lock, flags);
 	bucket->nmallocs++;
 	bucket->nbytesmalloced += size;
 	p->bh_flags = type;	/* As of now this block is officially in use */
@@ -307,9 +308,9 @@ no_bucket_page:
 	 * If we didn't find a page already allocated for this
 	 * bucket size, we need to get one..
 	 *
-	 * This can be done with ints on: it is private to this invocation
+	 * This can be done without locks: it is private to this invocation
 	 */
-	restore_flags(flags);
+	spin_unlock_irqrestore(&kmalloc_lock, flags);
 
 	{
 		int i, sz;
@@ -345,7 +346,7 @@ found_cached_page:
 	 * Now we're going to muck with the "global" freelist
 	 * for this size: this should be uninterruptible
 	 */
-	cli();
+	spin_lock_irq(&kmalloc_lock);
 	page->next = *pg;
 	*pg = page;
 	goto found_it;
@@ -371,7 +372,7 @@ no_free_page:
 	}
 
 not_free_on_freelist:
-	restore_flags(flags);
+	spin_unlock_irqrestore(&kmalloc_lock, flags);
 	printk("Problem: block on freelist at %08lx isn't free.\n", (long) p);
 	return NULL;
 }
@@ -408,8 +409,7 @@ void kfree(void *__ptr)
 #ifdef SADISTIC_KMALLOC
 	memset(ptr+1, 0x0e, ptr->bh_length);
 #endif
-	save_flags(flags);
-	cli();
+	spin_lock_irqsave(&kmalloc_lock, flags);
 
 	bucket->nfrees++;
 	bucket->nbytesmalloced -= ptr->bh_length;
@@ -438,7 +438,7 @@ free_page:
 		bucket->npages--;
 		free_kmalloc_pages(page, bucket->gfporder, dma);
 	}
-	restore_flags(flags);
+	spin_unlock_irqrestore(&kmalloc_lock, flags);
 null_kfree:
 	return;
 
@@ -449,5 +449,5 @@ bad_order:
 
 not_on_freelist:
 	printk("Ooops. page %p doesn't show on freelist.\n", page);
-	restore_flags(flags);
+	spin_unlock_irqrestore(&kmalloc_lock, flags);
 }

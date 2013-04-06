@@ -67,7 +67,7 @@
  *  |				     |			      |
  *  |				     |			      v
  *  +================================+ <-------------------------
- *					task->kernel_stack_page
+ *					task + PAGE_SIZE
  */
 #define PT_REG(reg)	(PAGE_SIZE - sizeof(struct pt_regs)	\
 			 + (long)&((struct pt_regs *)0)->reg)
@@ -107,19 +107,6 @@ static unsigned short regoff[] = {
 
 static long zero;
 
-
-/* change a pid into a task struct. */
-static inline struct task_struct * get_task(int pid)
-{
-	int i;
-
-	for (i = 1; i < NR_TASKS; i++) {
-		if (task[i] != NULL && (task[i]->pid == pid))
-			return task[i];
-	}
-	return NULL;
-}
-
 /*
  * Get contents of register REGNO in task TASK.
  */
@@ -133,7 +120,7 @@ static inline long get_reg(struct task_struct * task, long regno)
 		zero = 0;
 		addr = &zero;
 	} else {
-		addr = (long *) (task->kernel_stack_page + regoff[regno]);
+		addr = (long *) (regoff[regno] + PAGE_SIZE + (long)task);
 	}
 	return *addr;
 }
@@ -150,7 +137,7 @@ static inline int put_reg(struct task_struct *task, long regno, long data)
 	} else if (regno == 31) {
 		addr = &zero;
 	} else {
-		addr = (long *) (task->kernel_stack_page + regoff[regno]);
+		addr = (long *) (regoff[regno] + PAGE_SIZE + (long)task);
 	}
 	*addr = data;
 	return 0;
@@ -507,7 +494,7 @@ asmlinkage long sys_ptrace(long request, long pid, long addr, long data,
 	if (pid == 1)		/* you may not mess with init */
 		goto out;
 	ret = -ESRCH;
-	if (!(child = get_task(pid)))
+	if (!(child = find_task_by_pid(pid)))
 		goto out;
 	if (request == PTRACE_ATTACH) {
 		ret = -EPERM;
