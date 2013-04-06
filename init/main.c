@@ -88,7 +88,9 @@ extern void smp_setup(char *str, int *ints);
 #ifdef __i386__
 extern void ioapic_pirq_setup(char *str, int *ints);
 #endif
+#ifdef CONFIG_VGA_CONSOLE
 extern void no_scroll(char *str, int *ints);
+#endif
 extern void kbd_reset_setup(char *str, int *ints);
 extern void panic_setup(char *str, int *ints);
 extern void bmouse_setup(char *str, int *ints);
@@ -536,7 +538,9 @@ static struct kernel_param cooked_params[] __initdata = {
 	{ "panic=", panic_setup },
 	{ "console=", console_setup },
 #ifdef CONFIG_VT
+#ifdef CONFIG_VGA_CONSOLE
 	{ "no-scroll", no_scroll },
+#endif
 	{ "kbd-reset", kbd_reset_setup },
 #endif
 #ifdef CONFIG_BUGi386
@@ -1105,12 +1109,12 @@ __initfunc(asmlinkage void start_kernel(void))
 #if defined(CONFIG_QUOTA)
 	dquot_init_hash();
 #endif
-	check_bugs();
-
-	printk("POSIX conformance testing by UNIFIX\n");
 #ifdef __SMP__
 	smp_init();
 #endif
+	printk("POSIX conformance testing by UNIFIX\n");
+	check_bugs();
+
 	sock_init();
 #ifdef CONFIG_SYSCTL
 	sysctl_init();

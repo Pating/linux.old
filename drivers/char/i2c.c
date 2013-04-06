@@ -5,6 +5,7 @@
  *
  */
 
+#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/errno.h>
@@ -34,11 +35,18 @@ static struct i2c_bus    *busses[I2C_BUS_MAX];
 static struct i2c_driver *drivers[I2C_DRIVER_MAX];
 static int bus_count = 0, driver_count = 0;
 
+extern int i2c_tuner_init(void);
+extern int msp3400c_init(void);
+
 int i2c_init(void)
 {
 	printk(KERN_INFO "i2c: initialized%s\n",
 		scan ? " (i2c bus scan enabled)" : "");
 	/* anything to do here ? */
+#ifdef CONFIG_VIDEO_BT848
+	i2c_tuner_init();
+	msp3400c_init();
+#endif	
 	return 0;
 }
 

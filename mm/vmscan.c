@@ -533,7 +533,6 @@ int kswapd(void *unused)
 	add_wait_queue(&kswapd_wait, &wait);
 	while (1) {
 		int tries;
-		int tried = 0;
 
 		current->state = TASK_INTERRUPTIBLE;
 		flush_signals(current);
@@ -594,9 +593,10 @@ int try_to_free_pages(unsigned int gfp_mask, int count)
 	int retval;
 
 	lock_kernel();
-	retval = 0;
 	do {
-		retval |= do_try_to_free_page(gfp_mask);
+		retval = do_try_to_free_page(gfp_mask);
+		if (!retval)
+			break;
 		count--;
 	} while (count > 0);
 	unlock_kernel();

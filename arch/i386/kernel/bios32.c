@@ -1,7 +1,7 @@
 /*
  * bios32.c - Low-Level PCI Access
  *
- * $Id: bios32.c,v 1.37 1998/06/19 17:11:37 mj Exp $
+ * $Id: bios32.c,v 1.40 1998/07/16 21:16:03 mj Exp $
  *
  * Copyright 1993, 1994 Drew Eckhardt
  *      Visionary Computing
@@ -80,13 +80,13 @@
 #include <asm/segment.h>
 #include <asm/system.h>
 #include <asm/io.h>
-#include <asm/irq.h>
 #include <asm/smp.h>
 #include <asm/spinlock.h>
 
 #include "irq.h"
 
 #undef DEBUG
+#define DEBUG
 
 #ifdef DEBUG
 #define DBG(x...) printk(x)
@@ -795,7 +795,7 @@ __initfunc(void pcibios_sort(void))
 				break;
 			}
 		}
-		if (!idx) {
+		if (e == dev) {
 			printk("PCI: Device %02x:%02x not found by BIOS\n",
 				dev->bus->number, dev->devfn);
 			d = dev;
@@ -870,6 +870,46 @@ __initfunc(void pcibios_fixup_io_addr(struct pci_dev *dev, int idx))
 }
 
 /*
+ * Several buggy motherboards address only 16 devices and mirror
+ * them to next 16 IDs. We try to detect this `feature' on all
+ * primary busses (those containing host bridges as they are
+ * expected to be unique) and remove the ghost devices.
+ */
+
+__initfunc(void pcibios_fixup_ghosts(struct pci_bus *b))
+{
+	struct pci_dev *d, *e, **z;
+	int mirror = PCI_DEVFN(16,0);
+	int seen_host_bridge = 0;
+
+	DBG("PCI: Scanning for ghost devices on bus %d\n", b->number);
+	for(d=b->devices; d && d->devfn < mirror; d=d->sibling) {
+		if ((d->class >> 8) == PCI_CLASS_BRIDGE_HOST)
+			seen_host_bridge++;
+		for(e=d->next; e; e=e->sibling)
+			if (e->devfn == d->devfn + mirror &&
+			    e->vendor == d->vendor &&
+			    e->device == d->device &&
+			    e->class == d->class &&
+			    !memcmp(e->base_address, d->base_address, sizeof(e->base_address)))
+				break;
+		if (!e)
+			return;
+	}
+	if (!seen_host_bridge)
+		return;
+	printk("PCI: Ignoring ghost devices on bus %d\n", b->number);
+	for(e=b->devices; e->sibling != d; e=e->sibling);
+	e->sibling = NULL;
+	for(z=&pci_devices; (d=*z);)
+		if (d->bus == b && d->devfn >= mirror) {
+			*z = d->next;
+			kfree_s(d, sizeof(*d));
+		} else
+			z = &d->next;
+}
+
+/*
  * In case there are peer host bridges, scan bus behind each of them.
  * Although several sources claim that the host bridges should have
  * header type 1 and be assigned a bus number as for PCI2PCI bridges,
@@ -928,18 +968,24 @@ __initfunc(void pcibios_fixup_devices(void))
 			} else if (a & PCI_BASE_ADDRESS_MEM_MASK)
 				has_mem = 1;
 		}
-		pci_read_config_word(dev, PCI_COMMAND, &cmd);
-		if (has_io && !(cmd & PCI_COMMAND_IO)) {
-			printk("PCI: Enabling I/O for device %02x:%02x\n",
-				dev->bus->number, dev->devfn);
-			cmd |= PCI_COMMAND_IO;
-			pci_write_config_word(dev, PCI_COMMAND, cmd);
-		}
-		if (has_mem && !(cmd & PCI_COMMAND_MEMORY)) {
-			printk("PCI: Enabling memory for device %02x:%02x\n",
-				dev->bus->number, dev->devfn);
-			cmd |= PCI_COMMAND_MEMORY;
-			pci_write_config_word(dev, PCI_COMMAND, cmd);
+		/*
+		 * Don't enable VGA-compatible cards since they have
+		 * fixed I/O and memory space.
+		 */
+		if ((dev->class >> 8) != PCI_CLASS_DISPLAY_VGA) {
+			pci_read_config_word(dev, PCI_COMMAND, &cmd);
+			if (has_io && !(cmd & PCI_COMMAND_IO)) {
+				printk("PCI: Enabling I/O for device %02x:%02x\n",
+					dev->bus->number, dev->devfn);
+				cmd |= PCI_COMMAND_IO;
+				pci_write_config_word(dev, PCI_COMMAND, cmd);
+			}
+			if (has_mem && !(cmd & PCI_COMMAND_MEMORY)) {
+				printk("PCI: Enabling memory for device %02x:%02x\n",
+					dev->bus->number, dev->devfn);
+				cmd |= PCI_COMMAND_MEMORY;
+				pci_write_config_word(dev, PCI_COMMAND, cmd);
+			}
 		}
 #ifdef __SMP__
 		/*
@@ -962,7 +1008,7 @@ __initfunc(void pcibios_fixup_devices(void))
 		}
 #endif
 		/*
-		 * Fix out-of-range IRQ numbers and report bogus IRQ.
+		 * Fix out-of-range IRQ numbers
 		 */
 		if (dev->irq >= NR_IRQS)
 			dev->irq = 0;
@@ -982,6 +1028,11 @@ __initfunc(void pcibios_fixup(void))
 	if ((pci_probe & PCI_BIOS_SORT) && !(pci_probe & PCI_NO_SORT))
 		pcibios_sort();
 #endif
+}
+
+__initfunc(void pcibios_fixup_bus(struct pci_bus *b))
+{
+	pcibios_fixup_ghosts(b);
 }
 
 /*

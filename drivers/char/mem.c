@@ -263,44 +263,54 @@ static ssize_t write_null(struct file * file, const char * buf,
  */
 static inline size_t read_zero_pagealigned(char * buf, size_t size)
 {
+	struct mm_struct *mm;
 	struct vm_area_struct * vma;
 	unsigned long addr=(unsigned long)buf;
 
+	mm = current->mm;
+	/* Oops, this was forgotten before. -ben */
+	down(&mm->mmap_sem);
+
 	/* For private mappings, just map in zero pages. */
-	for (vma = find_vma(current->mm, addr); vma; vma = vma->vm_next) {
+	for (vma = find_vma(mm, addr); vma; vma = vma->vm_next) {
 		unsigned long count;
 
 		if (vma->vm_start > addr || (vma->vm_flags & VM_WRITE) == 0)
-			return size;
+			goto out_up;
 		if (vma->vm_flags & VM_SHARED)
 			break;
 		count = vma->vm_end - addr;
 		if (count > size)
 			count = size;
 
-		flush_cache_range(current->mm, addr, addr + count);
-		zap_page_range(current->mm, addr, count);
+		flush_cache_range(mm, addr, addr + count);
+		zap_page_range(mm, addr, count);
         	zeromap_page_range(addr, count, PAGE_COPY);
-        	flush_tlb_range(current->mm, addr, addr + count);
+        	flush_tlb_range(mm, addr, addr + count);
 
 		size -= count;
 		buf += count;
 		addr += count;
 		if (size == 0)
-			return 0;
+			goto out_up;
 	}
+
+	up(&mm->mmap_sem);
 	
 	/* The shared case is hard. Let's do the conventional zeroing. */ 
 	do {
 		unsigned long unwritten = clear_user(buf, PAGE_SIZE);
 		if (unwritten)
 			return size + unwritten - PAGE_SIZE;
-		if (need_resched)
+		if (current->need_resched)
 			schedule();
 		buf += PAGE_SIZE;
 		size -= PAGE_SIZE;
 	} while (size);
 
+	return size;
+out_up:
+	up(&mm->mmap_sem);
 	return size;
 }
 
@@ -565,6 +575,9 @@ __initfunc(int chr_dev_init(void))
 #endif
 #ifdef CONFIG_FTAPE
 	ftape_init();
+#endif
+#ifdef CONFIG_VIDEO_BT848
+	i2c_init();
 #endif
 #ifdef CONFIG_VIDEO_DEV
 	videodev_init();

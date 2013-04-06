@@ -127,14 +127,16 @@ struct parport_operations {
 
 	void (*inc_use_count)(void);
 	void (*dec_use_count)(void);
+	void (*fill_inode)(struct inode *inode, int fill);
 };
 
 struct parport_device_info {
 	parport_device_class class;
-	char *mfr;
-	char *model;
-	char *cmdset;
-	char *description;
+	const char *class_name;
+	const char *mfr;
+	const char *model;
+	const char *cmdset;
+	const char *description;
 };
 
 /* Each device can have two callback functions:
@@ -151,7 +153,7 @@ struct parport_device_info {
 
 /* A parallel port device */
 struct pardevice {
-	char *name;
+	const char *name;
 	struct parport *port;
 	int (*preempt)(void *);
 	void (*wakeup)(void *);
@@ -183,7 +185,7 @@ struct parport_dir {
 struct parport {
 	unsigned long base;	/* base address */
 	unsigned int size;	/* IO extent */
-	char *name;
+	const char *name;
 	int irq;		/* interrupt (or -1 for none) */
 	int dma;
 	unsigned int modes;
