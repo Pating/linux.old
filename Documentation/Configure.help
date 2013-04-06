@@ -225,7 +225,8 @@ CONFIG_BLK_DEV_IDE
   If you say Y here, you will use the full-featured IDE driver to
   control up to four IDE interfaces, each being able to serve a
   "master" and a "slave" device, for a total of up to eight IDE
-  disk/cdrom/tape/floppy drives.
+  disk/cdrom/tape/floppy drives.  People with SCSI-only systems
+  should say 'N' here.
 
   Useful information about large (>540MB) IDE disks, sound card IDE
   ports, module support, and other topics, is contained in
@@ -256,6 +257,8 @@ CONFIG_BLK_DEV_HD_ONLY
   more detailed information, read the Disk-HOWTO, available via FTP
   (user: anonymous) from ftp://sunsite.unc.edu/pub/Linux/docs/HOWTO.
 
+  People with SCSI-only systems can say 'N' here.
+
 Use old disk-only driver on primary interface
 CONFIG_BLK_DEV_HD_IDE
   There are two drivers for MFM/RLL/IDE disks. Most people use just
@@ -270,11 +273,13 @@ CONFIG_BLK_DEV_HD_IDE
   addresses. Normally, just say N here; you will then use the new
   driver for all 4 interfaces.
 
+  People with SCSI-only systems can say 'N' here.
+
 Include IDE/ATA-2 DISK support
 CONFIG_BLK_DEV_IDEDISK
   This will include enhanced support for MFM/RLL/IDE hard disks. If you
   have a MFM/RLL/IDE disk, and there is no special reason to use the
-  old hard disk driver instead, say Y.  
+  old hard disk driver instead, say Y.  If all your disks are SCSI, say 'N'.
 
   If you want to compile this driver as a module ( = code which can be
   inserted in and removed from the running kernel whenever you want),
@@ -313,7 +318,7 @@ Include IDE/ATAPI TAPE support
 CONFIG_BLK_DEV_IDETAPE
   If you have an IDE tape drive using the ATAPI protocol, say Y.
   ATAPI is a newer protocol used by IDE tape and CDROM drives, similar
-  to the SCSI protocol.  
+  to the SCSI protocol (but say 'N' if your tape is a SCSI device).
 
   If you say Y here, the tape drive will be identified at boot time
   along with other IDE devices, as "hdb" or "hdc", or something
@@ -363,7 +368,7 @@ CONFIG_BLK_DEV_IDESCSI
   If both this SCSI emulation and native ATAPI support are compiled
   into the kernel, the native support will be used.
 
-  If unsure, say N.
+  People with SCSI-only systems should say 'N' here.  If unsure, say N.
 
 CMD640 chipset bugfix/support
 CONFIG_BLK_DEV_CMD640
@@ -387,7 +392,9 @@ CONFIG_BLK_DEV_CMD640
 
   The CMD640 chip is also used on add-in cards by Acculogic, and on
   the "CSA-6400E PCI to IDE controller" that some people have. For
-  details, read Documentation/ide.txt. If unsure, say Y.
+  details, read Documentation/ide.txt. 
+
+  People with SCSI-only systems should say 'N' here.  If unsure, say Y.
 
 CMD640 enhanced support
 CONFIG_BLK_DEV_CMD640_ENHANCED
@@ -405,14 +412,18 @@ CONFIG_BLK_DEV_RZ1000
   severe data corruption under many conditions.  Say Y here to include
   code which automatically detects and corrects the problem under
   Linux.  This may slow disk throughput by a few percent, but at least
-  things will operate 100% reliably. If unsure, say Y.
+  things will operate 100% reliably. 
+
+  People with SCSI-only systems can say 'N' here.  If unsure, say Y.
 
 Generic PCI IDE chipset support
 CONFIG_BLK_DEV_IDEPCI
   Enable this for PCI systems which use IDE drive(s).
   This option helps the IDE driver to automatically detect and
   configure all PCI-based IDE interfaces in your system.
-  It is safe to say Y to this question.
+
+  People with SCSI-only systems should say 'N' here.   It is safe to
+  say 'Y' to this question.
 
 Generic PCI bus-master DMA support
 CONFIG_BLK_DEV_IDEDMA
@@ -467,6 +478,8 @@ CONFIG_IDE_CHIPSETS
   higher speed I/O rates to improve system performance with these
   chipsets.  Most of these also require special kernel boot parameters
   to actually turn on the support at runtime.
+
+  People with SCSI-only systems should say 'N' here. 
 
 Generic 4 drives/port support
 CONFIG_BLK_DEV_4DRIVES
@@ -1479,13 +1492,6 @@ CONFIG_VGA_CONSOLE
   display that complies with the generic VGA standard. Virtually
   everyone wants that. Say Y.
 
-Use 64KB of VGA video RAM (aka: Maximum VGA Scrollback)
-CONFIG_VGA_GET_64KB
-  Use 64K rather than 32K of video RAM. This doesn't actually work
-  on all "VGA" controllers. If your vga card can do it, then you 
-  can say Y here to get more scrollback buffer (shift-pgup) on VGA
-  consoles.
-
 Video mode selection support
 CONFIG_VIDEO_SELECT
   This enables support for text mode selection on kernel startup. If
@@ -1507,20 +1513,26 @@ CONFIG_FB
   hardware. It represents the frame buffer of some video hardware and
   allows application software to access the graphics hardware through
   a well-defined interface, so the software doesn't need to know
-  anything about the low-level (hardware register) stuff. This works
-  across the different architectures supported by Linux and makes the
-  implementation of application programs easier and more portable; at
-  this point, an X server exists which uses the frame buffer device
-  exclusively.
+  anything about the low-level (hardware register) stuff. 
 
+  Frame buffer devices work identically across the different
+  architectures supported by Linux and make the implementation of
+  application programs easier and more portable; at this point, an X
+  server exists which uses the frame buffer device exclusively.
+  On several non-X86 architectures, the frame buffer device is the
+  only way to use the graphics hardware.
+ 
   The device is accessed through special device nodes, usually located
   in the /dev directory, i.e. /dev/fb*.
 
-  Please read the file Documentation/fb/framebuffer.txt for more
-  information.
+  You need an utility program called fbset to make full use of frame
+  buffer devices. Please read the file
+  Documentation/fb/framebuffer.txt for more information.
 
-  If you want to play with it, say Y here and to the driver for your
-  graphics board, below. If unsure, say N.
+  If you want to play with it, say Y here and also to the driver for
+  your graphics board, below. If unsure, say N, unless you are
+  compiling a kernel for a non-X86 architecture, in which case you
+  should say Y.
 
 Acorn VIDC support
 CONFIG_FB_ACORN
@@ -1559,33 +1571,34 @@ CONFIG_FB_AMIGA_AGA
 
 Amiga CyberVision support
 CONFIG_FB_CYBER
-  This enables support for the Cybervision 64 graphics card from Phase5.
-  Please note that its use is not all that intuitive (i.e. if you have
-  any questions, be sure to ask!).  Say N unless you have a Cybervision
-  64 or plan to get one before you next recompile the kernel.         
-  Please note that this driver DOES NOT support the Cybervision 64 3D
-  card, as they use incompatible video chips.           
+  This enables support for the Cybervision 64 graphics card from
+  Phase5. Please note that its use is not all that intuitive (i.e. if
+  you have any questions, be sure to ask!). Say N unless you have a
+  Cybervision 64 or plan to get one before you next recompile the
+  kernel. Please note that this driver DOES NOT support the
+  Cybervision 64 3D card, as they use incompatible video chips.
 
 Amiga CyberVision3D support (EXPERIMENTAL)
 CONFIG_FB_VIRGE
-  This enables support for the Cybervision 64/3D graphics card from Phase5.
-  Please note that its use is not all that intuitive (i.e. if you have
-  any questions, be sure to ask!).  Say N unless you have a Cybervision
-  64/3D or plan to get one before you next recompile the kernel.         
-  Please note that this driver DOES NOT support the older Cybervision 64
-  card, as they use incompatible video chips.           
+  This enables support for the Cybervision 64/3D graphics card from
+  Phase5. Please note that its use is not all that intuitive (i.e. if
+  you have any questions, be sure to ask!). Say N unless you have a
+  Cybervision 64/3D or plan to get one before you next recompile the
+  kernel. Please note that this driver DOES NOT support the older
+  Cybervision 64 card, as they use incompatible video chips.
 
 Amiga RetinaZ3 support (EXPERIMENTAL)
 CONFIG_FB_RETINAZ3
-  This enables support for the Retina Z3 graphics card. Say N unless you
-  have a Retina Z3 or plan to get one before you next recompile the kernel.
+  This enables support for the Retina Z3 graphics card. Say N unless
+  you have a Retina Z3 or plan to get one before you next recompile
+  the kernel.
 
 Amiga CLgen driver (EXPERIMENTAL)
 CONFIG_FB_CLGEN
-  This enables support for Cirrus Logic GD542x/543x based boards on Amiga:
-  SD64, Piccolo, Picasso II/II+, Picasso IV, or EGS Spectrum.  Say N
-  unless you have such a graphics board or plan to get one before you next
-  recompile the kernel.
+  This enables support for Cirrus Logic GD542x/543x based boards on
+  Amiga: SD64, Piccolo, Picasso II/II+, Picasso IV, or EGS Spectrum.
+  Say N unless you have such a graphics board or plan to get one
+  before you next recompile the kernel.
 
 Atari native chipset support
 CONFIG_FB_ATARI
@@ -1686,13 +1699,14 @@ CONFIG_FB_TCX
 
 Virtual Frame Buffer support (ONLY FOR TESTING!)
 CONFIG_FB_VIRTUAL
-  This is a `virtual' frame buffer device.  It operates on a chunk of
-  unswapable kernel memory instead of on the memory of a graphics board.
-  This means you cannot see any output sent to this frame buffer device,
-  while it does consume precious memory.  The main use of this frame
-  buffer device is testing and debugging the frame buffer subsystem. Do
-  NOT enable it for normal systems! To protect the innocent, it has to
-  be enabled explicitly on boot time using the kernel option `video=vfb:'.
+  This is a `virtual' frame buffer device. It operates on a chunk of
+  unswapable kernel memory instead of on the memory of a graphics
+  board. This means you cannot see any output sent to this frame
+  buffer device, while it does consume precious memory. The main use
+  of this frame buffer device is testing and debugging the frame
+  buffer subsystem. Do NOT enable it for normal systems! To protect
+  the innocent, it has to be enabled explicitly at boot time using the
+  kernel option `video=vfb:'.
 
   This driver is also available as a module ( = code which can be
   inserted and removed from the running kernel whenever you want).
@@ -1709,12 +1723,12 @@ CONFIG_FBCON_ADVANCED
   drivers. Note that they are used for text console output only; they are
   NOT needed for graphical applications.
 
-  If you do not enable this option, the needed low level drivers are
-  automatically enabled, depending on what frame buffer devices you
-  selected. This is recommended for most users.
+  If you say N here, the needed low level drivers are automatically
+  enabled, depending on what frame buffer devices you selected above.
+  This is recommended for most users.
 
-  If you enable this option, you have more fine-grained control over which
-  low level drivers are enabled. You can e.g. leave out low level drivers
+  If you say Y here, you have more fine-grained control over which low
+  level drivers are enabled. You can e.g. leave out low level drivers
   for color depths you do not intend to use for text consoles.
 
   Low level frame buffer console drivers can be modules ( = code which
@@ -1788,13 +1802,13 @@ CONFIG_FBCON_IPLAN2P8
 Mac variable bpp packed pixels support
 CONFIG_FBCON_MAC
   This is the low level frame buffer console driver for 1/2/4/8/16/32
-  bits per pixel packed pixels on Mac. It supports variable fontwidths
+  bits per pixel packed pixels on Mac. It supports variable font widths
   for low resolution screens.
   
 VGA characters/attributes support
 CONFIG_FBCON_VGA
-  This is the low level frame buffer console driver for VGA text mode, as
-  used by vgafb.
+  This is the low level frame buffer console driver for VGA text mode;
+  it is used if you said Y to "VGA chipset support (text only)" above.
 
 Parallel-port support
 CONFIG_PARPORT
@@ -2182,7 +2196,7 @@ CONFIG_IP_TRANSPARENT_PROXY
   server".  This makes the local computers think they are talking to
   the remote end, while in fact they are connected to the local
   proxy. Redirection is activated by defining special input firewall
-  rules (using the ipfwadm utility) and/or by doing an appropriate
+  rules (using the ipchains utility) and/or by doing an appropriate
   bind() system call.
 
 IP: masquerading
@@ -2825,12 +2839,12 @@ CONFIG_ROSE
 
 Serial port KISS driver for AX.25
 CONFIG_MKISS
-  KISS is a protocol used to send IP traffic over AX.25 radio
-  connections, somewhat similar to SLIP for telephone lines. Say Y
-  here if you intend to send Internet traffic over amateur radio,
-  using some device connected to your machine's serial port. In that
-  case, you also have to say Y to "Amateur Radio AX.25 Level 2"
-  support.  
+  KISS is a protocol used for the exchange of data between a computer
+  and a Terminal Node Controller (a small embedded system commonly
+  used for networking over AX25 amateur radio connections).
+  Although KISS is less advanced than the 6pack protocol, it has
+  the advantage that it is already supported by most modern TNCs
+  without the need for a firmware upgrade.
 
   If you want to compile this driver as a module ( = code which can be
   inserted in and removed from the running kernel whenever you want),
@@ -5549,6 +5563,19 @@ CONFIG_LNE390
   module, say M here and read Documentation/modules.txt as well as
   Documentation/networking/net-modules.txt.
 
+Novell/Eagle/Microdyne NE3210 EISA support
+CONFIG_NE3210
+  If you have a network (Ethernet) card of this type, say Y and read
+  the Ethernet-HOWTO, available via FTP (user: anonymous) in
+  ftp://sunsite.unc.edu/pub/Linux/docs/HOWTO. Note that this driver
+  will NOT WORK for NE3200 cards as they are completely different.
+
+  This driver is also available as a module ( = code which can be
+  inserted in and removed from the running kernel whenever you want).
+  The module will be called ne3210.o. If you want to compile it as a
+  module, say M here and read Documentation/modules.txt as well as
+  Documentation/networking/net-modules.txt.
+
 Apricot Xen-II on board Ethernet
 CONFIG_APRICOT
   If you have a network (Ethernet) controller of this type, say Y and
@@ -5665,6 +5692,12 @@ CONFIG_EPIC100
   The module will be called epic100.o. If you want to compile it as a
   module, say M here and read Documentation/modules.txt as well as
   Documentation/networking/net-modules.txt.
+
+VIA Rhine support
+CONFIG_VIA_RHINE
+  If you have a VIA "rhine" based network card (Rhine-I (3043) or
+  Rhine-2 (VT86c100A)), say Y here. To build this driver as a module
+  say M.
 
 Zenith Z-Note support
 CONFIG_ZNET
@@ -8028,20 +8061,93 @@ CONFIG_NVRAM
   The module will be called nvram.o. If you want to compile it as a
   module, say M here and read Documentation/modules.txt.
 
-PC joystick support
+Joystick support
 CONFIG_JOYSTICK
-  If you have a PC compatible analog or digital joystick, you can say
-  Y here. If you then create a character special file under /dev with
-  major number 15 and minor number 0 or 1 (for the two joystick ports)
-  using mknod ("man mknod"), you can read the status of the buttons
-  and the x and y coordinates from that file. Please read the file
+  If you have a joystick, you can say Y here to enable generic
+  joystick support. You will also need to say Y or M to at least one
+  of the hardware specific joystick drivers. This will make the
+  joysticks available under /dev/jsX devices. Please read the file
   Documentation/joystick.txt which contains more information and the
-  location of the joystick package that you'll need.  
+  location of the joystick package that you'll need.
 
   This driver is also available as a module ( = code which can be
   inserted in and removed from the running kernel whenever you want).
   The module will be called joystick.o. If you want to compile it as a
   module, say M here and read Documentation/modules.txt.
+
+Classic PC analog joysticks
+CONFIG_JOY_ANALOG
+  Say Y here if you have an analog joystick or gamepad that connects
+  to the PC gameport. This supports many different types, including
+  joysticks with throttle control, and with CHF / FCS / 6-button
+  extensions. For more information on how to use the driver please
+  read Documentation/joystick.txt
+
+FPGaming and MadCatz A3D controllers
+CONFIG_JOY_ASSASIN
+  Say Y here if you have an FPGaming Assasin 3D, MadCatz Panther or
+  MadCatz Panther XL. For more information on how to use the driver
+  please read Documentation/joystick.txt
+
+Gravis GrIP gamepads
+CONFIG_JOY_GRAVIS
+  Say Y here if you have a Gravis GamePad Pro. For more information
+  on how to use the driver please read Documentation/joystick.txt
+
+PDPI Lightning L4 gamecards
+CONFIG_JOY_LIGHTNING
+  Say Y here if you have a PDPI Lightning L4 gamecard and an analog
+  joystick or gamepad connected to it. For more information on how to
+  use the driver please read Documentation/joystick.txt
+
+Logitech Digital joysticks
+CONFIG_JOY_LOGITECH
+  Say Y here if you have a Logitech WingMan Extreme Digital,
+  Logitech ThunderPad Digital or Logitech CyberMan 2. For more
+  information on how to use the driver please read
+  Documentation/joystick.txt
+
+Microsoft SideWinder, Genius Digital joysticks
+CONFIG_JOY_SIDEWINDER
+  Say Y here if you have a Microsoft SideWinder 3d Pro, Microsoft
+  SideWinder Precision Pro, Microsoft SideWinder Force Feedback Pro,
+  Microsoft Sidewinder GamePad or Genius Flight2000 F-23 Digital. For
+  more information on how to use the driver please read
+  Documentation/joystick.txt
+
+ThrustMaster DirectConnect (BSP) joysticks
+CONFIG_JOY_THRUSTMASTER
+  Say Y here if you have a ThrustMaster Millenium 3D Inceptor, ThrustMaster
+  3D Rage Pad, or ThrustMaster WCS III. For more information on how to use the
+  driver please read Documentation/joystick.txt
+
+NES, SNES, PSX, Multisystem gamepads
+CONFIG_JOY_CONSOLE
+  Say Y here if you have a Nintendo Entertainment System gamepad,
+  Super Nintendo Entertainment System gamepad, Sony PlayStation
+  gamepad or a Multisystem - Atari, Amiga, Commodore, Amstrad CPC
+  joystick. For more information on how to use the driver please read
+  Documentation/joystick.txt
+
+Sega, Multisystem gamepads
+CONFIG_JOY_DB9
+  Say Y here if you have a Sega Master System gamepad, Sega Genesis
+  gamepad, Sega Saturn gamepad, or a Multisystem - Atari, Amiga,
+  Commodore, Amstrad CPC joystick. For more information on how to use
+  the driver please read Documentation/joystick.txt
+
+TurboGraFX Multisystem joystick interface
+CONFIG_JOY_TURBOGRAFX
+  Say Y here if you have the TurboGraFX interface by Steffen Schwenke, and
+  want to use it with Multiststem - Atari, Amiga, Commodore, Amstrad CPC
+  joystick. For more information on how to use the driver please read
+  Documentation/joystick-parport.txt
+
+Amiga joysticks
+CONFIG_JOY_AMIGA
+  Say Y here if you have an Amiga with a digital joystick connected
+  to it. For more information on how to use the driver please read
+  Documentation/joystick.txt
 
 Atomwide Serial Support
 CONFIG_ATOMWIDE_SERIAL
@@ -8988,15 +9094,6 @@ CONFIG_AMIFB_AGA
   and CD32.  If you intend to run Linux on any of these systems, say Y;
   otherwise say N.
 
-Amiga Cybervision support
-CONFIG_FB_CYBER
-  This enables support for the Cybervision 64 graphics card from Phase5.
-  Please note that its use is not all that intuitive (i.e. if you have
-  any questions, be sure to ask!).  Say N unless you have a Cybervision
-  64 or plan to get one before you next recompile the kernel.
-  Please note that this driver DOES NOT support the Cybervision 64 3D
-  card at present, as they use incompatible video chips.
-
 Amiga GSP (TMS340x0) support
 CONFIG_AMIGA_GSP
   Include support for Amiga graphics cards that use the Texas
@@ -9124,6 +9221,11 @@ CONFIG_BLZ1230_SCSI
   1260 accelerator, and the optional SCSI module, say Y.  Otherwise,
   say N.
 
+Blizzard PowerUP 603e+ SCSI support
+CONFIG_BLZ603EPLUS_SCSI
+  If you have an Amiga 1200 with a Phase5 Blizzard PowerUP 603e+
+  accelerator, say Y.  Otherwise, say N.
+
 Fastlane SCSI support
 CONFIG_FASTLANE_SCSI
   If you have the Phase5 Fastlane Z3 SCSI controller, or plan to use
@@ -9165,6 +9267,16 @@ CONFIG_ARIADNE
   This driver is also available as a module ( = code which can be
   inserted in and removed from the running kernel whenever you
   want). The module is called ariadne.o. If you want to compile it as
+  a module, say M here and read Documentation/modules.txt.
+
+Ariadne II support
+CONFIG_ARIADNE2
+  If you have a VillageTronics Ariadne II Ethernet adapter, say Y.
+  Otherwise, say N.
+
+  This driver is also available as a module ( = code which can be
+  inserted in and removed from the running kernel whenever you
+  want). The module is called ariadne2.o. If you want to compile it as
   a module, say M here and read Documentation/modules.txt.
 
 A2065 support

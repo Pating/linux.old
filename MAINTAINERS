@@ -57,8 +57,7 @@ L: Mailing list that is relevant to this area
 W: Web-page with status/info
 S: Status, one of the following:
 
-	Supported:	Someone is actually paid to look after this (wildly
-			improbable).
+	Supported:	Someone is actually paid to look after this.
 	Maintained:	Someone actually looks after it.
 	Odd Fixes:	It has a maintainer but they don't have time to do
 			much other than throw the odd patch in. See below..
@@ -142,8 +141,8 @@ W:	http://www.arm.uk.linux.org/~rmk/armlinux.html
 S:	Maintained
 
 AX.25 NETWORK LAYER
-P:	Jon Naylor
-M:	jsn@cs.nott.ac.uk
+P:	Matthias Welwarsky
+M:	dg2fef@afthd.tu-darmstadt.de
 L:	linux-hams@vger.rutgers.edu
 S:	Maintained
 
@@ -358,6 +357,12 @@ M:	hpa@zytor.com
 L:	autofs@linux.kernel.org
 S:	Maintained
 
+LAPB module
+P:	Henner Eisen
+M:	eis@baty.hanse.de
+L:	linux-x25@vger.rutgers.edu
+S:	Maintained
+
 LINUX FOR POWERPC (PREP)
 P:	Cort Dougan
 M:	cort@cs.nmt.edu
@@ -383,6 +388,12 @@ M:	Alan.Cox@linux.org
 W:	http://www.mac.linux-m68k.org/home.html
 L:	linux-mac68k@wave.lm.com
 S:	As time permits [Michael confess, you are the mac68k maintainer 8)]
+
+M68K ON HP9000/300
+P:	Philip Blundell
+M:	philb@gnu.org
+W:	http://www.tazenda.demon.co.uk/phil/linux-hp
+S:	Maintained
 
 MENUCONFIG:
 P:	Michael Elizabeth Chastain
@@ -423,8 +434,8 @@ L:	linware@sh.cvut.cz
 S:	Maintained
 
 NETROM NETWORK LAYER
-P:	Jon Naylor
-M:	jsn@cs.nott.ac.uk
+P:	Tomi Manninen 
+M:	Tomi.Manninen@hut.fi
 L:	linux-hams@vger.rutgers.edu
 S:	Maintained
 
@@ -527,6 +538,12 @@ REAL TIME CLOCK DRIVER
 P:	Paul Gortmaker
 M	gpg109@rsphy1.anu.edu.au
 L:	linux-kernel@vger.rutgers.edu
+S:	Maintained
+
+ROSE NETWORK LAYER
+P:	Frederic Rible
+M:	frible@teaser.fr
+L:	linux-hams@vger.rutgers.edu
 S:	Maintained
 
 RISCOM8 DRIVER:
@@ -677,6 +694,12 @@ WD7000 SCSI DRIVER
 P:	Miroslav Zagorac
 M:	zaga@fly.cc.fer.hr
 L:	linux-scsi@vger.rutgers.edu
+S:	Maintained
+
+X.25 NETWORK LAYER
+P:	Henner Eisen
+M:	eis@baty.hanse.de
+L:	linux-x25@vger.rutgers.edu
 S:	Maintained
 
 Z8530 DRIVER FOR AX.25

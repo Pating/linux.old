@@ -99,6 +99,7 @@
 #include <asm/io.h>
 #include <asm/system.h>
 #include <asm/uaccess.h>
+#include <asm/bitops.h>
 
 #include <asm/linux_logo.h>
 
@@ -1953,23 +1954,29 @@ static void console_bh(void)
 	}
 }
 
+#ifdef CONFIG_VT_CONSOLE
+
 /*
  *	Console on virtual terminal
+ *
+ * NOTE NOTE NOTE! This code can do no global locking. In particular,
+ * we can't disable interrupts or bottom half handlers globally, because
+ * we can be called from contexts that hold critical spinlocks, and
+ * trying do get a global lock at this point will lead to deadlocks.
  */
 
-#ifdef CONFIG_VT_CONSOLE
 void vt_console_print(struct console *co, const char * b, unsigned count)
 {
 	int currcons = fg_console;
 	unsigned char c;
-	static int printing = 0;
+	static unsigned long printing = 0;
 	const ushort *start;
 	ushort cnt = 0;
 	ushort myx = x;
 
-	if (!printable || printing)
-		return;	 /* console not yet initialized */
-	printing = 1;
+	/* console busy or not yet initialized */
+	if (!printable || test_and_set_bit(0, &printing))
+		return;
 
 	if (kmsg_redirect && vc_cons_allocated(kmsg_redirect - 1))
 		currcons = kmsg_redirect - 1;
@@ -1981,7 +1988,7 @@ void vt_console_print(struct console *co, const char * b, unsigned count)
 	}
 
 	if (vcmode != KD_TEXT)
-		return;
+		goto quit;
 
 	/* undraw cursor first */
 	if (IS_FG)
@@ -1991,11 +1998,8 @@ void vt_console_print(struct console *co, const char * b, unsigned count)
 
 	/* Contrived structure to try to emulate original need_wrap behaviour
 	 * Problems caused when we have need_wrap set on '\n' character */
-	disable_bh(CONSOLE_BH);	
 	while (count--) {
-		enable_bh(CONSOLE_BH);
 		c = *b++;
-		disable_bh(CONSOLE_BH);
 		if (c == 10 || c == 13 || c == 8 || need_wrap) {
 			if (cnt > 0) {
 				if (IS_VISIBLE)
@@ -2037,12 +2041,11 @@ void vt_console_print(struct console *co, const char * b, unsigned count)
 			need_wrap = 1;
 		}
 	}
-	enable_bh(CONSOLE_BH);
 	set_cursor(currcons);
 	poke_blanked_console();
 
 quit:
-	printing = 0;
+	clear_bit(0, &printing);
 }
 
 static kdev_t vt_console_device(struct console *c)

@@ -48,6 +48,10 @@
 #include <linux/dio.h>
 #endif
 
+#ifdef CONFIG_ZORRO
+#include <linux/zorro.h>
+#endif
+
 #ifdef CONFIG_MTRR
 #  include <asm/mtrr.h>
 #endif
@@ -106,8 +110,26 @@ extern void console_setup(char *str, int *ints);
 #ifdef CONFIG_PRINTER
 extern void lp_setup(char *str, int *ints);
 #endif
-#ifdef CONFIG_JOYSTICK
-extern void js_setup(char *str, int *ints);
+#ifdef CONFIG_JOY_AMIGA
+extern void js_am_setup(char *str, int *ints);
+#endif
+#ifdef CONFIG_JOY_ANALOG
+extern void js_an_setup(char *str, int *ints);
+#endif
+#ifdef CONFIG_JOY_ASSASIN
+extern void js_as_setup(char *str, int *ints);
+#endif
+#ifdef CONFIG_JOY_CONSOLE
+extern void js_console_setup(char *str, int *ints);
+#endif
+#ifdef CONFIG_JOY_DB9
+extern void js_db9_setup(char *str, int *ints);
+#endif
+#ifdef CONFIG_JOY_TURBOGRAFX
+extern void js_tg_setup(char *str, int *ints);
+#endif
+#ifdef CONFIG_JOY_LIGHTNING
+extern void js_l4_setup(char *str, int *ints);
 #endif
 extern void eth_setup(char *str, int *ints);
 #ifdef CONFIG_ARCNET_COM20020
@@ -579,12 +601,36 @@ static struct kernel_param cooked_params[] __initdata = {
 #ifdef CONFIG_PRINTER
         { "lp=", lp_setup },
 #endif
-#ifdef CONFIG_JOYSTICK
-	{ "js=", js_setup },
+#ifdef CONFIG_JOY_AMIGA
+	{ "js_am=", js_am_setup },
+#endif
+#ifdef CONFIG_JOY_ANALOG
+	{ "js_an=", js_an_setup },
+#endif
+#ifdef CONFIG_JOY_ASSASIN
+	{ "js_as=", js_as_setup },
+#endif
+#ifdef CONFIG_JOY_CONSOLE
+	{ "js_console=", js_console_setup },
+	{ "js_console2=", js_console_setup },
+	{ "js_console3=", js_console_setup },
+#endif
+#ifdef CONFIG_JOY_DB9
+	{ "js_db9=", js_db9_setup },
+	{ "js_db9_2=", js_db9_setup },
+	{ "js_db9_3=", js_db9_setup },
+#endif
+#ifdef CONFIG_JOY_TURBOGRAFX
+	{ "js_tg=", js_tg_setup },
+	{ "js_tg_2=", js_tg_setup },
+	{ "js_tg_3=", js_tg_setup },
 #endif
 #ifdef CONFIG_SCSI
 	{ "max_scsi_luns=", scsi_luns_setup },
 	{ "scsi_logging=", scsi_logging_setup },
+#endif
+#ifdef CONFIG_JOY_LIGHTNING
+	{ "js_l4=", js_l4_setup },
 #endif
 #ifdef CONFIG_SCSI_ADVANSYS
 	{ "advansys=", advansys_setup },
@@ -1174,9 +1220,6 @@ static void __init do_basic_setup(void)
 #ifdef CONFIG_SYSCTL
 	sysctl_init();
 #endif
-#ifdef CONFIG_DIO
-	dio_init();
-#endif
 
 	/*
 	 * Ok, at this point all CPU's should be initialized, so
@@ -1196,6 +1239,12 @@ static void __init do_basic_setup(void)
 #endif
 #ifdef CONFIG_ARCH_ACORN
 	ecard_init();
+#endif
+#ifdef CONFIG_ZORRO
+	zorro_init();
+#endif
+#ifdef CONFIG_DIO
+	dio_init();
 #endif
 
 	/* Networking initialization needs a process context */ 

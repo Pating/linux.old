@@ -103,8 +103,13 @@ asmlinkage void do_page_fault(struct pt_regs *regs, unsigned long error_code)
 
 	tsk = current;
 	mm = tsk->mm;
-	if (in_interrupt())
-		die("page fault from irq handler",regs,error_code);
+
+	/*
+	 * If we're in an interrupt or have no user
+	 * context, we must not take the fault..
+	 */
+	if (in_interrupt() || mm == &init_mm)
+		goto no_context;
 
 	down(&mm->mmap_sem);
 
@@ -194,6 +199,7 @@ bad_area:
 		}
 	}
 
+no_context:
 	/* Are we prepared to handle this kernel fault?  */
 	if ((fixup = search_exception_table(regs->eip)) != 0) {
 		regs->eip = fixup;
@@ -235,8 +241,6 @@ bad_area:
 		page = ((unsigned long *) __va(page))[address >> PAGE_SHIFT];
 		printk(KERN_ALERT "*pte = %08lx\n", page);
 	}
-	lock_kernel();
 	die("Oops", regs, error_code);
 	do_exit(SIGKILL);
-	unlock_kernel();
 }
